@@ -383,6 +383,15 @@ namespace OCPP.Core.Server
         /// </summary>
         private async Task RequestStartTransaction21(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, string urlConnectorId, string idTag)
         {
+            string apiResult = await ExecuteRequestStartTransaction21(chargePointStatus, dbContext, urlConnectorId, idTag);
+
+            apiCallerContext.Response.StatusCode = 200;
+            apiCallerContext.Response.ContentType = "application/json";
+            await apiCallerContext.Response.WriteAsync(apiResult);
+        }
+
+        private async Task<string> ExecuteRequestStartTransaction21(ChargePointStatus chargePointStatus, OCPPCoreContext dbContext, string urlConnectorId, string idTag)
+        {
             ILogger logger = _logFactory.CreateLogger("OCPPMiddleware.OCPP21");
             ControllerOCPP21 controller21 = new ControllerOCPP21(_configuration, _logFactory, chargePointStatus, dbContext);
 
@@ -441,9 +450,7 @@ namespace OCPP.Core.Server
                 apiResult = "{\"status\": \"Rejected\"}";
             }
 
-            apiCallerContext.Response.StatusCode = 200;
-            apiCallerContext.Response.ContentType = "application/json";
-            await apiCallerContext.Response.WriteAsync(apiResult);
+            return apiResult;
         }
 
         /// <summary>

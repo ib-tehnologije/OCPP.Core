@@ -163,6 +163,8 @@ namespace OCPP.Core.Server
                                 DbContext.Add<Transaction>(transaction);
 
                                 DbContext.SaveChanges();
+
+                                ocppMiddleware?.NotifyTransactionStarted(DbContext, ChargePointStatus, transaction.ConnectorId, idTag, transaction.TransactionId);
                             }
                             catch (Exception exp)
                             {
@@ -377,6 +379,8 @@ namespace OCPP.Core.Server
                                         transaction.StopTagId = idTag;
                                         transaction.StopReason = transactionEventRequest.TriggerReason.ToString();
                                         DbContext.SaveChanges();
+
+                                        ocppMiddleware?.NotifyTransactionCompleted(DbContext, transaction);
                                     }
                                 }
                                 else

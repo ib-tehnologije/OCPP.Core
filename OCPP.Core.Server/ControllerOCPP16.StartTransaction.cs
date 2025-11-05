@@ -71,6 +71,8 @@ namespace OCPP.Core.Server
 
                         // Return DB-ID as transaction ID
                         startTransactionResponse.TransactionId = transaction.TransactionId;
+
+                        ocppMiddleware?.NotifyTransactionStarted(DbContext, ChargePointStatus, transaction.ConnectorId, idTag, transaction.TransactionId);
                     }
                     catch (Exception exp)
                     {

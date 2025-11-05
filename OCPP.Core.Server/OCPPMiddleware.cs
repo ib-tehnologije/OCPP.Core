@@ -23,6 +23,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -57,6 +58,7 @@ namespace OCPP.Core.Server
         private readonly ILoggerFactory _logFactory;
         private readonly ILogger _logger;
         private readonly IConfiguration _configuration;
+        private readonly IPaymentCoordinator _paymentCoordinator;
 
         // Dictionary with status objects for each charge point
         private static Dictionary<string, ChargePointStatus> _chargePointStatusDict = new Dictionary<string, ChargePointStatus>();
@@ -64,11 +66,12 @@ namespace OCPP.Core.Server
         // Dictionary for processing asynchronous API calls
         private Dictionary<string, OCPPMessage> _requestQueue = new Dictionary<string, OCPPMessage>();
 
-        public OCPPMiddleware(RequestDelegate next, ILoggerFactory logFactory, IConfiguration configuration)
+        public OCPPMiddleware(RequestDelegate next, ILoggerFactory logFactory, IConfiguration configuration, IPaymentCoordinator paymentCoordinator)
         {
             _next = next;
             _logFactory = logFactory;
             _configuration = configuration;
+            _paymentCoordinator = paymentCoordinator;
 
             _logger = logFactory.CreateLogger("OCPPMiddleware");
 
@@ -695,6 +698,10 @@ namespace OCPP.Core.Server
                             context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                         }
                     }
+                    else if (cmd == "Payments")
+                    {
+                        await HandlePaymentsAsync(context, dbContext, urlParts);
+                    }
                     else
                     {
                         // Unknown action/function
@@ -732,6 +739,278 @@ namespace OCPP.Core.Server
                 _logger.LogWarning("OCPPMiddleware => Bad path request");
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
             }
+        }
+
+        private async Task HandlePaymentsAsync(HttpContext context, OCPPCoreContext dbContext, string[] urlParts)
+        {
+            string action = (urlParts.Length >= 4) ? urlParts[3] : null;
+
+            if (string.Equals(action, "Webhook", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePaymentWebhookAsync(context, dbContext);
+                return;
+            }
+
+            if (_paymentCoordinator == null || !_paymentCoordinator.IsEnabled)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"Disabled\"}");
+                return;
+            }
+
+            if (string.Equals(action, "Create", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePaymentCreateAsync(context, dbContext);
+            }
+            else if (string.Equals(action, "Confirm", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePaymentConfirmAsync(context, dbContext);
+            }
+            else if (string.Equals(action, "Cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePaymentCancelAsync(context, dbContext);
+            }
+            else
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+            }
+        }
+
+        private async Task HandlePaymentCreateAsync(HttpContext context, OCPPCoreContext dbContext)
+        {
+            if (!HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                return;
+            }
+
+            PaymentSessionRequest request = null;
+            try
+            {
+                string body = await ReadRequestBodyAsync(context);
+                request = JsonConvert.DeserializeObject<PaymentSessionRequest>(body);
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(exp, "Payments/Create => Invalid request payload");
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.ChargePointId) ||
+                string.IsNullOrWhiteSpace(request.ChargeTagId))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            if (!_chargePointStatusDict.TryGetValue(request.ChargePointId, out var status) ||
+                status.WebSocket == null ||
+                status.WebSocket.State != WebSocketState.Open)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                await context.Response.WriteAsync("{\"status\":\"ChargerOffline\"}");
+                return;
+            }
+
+            try
+            {
+                var result = _paymentCoordinator.CreateCheckoutSession(dbContext, request);
+                var payload = new
+                {
+                    status = "Redirect",
+                    checkoutUrl = result.CheckoutUrl,
+                    reservationId = result.Reservation.ReservationId,
+                    currency = result.Reservation.Currency,
+                    maxAmountCents = result.Reservation.MaxAmountCents,
+                    maxEnergyKwh = result.Reservation.MaxEnergyKwh
+                };
+
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(payload));
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(exp, "Payments/Create => Exception: {0}", exp.Message);
+                context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                await context.Response.WriteAsync("{\"status\":\"Error\"}");
+            }
+        }
+
+        private async Task HandlePaymentConfirmAsync(HttpContext context, OCPPCoreContext dbContext)
+        {
+            if (!HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                return;
+            }
+
+            PaymentConfirmRequest request = null;
+            try
+            {
+                string body = await ReadRequestBodyAsync(context);
+                request = JsonConvert.DeserializeObject<PaymentConfirmRequest>(body);
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(exp, "Payments/Confirm => Invalid request payload");
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            if (request == null || request.ReservationId == Guid.Empty || string.IsNullOrWhiteSpace(request.CheckoutSessionId))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            var confirmation = _paymentCoordinator.ConfirmReservation(dbContext, request.ReservationId, request.CheckoutSessionId);
+            if (!confirmation.Success)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new { status = confirmation.Status, error = confirmation.Error }));
+                return;
+            }
+
+            var reservation = confirmation.Reservation;
+            if (!_chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var status) ||
+                status.WebSocket == null ||
+                status.WebSocket.State != WebSocketState.Open)
+            {
+                _paymentCoordinator.CancelReservation(dbContext, reservation.ReservationId, "Charge point offline after payment confirmation.");
+                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"ChargerOffline\"}");
+                return;
+            }
+
+            string connectorId = reservation.ConnectorId.ToString();
+            string apiResult = await ExecuteRemoteStartAsync(status, dbContext, connectorId, reservation.ChargeTagId);
+            string remoteStatus = ExtractStatusFromApiResult(apiResult);
+
+            if (string.Equals(remoteStatus, "Accepted", StringComparison.OrdinalIgnoreCase))
+            {
+                reservation.Status = PaymentReservationStatus.StartRequested;
+                reservation.UpdatedAtUtc = DateTime.UtcNow;
+                dbContext.SaveChanges();
+            }
+            else
+            {
+                _paymentCoordinator.CancelReservation(dbContext, reservation.ReservationId, $"Remote start result: {remoteStatus}");
+            }
+
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(apiResult);
+        }
+
+        private async Task HandlePaymentCancelAsync(HttpContext context, OCPPCoreContext dbContext)
+        {
+            if (!HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                return;
+            }
+
+            PaymentCancelRequest request = null;
+            try
+            {
+                string body = await ReadRequestBodyAsync(context);
+                request = JsonConvert.DeserializeObject<PaymentCancelRequest>(body);
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(exp, "Payments/Cancel => Invalid request payload");
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            _paymentCoordinator.CancelReservation(dbContext, request.ReservationId, request.Reason);
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"status\":\"Cancelled\"}");
+        }
+
+        private async Task HandlePaymentWebhookAsync(HttpContext context, OCPPCoreContext dbContext)
+        {
+            if (!HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                return;
+            }
+
+            string payload = await ReadRequestBodyAsync(context);
+            string signature = context.Request.Headers["Stripe-Signature"].FirstOrDefault();
+            _paymentCoordinator?.HandleWebhookEvent(dbContext, payload, signature);
+
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+        }
+
+        private async Task<string> ExecuteRemoteStartAsync(ChargePointStatus chargePointStatus, OCPPCoreContext dbContext, string connectorId, string idTag)
+        {
+            if (chargePointStatus.Protocol == Protocol_OCPP21)
+            {
+                return await ExecuteRequestStartTransaction21(chargePointStatus, dbContext, connectorId, idTag);
+            }
+            else if (chargePointStatus.Protocol == Protocol_OCPP201)
+            {
+                return await ExecuteRequestStartTransaction20(chargePointStatus, dbContext, connectorId, idTag);
+            }
+            else
+            {
+                return await ExecuteRemoteStartTransaction16(chargePointStatus, dbContext, connectorId, idTag);
+            }
+        }
+
+        private static string ExtractStatusFromApiResult(string apiResult)
+        {
+            if (string.IsNullOrWhiteSpace(apiResult)) return null;
+            try
+            {
+                var payload = JsonConvert.DeserializeObject<Dictionary<string, object>>(apiResult);
+                if (payload != null && payload.TryGetValue("status", out var statusValue))
+                {
+                    return statusValue?.ToString();
+                }
+            }
+            catch
+            {
+                // ignore parse errors
+            }
+            return null;
+        }
+
+        private static async Task<string> ReadRequestBodyAsync(HttpContext context)
+        {
+            context.Request.EnableBuffering();
+            context.Request.Body.Position = 0;
+            using (var reader = new StreamReader(context.Request.Body, leaveOpen: true))
+            {
+                string body = await reader.ReadToEndAsync();
+                context.Request.Body.Position = 0;
+                return body;
+            }
+        }
+
+        public void NotifyTransactionStarted(OCPPCoreContext dbContext, ChargePointStatus chargePointStatus, int connectorId, string chargeTagId, int transactionId)
+        {
+            if (chargePointStatus == null) return;
+            _paymentCoordinator?.MarkTransactionStarted(dbContext, chargePointStatus.Id, connectorId, chargeTagId, transactionId);
+        }
+
+        public void NotifyTransactionCompleted(OCPPCoreContext dbContext, Transaction transaction)
+        {
+            _paymentCoordinator?.CompleteReservation(dbContext, transaction);
         }
 
         /// <summary>

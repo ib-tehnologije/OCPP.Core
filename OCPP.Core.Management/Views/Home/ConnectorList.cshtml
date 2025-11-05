@@ -139,6 +139,34 @@
                 }
             }
             function StartTransaction(chargepointId, connectorid, connectorName) {
+                function renderStartTransactionMessage(data) {
+                    if (!data || !data.status) {
+                        return '@Localizer["StartTransactionError"]';
+                    }
+                    switch (data.status) {
+                        case 'Accepted':
+                            return '@Localizer["StartTransactionAccepted"]';
+                        case 'Rejected':
+                            return '@Localizer["StartTransactionRejected"]';
+                        case 'Timeout':
+                            return '@Localizer["Timeout"]';
+                        case 'ChargerOffline':
+                            return '@Localizer["ChargerOffline"]';
+                        case 'Disabled':
+                            return '@Localizer["StartTransactionError"]';
+                        case 'Error':
+                            if (data.message) {
+                                return data.message;
+                            }
+                            return '@Localizer["StartTransactionError"]';
+                        default:
+                            if (data.message) {
+                                return data.message;
+                            }
+                            return '@Localizer["UnknownStatus"]'.replace('%', data.status);
+                    }
+                }
+
                 if (connectorName.length==0) connectorName=chargepointId+':'+connectorid;
                 var msg = '@Html.Raw(Localizer["DialogStartTransaction"].Value.Replace("%options%",sb.ToString()))';
                 msg = msg.replace('%connector%', connectorName);
@@ -161,13 +189,6 @@
                             var xmlhttp = new XMLHttpRequest();
                             xmlhttp.onreadystatechange = function () {
                                 if (xmlhttp.readyState == XMLHttpRequest.DONE) {
-                                    if (xmlhttp.status == 200) {
-                                        dialogRef.getModalBody().html(xmlhttp.responseText);
-                                    }
-                                    else {
-                                        dialogRef.getModalBody().html('@Localizer["ErrorStartTransaction"]');
-                                    }
-
                                     dialogRef.setClosable(true);
                                     dialogRef.enableButtons(true);
                                     var $resetButton = dialog.getButton('btnStartTransaction');
@@ -175,6 +196,21 @@
                                     var $cancelButton = dialog.getButton('btnDialogCancel');
                                     $cancelButton.text('@Localizer["Close"]');
 
+                                    if (xmlhttp.status == 200) {
+                                        try {
+                                            var response = JSON.parse(xmlhttp.responseText);
+                                            if (response.status === 'Redirect' && response.checkoutUrl) {
+                                                window.location.href = response.checkoutUrl;
+                                                return;
+                                            }
+                                            dialogRef.getModalBody().html(renderStartTransactionMessage(response));
+                                        } catch (e) {
+                                            dialogRef.getModalBody().html('@Localizer["StartTransactionError"]');
+                                        }
+                                    }
+                                    else {
+                                        dialogRef.getModalBody().html('@Localizer["ErrorStartTransaction"]');
+                                    }
                                 }
                             };
                             xmlhttp.open("GET", "@Html.Raw(Url.Content("~/API/StartTransaction/"))" + chargepointId + '/' + connectorid + '/' + chargeTag, true);

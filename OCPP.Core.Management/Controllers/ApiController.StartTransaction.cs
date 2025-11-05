@@ -21,6 +21,7 @@ using System;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -43,7 +44,7 @@ namespace OCPP.Core.Management.Controllers
             }
 
             int httpStatuscode = (int)HttpStatusCode.OK;
-            string resultContent = string.Empty;
+            object resultContent = new { status = "Error", message = _localizer["StartTransactionError"] };
 
             Logger.LogTrace("StartTransaction: Request to start charging transaction '{0}'/{1}/'{2}'", Id, connectorId, param);
             if (!string.IsNullOrEmpty(Id))
@@ -66,8 +67,8 @@ namespace OCPP.Core.Management.Controllers
                                         serverApiUrl += "/";
                                     }
                                     Uri uri = new Uri(serverApiUrl);
-                                    uri = new Uri(uri, $"StartTransaction/{Uri.EscapeDataString(Id)}/{connectorId}/{Uri.EscapeDataString(param)}");
-                                    httpClient.Timeout = new TimeSpan(0, 0, 15); // use short timeout
+                                    Uri createUri = new Uri(uri, "Payments/Create");
+                                    httpClient.Timeout = new TimeSpan(0, 0, 30); // allow a bit more time for Stripe setup
 
                                     // API-Key authentication?
                                     if (!string.IsNullOrWhiteSpace(apiKeyConfig))
@@ -79,58 +80,42 @@ namespace OCPP.Core.Management.Controllers
                                         Logger.LogWarning("StartTransaction: No API-Key configured!");
                                     }
 
-                                    HttpResponseMessage response = await httpClient.GetAsync(uri);
+                                    var payload = new
+                                    {
+                                        chargePointId = Id,
+                                        connectorId = connectorId,
+                                        chargeTagId = param
+                                    };
+                                    string jsonPayload = JsonConvert.SerializeObject(payload);
+                                    using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                                    HttpResponseMessage response = await httpClient.PostAsync(createUri, content);
                                     if (response.StatusCode == HttpStatusCode.OK)
                                     {
                                         string jsonResult = await response.Content.ReadAsStringAsync();
                                         if (!string.IsNullOrEmpty(jsonResult))
                                         {
-                                            try
-                                            {
-                                                dynamic jsonObject = JsonConvert.DeserializeObject(jsonResult);
-                                                Logger.LogInformation("StartTransaction: Result of API request is '{0}'", jsonResult);
-                                                string status = jsonObject.status;
-                                                switch (status)
-                                                {
-                                                    case "Accepted":
-                                                        resultContent = _localizer["StartTransactionAccepted"];
-                                                        break;
-                                                    case "Rejected":
-                                                        resultContent = _localizer["StartTransactionRejected"];
-                                                        break;
-                                                    case "Timeout":
-                                                        resultContent = _localizer["Timeout"];
-                                                        break;
-                                                    default:
-                                                        resultContent = string.Format(_localizer["UnknownStatus"], status);
-                                                        break;
-                                                }
-                                            }
-                                            catch (Exception exp)
-                                            {
-                                                Logger.LogError(exp, "StartTransaction: Error in JSON result => {0}", exp.Message);
-                                                httpStatuscode = (int)HttpStatusCode.OK;
-                                                resultContent = _localizer["StartTransactionError"];
-                                            }
+                                            Logger.LogInformation("StartTransaction: Payments/Create response '{0}'", jsonResult);
+                                            return Content(jsonResult, "application/json");
                                         }
                                         else
                                         {
                                             Logger.LogError("StartTransaction: Result of API request is empty");
                                             httpStatuscode = (int)HttpStatusCode.OK;
-                                            resultContent = _localizer["StartTransactionError"];
+                                            resultContent = new { status = "Error", message = _localizer["StartTransactionError"] };
                                         }
                                     }
                                     else if (response.StatusCode == HttpStatusCode.NotFound)
                                     {
                                         // Chargepoint offline
-                                        httpStatuscode = (int)HttpStatusCode.OK;
-                                        resultContent = _localizer["ChargerOffline"];
+                                        httpStatuscode = (int)HttpStatusCode.NotFound;
+                                        resultContent = new { status = "ChargerOffline", message = _localizer["ChargerOffline"] };
                                     }
                                     else
                                     {
                                         Logger.LogError("StartTransaction: Result of API  request => httpStatus={0}", response.StatusCode);
                                         httpStatuscode = (int)HttpStatusCode.OK;
-                                        resultContent = _localizer["StartTransactionError"];
+                                        resultContent = new { status = "Error", message = _localizer["StartTransactionError"] };
                                     }
                                 }
                             }
@@ -138,7 +123,7 @@ namespace OCPP.Core.Management.Controllers
                             {
                                 Logger.LogError(exp, "StartTransaction: Error in API request => {0}", exp.Message);
                                 httpStatuscode = (int)HttpStatusCode.OK;
-                                resultContent = _localizer["StartTransactionError"];
+                                resultContent = new { status = "Error", message = _localizer["StartTransactionError"] };
                             }
                         }
                     }
@@ -146,14 +131,14 @@ namespace OCPP.Core.Management.Controllers
                     {
                         Logger.LogWarning("StartTransaction: Error loading charge point '{0}' from database", Id);
                         httpStatuscode = (int)HttpStatusCode.OK;
-                        resultContent = _localizer["UnknownChargepoint"];
+                        resultContent = new { status = "Error", message = _localizer["UnknownChargepoint"] };
                     }
                 }
                 catch (Exception exp)
                 {
                     Logger.LogError(exp, "StartTransaction: Error loading charge point from database");
                     httpStatuscode = (int)HttpStatusCode.OK;
-                    resultContent = _localizer["StartTransactionError"];
+                    resultContent = new { status = "Error", message = _localizer["StartTransactionError"] };
                 }
             }
 

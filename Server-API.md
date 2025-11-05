@@ -109,6 +109,72 @@ The answer should be:
 {"status"="Accepted"} or {"status"="Rejected"}
 The server checks the last transaction for the specified connector and return the http code 424 (FailedDependency) when no open transaction was found.
 
+### Payments (Stripe)
+When Stripe support is enabled, charging sessions must reserve funds before a remote start is issued.
+
+#### Create payment reservation
+Create a Stripe Checkout Session for a charge point.
+
+	POST /API/Payments/Create
+
+Body (JSON):
+```
+{
+  "chargePointId": "station42",
+  "connectorId": 1,
+  "chargeTagId": "tag1234"
+}
+```
+
+Response (HTTP 200):
+```
+{
+  "status": "Redirect",
+  "checkoutUrl": "https://checkout.stripe.com/...",
+  "reservationId": "GUID",
+  "currency": "eur",
+  "maxAmountCents": 3920,
+  "maxEnergyKwh": 80
+}
+```
+Open `checkoutUrl` in the browser to collect payment authorisation.
+
+#### Confirm payment
+Called after Stripe redirects back with `session_id`.
+
+	POST /API/Payments/Confirm
+
+Body:
+```
+{
+  "reservationId": "GUID",
+  "checkoutSessionId": "cs_test_..."
+}
+```
+
+Response mirrors the remote-start outcome (e.g. `{"status":"Accepted"}`).
+
+#### Cancel reservation
+
+	POST /API/Payments/Cancel
+
+Body:
+```
+{
+  "reservationId": "GUID",
+  "reason": "checkout_cancelled"
+}
+```
+
+If the reservation was authorised it will be released.
+
+#### Webhook endpoint
+Stripe webhooks should target:
+
+	POST /API/Payments/Webhook
+
+Set `Stripe:WebhookSecret` so signatures can be verified.
+
 
 ### In general
 These commands means that the server send a request to the charger and the charger needs to answer in a reasonable period

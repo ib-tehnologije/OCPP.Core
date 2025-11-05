@@ -39,6 +39,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<ConnectorStatus> ConnectorStatuses { get; set; }
         public virtual DbSet<MessageLog> MessageLogs { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
+        public virtual DbSet<ChargePaymentReservation> ChargePaymentReservations { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -129,6 +130,47 @@ namespace OCPP.Core.Database
                     .HasConstraintName("FK_Transactions_ChargePoint");
 
                 entity.HasIndex(e => new { e.ChargePointId, e.ConnectorId });
+            });
+
+            modelBuilder.Entity<ChargePaymentReservation>(entity =>
+            {
+                entity.HasKey(e => e.ReservationId);
+
+                entity.ToTable("ChargePaymentReservation");
+
+                entity.Property(e => e.ChargePointId)
+                    .IsRequired()
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.ChargeTagId)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Currency)
+                    .IsRequired()
+                    .HasMaxLength(10);
+
+                entity.Property(e => e.Status)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.StripeCheckoutSessionId)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.StripePaymentIntentId)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.PricePerKwh)
+                    .HasColumnType("decimal(18,4)");
+
+                entity.Property(e => e.LastError)
+                    .HasMaxLength(500);
+
+                entity.HasIndex(e => e.StripeCheckoutSessionId)
+                    .HasDatabaseName("IX_PaymentReservations_StripeSession");
+
+                entity.HasIndex(e => e.StripePaymentIntentId)
+                    .HasDatabaseName("IX_PaymentReservations_PaymentIntent");
             });
 
             OnModelCreatingPartial(modelBuilder);

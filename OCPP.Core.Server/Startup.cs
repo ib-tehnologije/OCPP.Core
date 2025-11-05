@@ -37,6 +37,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments;
 
 namespace OCPP.Core.Server
 {
@@ -66,6 +67,8 @@ namespace OCPP.Core.Server
         {
             services.AddOCPPDbContext(Configuration);
             services.AddControllers();
+            services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
+            services.AddSingleton<IPaymentCoordinator, StripePaymentCoordinator>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

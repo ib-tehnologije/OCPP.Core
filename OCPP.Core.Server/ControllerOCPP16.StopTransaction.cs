@@ -140,6 +140,8 @@ namespace OCPP.Core.Server
                                 transaction.StopReason = stopTransactionRequest.Reason.ToString();
                                 transaction.StopTime = stopTransactionRequest.Timestamp.UtcDateTime;
                                 DbContext.SaveChanges();
+
+                                ocppMiddleware?.NotifyTransactionCompleted(DbContext, transaction);
                             }
                         }
                         else

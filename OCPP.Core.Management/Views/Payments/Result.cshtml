@@ -1,0 +1,21 @@
+@model OCPP.Core.Management.Models.PaymentResultViewModel
+@inject Microsoft.AspNetCore.Mvc.Localization.IViewLocalizer Localizer
+
+@{
+    var title = Localizer["PaymentStatusTitle"];
+    var heading = Localizer["PaymentStatusHeading"];
+    var back = Localizer["ReturnToDashboard"];
+    ViewData["Title"] = title.ResourceNotFound ? "Payment status" : title.Value;
+    string headingText = heading.ResourceNotFound ? "Payment status" : heading.Value;
+    string backText = back.ResourceNotFound ? "Back to dashboard" : back.Value;
+}
+
+<div class="container mt-4">
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <h4 class="card-title mb-3">@headingText</h4>
+            <p class="card-text">@Model.Message</p>
+            <a href="@Url.Action("Index", "Home")" class="btn btn-primary">@backText</a>
+        </div>
+    </div>
+</div>
