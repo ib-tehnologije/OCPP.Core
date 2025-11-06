@@ -44,15 +44,28 @@ namespace OCPP.Core.Management.Controllers
                 CheckoutSessionId = session_id
             });
 
+            string status = ExtractStatus(apiResult.Payload);
+
             if (!apiResult.Success)
             {
-                var errorMessage = !string.IsNullOrWhiteSpace(apiResult.ErrorMessage)
-                    ? apiResult.ErrorMessage
-                    : L("StartTransactionError", "Unable to start the transaction.");
+                if (!string.IsNullOrWhiteSpace(status))
+                {
+                    string statusMessage = MapStatusToMessage(status, apiResult.Payload);
+                    var statusModel = BuildResult(status, statusMessage);
+                    statusModel.ReservationId = reservationId;
+                    return View("Result", statusModel);
+                }
+
+                string payloadMessage = ExtractMessage(apiResult.Payload);
+                string errorMessage = !string.IsNullOrWhiteSpace(payloadMessage)
+                    ? payloadMessage
+                    : (!string.IsNullOrWhiteSpace(apiResult.ErrorMessage)
+                        ? apiResult.ErrorMessage
+                        : L("StartTransactionError", "Unable to start the transaction."));
+
                 return View("Result", BuildResult("Error", errorMessage));
             }
 
-            string status = ExtractStatus(apiResult.Payload);
             string message = MapStatusToMessage(status, apiResult.Payload);
 
             var model = BuildResult(status ?? "Error", message);
@@ -191,6 +204,12 @@ namespace OCPP.Core.Management.Controllers
                 if (!string.IsNullOrWhiteSpace(message))
                 {
                     return message;
+                }
+
+                var error = json["error"]?.Value<string>();
+                if (!string.IsNullOrWhiteSpace(error))
+                {
+                    return error;
                 }
             }
             catch
