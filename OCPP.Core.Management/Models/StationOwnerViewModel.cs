@@ -1,6 +1,6 @@
 ﻿/*
  * OCPP.Core - https://github.com/dallmann-consulting/OCPP.Core
- * Copyright (C) 2020-2021 dallmann consulting GmbH.
+ * Copyright (C) 2020-2025 dallmann consulting GmbH.
  * All Rights Reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,28 +19,37 @@
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using OCPP.Core.Database;
 
-#nullable disable
-
-namespace OCPP.Core.Database
+namespace OCPP.Core.Management.Models
 {
-    public partial class ChargePoint
+    public class StationOwnerViewModel
     {
-        public ChargePoint()
+        public StationOwnerViewModel()
         {
-            Transactions = new HashSet<Transaction>();
+            Owners = new List<ChargeStationOwner>();
         }
 
-        public string ChargePointId { get; set; }
-        public string Name { get; set; }
-        public string Comment { get; set; }
-        public string Username { get; set; }
-        public string Password { get; set; }
-        public string ClientCertThumb { get; set; }
-        public int? OwnerId { get; set; }
-        public decimal? PricePerKwh { get; set; }
+        public List<ChargeStationOwner> Owners { get; set; }
 
-        public virtual ICollection<Transaction> Transactions { get; set; }
-        public virtual ChargeStationOwner Owner { get; set; }
+        public string CurrentId { get; set; }
+
+        public int? OwnerId { get; set; }
+
+        [Required, StringLength(200)]
+        public string Name { get; set; }
+
+        [Required, EmailAddress, StringLength(200)]
+        public string Email { get; set; }
+
+        [Range(0, 100)]
+        public decimal ProvisionPercentage { get; set; }
+
+        public int? LastReportYear { get; set; }
+
+        public int? LastReportMonth { get; set; }
+
+        public DateTime? LastReportSentAt { get; set; }
     }
 }

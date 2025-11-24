@@ -132,6 +132,9 @@
   <data name="Connectors" xml:space="preserve">
     <value>Anschlüsse</value>
   </data>
+  <data name="Owners" xml:space="preserve">
+    <value>Betreiber</value>
+  </data>
   <data name="Logout" xml:space="preserve">
     <value>Abmelden</value>
   </data>

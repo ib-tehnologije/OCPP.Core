@@ -159,11 +159,29 @@
   <data name="NamePlaceholder" xml:space="preserve">
     <value>Charge point name</value>
   </data>
+  <data name="OwnerLabel" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="OwnerPlaceholder" xml:space="preserve">
+    <value>Select owner</value>
+  </data>
   <data name="PasswordLabel" xml:space="preserve">
     <value>Password</value>
   </data>
   <data name="PasswordPlaceholder" xml:space="preserve">
     <value>Charge point password</value>
+  </data>
+  <data name="PricePerKwhLabel" xml:space="preserve">
+    <value>Price per kWh</value>
+  </data>
+  <data name="PricePerKwhNumber" xml:space="preserve">
+    <value>Please enter a valid number.</value>
+  </data>
+  <data name="PricePerKwhPlaceholder" xml:space="preserve">
+    <value>Enter price per kWh</value>
+  </data>
+  <data name="PricePerKwhRange" xml:space="preserve">
+    <value>Enter a value between {0} and {1}.</value>
   </data>
   <data name="RequiredField" xml:space="preserve">
     <value>Required</value>

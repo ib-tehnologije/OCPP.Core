@@ -46,7 +46,13 @@ namespace OCPP.Core.Management.Controllers
                 cpvm.CurrentId = Id;
 
                 Logger.LogTrace("ChargePoint: Loading charge points...");
-                List<ChargePoint> dbChargePoints = DbContext.ChargePoints.OrderBy(x => x.Name).ToList<ChargePoint>();
+                List<ChargePoint> dbChargePoints = DbContext.ChargePoints
+                    .Include(cp => cp.Owner)
+                    .OrderBy(x => x.Name)
+                    .ToList();
+                List<ChargeStationOwner> dbOwners = DbContext.ChargeStationOwners
+                    .OrderBy(x => x.Name)
+                    .ToList();
                 Logger.LogInformation("ChargePoint: Found {0} chargepoints", dbChargePoints.Count);
 
                 ChargePoint currentChargePoint = null;
@@ -103,12 +109,17 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.Username = cpvm.Username;
                             newChargePoint.Password = cpvm.Password;
                             newChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
+                            newChargePoint.OwnerId = cpvm.OwnerId;
+                            newChargePoint.PricePerKwh = cpvm.PricePerKwh;
+
                             DbContext.ChargePoints.Add(newChargePoint);
                             DbContext.SaveChanges();
                             Logger.LogInformation("ChargePoint: New => charge point saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
                         }
                         else
                         {
+                            cpvm.Owners = dbOwners;
+                            cpvm.CurrentId = Id;
                             ViewBag.ErrorMsg = errorMsg;
                             return View("ChargePointDetail", cpvm);
                         }
@@ -162,6 +173,8 @@ namespace OCPP.Core.Management.Controllers
                             currentChargePoint.Username = cpvm.Username;
                             currentChargePoint.Password = cpvm.Password;
                             currentChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
+                            currentChargePoint.OwnerId = cpvm.OwnerId;
+                            currentChargePoint.PricePerKwh = cpvm.PricePerKwh;
 
                             DbContext.SaveChanges();
                             Logger.LogInformation("ChargePoint: Edit => chargepoint saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
@@ -175,6 +188,7 @@ namespace OCPP.Core.Management.Controllers
                     // Display charge point
                     cpvm = new ChargePointViewModel();
                     cpvm.ChargePoints = dbChargePoints;
+                    cpvm.Owners = dbOwners;
                     cpvm.CurrentId = Id;
 
                     if (currentChargePoint!= null)
@@ -186,6 +200,15 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.Username = currentChargePoint.Username;
                         cpvm.Password = currentChargePoint.Password;
                         cpvm.ClientCertThumb = currentChargePoint.ClientCertThumb;
+                        cpvm.OwnerId = currentChargePoint.OwnerId;
+                        cpvm.PricePerKwh = currentChargePoint.PricePerKwh;
+                        cpvm.Owners = dbOwners;
+                        cpvm.CurrentId = Id;
+                    }
+                    else if (Id == "@")
+                    {
+                        cpvm.Owners = dbOwners;
+                        cpvm.CurrentId = Id;
                     }
 
                     string viewName = (!string.IsNullOrEmpty(cpvm.ChargePointId) || Id == "@") ? "ChargePointDetail" : "ChargePointList";

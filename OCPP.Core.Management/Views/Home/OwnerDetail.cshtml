@@ -1,0 +1,140 @@
+@using Microsoft.AspNetCore.Mvc.Localization
+@model StationOwnerViewModel
+@inject IViewLocalizer Localizer
+@{
+    ViewData["Title"] = @Localizer["Title"];
+}
+<br />
+
+@if (Model != null)
+{
+    @using (Html.BeginForm())
+    {
+        @Html.AntiForgeryToken()
+
+        <h4>@Localizer["EditOwner"]</h4>
+        <br />
+        <div class="container">
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="Name">@Localizer["NameLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" data-val="true" data-val-length="@string.Format(Localizer["FieldMaxLength"].Value, 200)" data-val-length-max="200" data-val-required="@Localizer["RequiredField"]" id="Name" maxlength="200" name="Name" placeholder="@Localizer["NamePlaceholder"]" type="text" value="@Model.Name" />
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="Name" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="Email">@Localizer["EmailLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" data-val="true" data-val-email="@Localizer["EmailInvalid"]" data-val-required="@Localizer["RequiredField"]" data-val-length="@string.Format(Localizer["FieldMaxLength"].Value, 200)" data-val-length-max="200" id="Email" maxlength="200" name="Email" placeholder="@Localizer["EmailPlaceholder"]" type="email" value="@Model.Email" />
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="Email" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="ProvisionPercentage">@Localizer["ProvisionLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" data-val="true" data-val-number="@Localizer["ProvisionNumber"]" data-val-range="@string.Format(Localizer["ProvisionRange"].Value, 0, 100)" data-val-range-max="100" data-val-range-min="0" id="ProvisionPercentage" name="ProvisionPercentage" placeholder="@Localizer["ProvisionPlaceholder"]" step="0.01" type="number" value="@Model.ProvisionPercentage.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)" />
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="ProvisionPercentage" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label">@Localizer["LastReport"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input type="text" readonly class="form-control" value="@(!Model.LastReportYear.HasValue || !Model.LastReportMonth.HasValue ? Localizer["NoReport"] : new DateTime(Model.LastReportYear.Value, Model.LastReportMonth.Value, 1).ToString("Y"))@(Model.LastReportSentAt.HasValue ? string.Format(" ({0})", Model.LastReportSentAt.Value.ToLocalTime().ToString("g")) : string.Empty)" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-12 text-danger">
+                    @ViewBag.ErrorMsg
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-1">
+                    &nbsp;
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i>&nbsp;@Localizer[(Model.CurrentId == "@") ? "SaveNew" : "Save"].Value</button>
+                </div>
+                <div class="col-sm-2">
+                    <button type="button" class="btn btn-secondary" onclick="history.back()">@Localizer["Back"].Value</button>
+                </div>
+                @if (Model.CurrentId != "@" && Model.OwnerId.HasValue)
+                {
+                    <div class="col-sm-2">
+                        <button type="button" class="btn btn-warning" id="btnDelete" onclick="DeleteOwner()"><i class="fas fa-trash"></i>&nbsp;@Localizer["Delete"].Value</button>
+                    </div>
+                }
+            </div>
+        </div>
+        <input type="hidden" name="action" id="hidAction" value="" />
+    }
+
+    @section scripts {
+        @if (Model.CurrentId != "@" && Model.OwnerId.HasValue)
+        {
+            <script>
+                function DeleteOwner() {
+                    var dialog = new BootstrapDialog({
+                        title: '@Localizer["TitleDelete"]',
+                        message: '@Localizer["DialogDelete"]',
+                        buttons: [{
+                            id: 'btnDialogDelete',
+                            label: '@Localizer["Delete"]',
+                            icon: 'fas fa-trash',
+                            cssClass: 'btn-warning',
+                            action: function (dialogRef) {
+                                dialogRef.close();
+                                document.getElementById('hidAction').value = 'Delete';
+                                document.forms[0].submit();
+                            }
+                        }, {
+                            label: '@Localizer["Cancel"]',
+                            action: function (dialogRef) {
+                                dialogRef.close();
+                            }
+                        }]
+                    });
+                    dialog.open();
+                }
+            </script>
+        }
+    }
+}
+

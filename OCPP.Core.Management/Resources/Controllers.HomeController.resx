@@ -156,6 +156,24 @@
   <data name="ErrorOCPPServer" xml:space="preserve">
     <value>No current status could be retrieved from the OCPP server.</value>
   </data>
+  <data name="OwnerDeleteWithStations" xml:space="preserve">
+    <value>The owner still has charging stations assigned and cannot be deleted.</value>
+  </data>
+  <data name="OwnerEmailExists" xml:space="preserve">
+    <value>An owner with this e-mail address already exists.</value>
+  </data>
+  <data name="OwnerEmailInvalid" xml:space="preserve">
+    <value>Please enter a valid e-mail address.</value>
+  </data>
+  <data name="OwnerEmailRequired" xml:space="preserve">
+    <value>Please enter an e-mail address.</value>
+  </data>
+  <data name="OwnerNameRequired" xml:space="preserve">
+    <value>Please enter an owner name.</value>
+  </data>
+  <data name="OwnerNotFound" xml:space="preserve">
+    <value>The selected owner could not be found.</value>
+  </data>
   <data name="ReportSheetName" xml:space="preserve">
     <value>Transactions</value>
   </data>

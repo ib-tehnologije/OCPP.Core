@@ -1,0 +1,54 @@
+@using Microsoft.AspNetCore.Mvc.Localization
+@model StationOwnerViewModel
+@inject IViewLocalizer Localizer
+@{
+    ViewData["Title"] = @Localizer["Title"];
+}
+<br />
+
+@if (Model != null)
+{
+    <table class="table table-striped table-bordered table-sm table-hover" cellspacing="0" width="100%">
+        <thead>
+            <tr>
+                <th class="th-sm">@Localizer["Name"]</th>
+                <th class="th-sm">@Localizer["Email"]</th>
+                <th class="th-sm">@Localizer["Provision"]</th>
+                <th class="th-sm">@Localizer["ChargePoints"]</th>
+                <th class="th-sm">@Localizer["LastReport"]</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Owners != null)
+            {
+                foreach (var owner in Model.Owners)
+                {
+                    <tr class="table-row" data-href='@Url.Action("Owner", Constants.HomeController, new { id = owner.OwnerId })'>
+                        <td>@owner.Name</td>
+                        <td>@owner.Email</td>
+                        <td>@string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0.##}%", owner.ProvisionPercentage)</td>
+                        <td>@(owner.ChargePoints?.Count ?? 0)</td>
+                        <td>
+                            @if (owner.LastReportYear.HasValue && owner.LastReportMonth.HasValue)
+                            {
+                                <text>@(new DateTime(owner.LastReportYear.Value, owner.LastReportMonth.Value, 1).ToString("Y"))</text>
+                                if (owner.LastReportSentAt.HasValue)
+                                {
+                                    <text> (@owner.LastReportSentAt.Value.ToLocalTime().ToString("g"))</text>
+                                }
+                            }
+                            else
+                            {
+                                <text>-</text>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+
+    <br />
+    <a class="btn btn-secondary" href="~/Home/Owner/@@">@Localizer["AddNew"]</a>
+}
+

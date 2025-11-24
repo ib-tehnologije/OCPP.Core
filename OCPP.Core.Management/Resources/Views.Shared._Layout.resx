@@ -132,6 +132,9 @@
   <data name="Connectors" xml:space="preserve">
     <value>Connectors</value>
   </data>
+  <data name="Owners" xml:space="preserve">
+    <value>Owners</value>
+  </data>
   <data name="Logout" xml:space="preserve">
     <value>Logout</value>
   </data>

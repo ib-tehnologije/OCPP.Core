@@ -126,6 +126,12 @@
   <data name="Comment" xml:space="preserve">
     <value>Notiz</value>
   </data>
+  <data name="Owner" xml:space="preserve">
+    <value>Betreiber</value>
+  </data>
+  <data name="PricePerKwh" xml:space="preserve">
+    <value>Preis pro kWh</value>
+  </data>
   <data name="Name" xml:space="preserve">
     <value>Bezeichnung</value>
   </data>

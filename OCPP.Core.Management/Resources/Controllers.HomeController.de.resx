@@ -156,6 +156,24 @@
   <data name="ErrorOCPPServer" xml:space="preserve">
     <value>Es konnte kein aktueller Status vom OCPP-Server abgerufen werden.</value>
   </data>
+  <data name="OwnerDeleteWithStations" xml:space="preserve">
+    <value>Dem Betreiber sind noch Ladestationen zugeordnet und er kann nicht gelöscht werden.</value>
+  </data>
+  <data name="OwnerEmailExists" xml:space="preserve">
+    <value>Ein Betreiber mit dieser E-Mail-Adresse existiert bereits.</value>
+  </data>
+  <data name="OwnerEmailInvalid" xml:space="preserve">
+    <value>Bitte geben Sie eine gültige E-Mail-Adresse an.</value>
+  </data>
+  <data name="OwnerEmailRequired" xml:space="preserve">
+    <value>Bitte geben Sie eine E-Mail-Adresse an.</value>
+  </data>
+  <data name="OwnerNameRequired" xml:space="preserve">
+    <value>Bitte geben Sie einen Betreiber-Namen an.</value>
+  </data>
+  <data name="OwnerNotFound" xml:space="preserve">
+    <value>Der ausgewählte Betreiber wurde nicht gefunden.</value>
+  </data>
   <data name="ReportSheetName" xml:space="preserve">
     <value>Transaktionen</value>
   </data>
