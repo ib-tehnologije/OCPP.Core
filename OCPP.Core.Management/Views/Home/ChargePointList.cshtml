@@ -14,6 +14,8 @@
                 <th class="th-sm">@Localizer["ChargePointId"]</th>
                 <th class="th-sm">@Localizer["Name"]</th>
                 <th class="th-sm">@Localizer["Comment"]</th>
+                <th class="th-sm">@Localizer["Owner"]</th>
+                <th class="th-sm">@Localizer["PricePerKwh"]</th>
             </tr>
         </thead>
         <tbody>
@@ -25,6 +27,8 @@
                         <td>@cp.ChargePointId</td>
                         <td>@cp.Name</td>
                         <td>@cp.Comment</td>
+                        <td>@(cp.Owner != null ? cp.Owner.Name : "-")</td>
+                        <td>@(cp.PricePerKwh.HasValue ? cp.PricePerKwh.Value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) : "-")</td>
                     </tr>
                 }
             }

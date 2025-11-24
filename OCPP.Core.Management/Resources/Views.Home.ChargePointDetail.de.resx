@@ -159,11 +159,29 @@
   <data name="NamePlaceholder" xml:space="preserve">
     <value>Bezeichnung der Ladestation</value>
   </data>
+  <data name="OwnerLabel" xml:space="preserve">
+    <value>Betreiber</value>
+  </data>
+  <data name="OwnerPlaceholder" xml:space="preserve">
+    <value>Betreiber auswählen</value>
+  </data>
   <data name="PasswordLabel" xml:space="preserve">
     <value>Passwort</value>
   </data>
   <data name="PasswordPlaceholder" xml:space="preserve">
     <value>Passwort der Ladestation</value>
+  </data>
+  <data name="PricePerKwhLabel" xml:space="preserve">
+    <value>Preis pro kWh</value>
+  </data>
+  <data name="PricePerKwhNumber" xml:space="preserve">
+    <value>Bitte geben Sie eine gültige Zahl ein.</value>
+  </data>
+  <data name="PricePerKwhPlaceholder" xml:space="preserve">
+    <value>Preis pro kWh eingeben</value>
+  </data>
+  <data name="PricePerKwhRange" xml:space="preserve">
+    <value>Bitte einen Wert zwischen {0} und {1} eingeben.</value>
   </data>
   <data name="RequiredField" xml:space="preserve">
     <value>Pflichtfeld</value>

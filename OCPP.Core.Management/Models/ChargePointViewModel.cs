@@ -28,7 +28,15 @@ namespace OCPP.Core.Management.Models
 {
     public class ChargePointViewModel
     {
+        public ChargePointViewModel()
+        {
+            ChargePoints = new List<ChargePoint>();
+            Owners = new List<ChargeStationOwner>();
+        }
+
         public List<ChargePoint> ChargePoints { get; set; }
+
+        public List<ChargeStationOwner> Owners { get; set; }
 
         public string CurrentId { get; set; }
 
@@ -50,5 +58,10 @@ namespace OCPP.Core.Management.Models
 
         [StringLength(100)]
         public string ClientCertThumb { get; set; }
+
+        public int? OwnerId { get; set; }
+
+        [Range(0, 9999)]
+        public decimal? PricePerKwh { get; set; }
     }
 }

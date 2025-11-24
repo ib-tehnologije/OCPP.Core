@@ -1,6 +1,6 @@
 ﻿/*
  * OCPP.Core - https://github.com/dallmann-consulting/OCPP.Core
- * Copyright (C) 2020-2021 dallmann consulting GmbH.
+ * Copyright (C) 2020-2025 dallmann consulting GmbH.
  * All Rights Reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -24,23 +24,21 @@ using System.Collections.Generic;
 
 namespace OCPP.Core.Database
 {
-    public partial class ChargePoint
+    public partial class ChargeStationOwner
     {
-        public ChargePoint()
+        public ChargeStationOwner()
         {
-            Transactions = new HashSet<Transaction>();
+            ChargePoints = new HashSet<ChargePoint>();
         }
 
-        public string ChargePointId { get; set; }
+        public int OwnerId { get; set; }
         public string Name { get; set; }
-        public string Comment { get; set; }
-        public string Username { get; set; }
-        public string Password { get; set; }
-        public string ClientCertThumb { get; set; }
-        public int? OwnerId { get; set; }
-        public decimal? PricePerKwh { get; set; }
+        public string Email { get; set; }
+        public decimal ProvisionPercentage { get; set; }
+        public int? LastReportYear { get; set; }
+        public int? LastReportMonth { get; set; }
+        public DateTime? LastReportSentAt { get; set; }
 
-        public virtual ICollection<Transaction> Transactions { get; set; }
-        public virtual ChargeStationOwner Owner { get; set; }
+        public virtual ICollection<ChargePoint> ChargePoints { get; set; }
     }
 }

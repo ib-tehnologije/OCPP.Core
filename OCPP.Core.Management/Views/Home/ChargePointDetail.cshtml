@@ -72,6 +72,44 @@
                 </div>
             </div>
 
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="OwnerId">@Localizer["OwnerLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <select class="form-control" id="OwnerId" name="OwnerId">
+                            <option value="">@Localizer["OwnerPlaceholder"]</option>
+                            @if (Model.Owners != null)
+                            {
+                                foreach (var owner in Model.Owners)
+                                {
+                                    <option value="@owner.OwnerId" selected="@(Model.OwnerId == owner.OwnerId ? "selected" : null)">@owner.Name (@owner.Email)</option>
+                                }
+                            }
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="PricePerKwh">@Localizer["PricePerKwhLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" data-val="true" data-val-number="@Localizer["PricePerKwhNumber"]" data-val-range="@string.Format(Localizer["PricePerKwhRange"].Value, 0, 9999)" data-val-range-max="9999" data-val-range-min="0" id="PricePerKwh" name="PricePerKwh" placeholder="@Localizer["PricePerKwhPlaceholder"]" step="0.0001" type="number" value="@(Model.PricePerKwh?.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture))" />
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="PricePerKwh" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+
 
             <div class="row">
                 <div class="col-sm-2 align-self-center">

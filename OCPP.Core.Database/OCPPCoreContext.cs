@@ -40,6 +40,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<MessageLog> MessageLogs { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
         public virtual DbSet<ChargePaymentReservation> ChargePaymentReservations { get; set; }
+        public virtual DbSet<ChargeStationOwner> ChargeStationOwners { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -61,6 +62,14 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.Password).HasMaxLength(50);
 
                 entity.Property(e => e.ClientCertThumb).HasMaxLength(100);
+
+                entity.Property(e => e.PricePerKwh).HasColumnType("decimal(18,4)");
+
+                entity.HasOne(d => d.Owner)
+                    .WithMany(p => p.ChargePoints)
+                    .HasForeignKey(d => d.OwnerId)
+                    .OnDelete(DeleteBehavior.SetNull)
+                    .HasConstraintName("FK_ChargePoint_Owner");
             });
 
             modelBuilder.Entity<ChargeTag>(entity =>
@@ -171,6 +180,28 @@ namespace OCPP.Core.Database
 
                 entity.HasIndex(e => e.StripePaymentIntentId)
                     .HasDatabaseName("IX_PaymentReservations_PaymentIntent");
+            });
+
+            modelBuilder.Entity<ChargeStationOwner>(entity =>
+            {
+                entity.HasKey(e => e.OwnerId);
+
+                entity.ToTable("ChargeStationOwner");
+
+                entity.Property(e => e.Name)
+                    .IsRequired()
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.Email)
+                    .IsRequired()
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.ProvisionPercentage)
+                    .HasColumnType("decimal(5,2)")
+                    .HasDefaultValue(0m);
+
+                entity.Property(e => e.LastReportSentAt)
+                    .HasColumnType("datetime2");
             });
 
             OnModelCreatingPartial(modelBuilder);

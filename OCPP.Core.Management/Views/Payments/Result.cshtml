@@ -5,9 +5,10 @@
     var title = Localizer["PaymentStatusTitle"];
     var heading = Localizer["PaymentStatusHeading"];
     var back = Localizer["ReturnToDashboard"];
-    ViewData["Title"] = title.ResourceNotFound ? "Payment status" : title.Value;
-    string headingText = heading.ResourceNotFound ? "Payment status" : heading.Value;
-    string backText = back.ResourceNotFound ? "Back to dashboard" : back.Value;
+    string titleText = title.Name == title.Value ? "Payment status" : title.Value;
+    string headingText = heading.Name == heading.Value ? "Payment status" : heading.Value;
+    string backText = back.Name == back.Value ? "Back to dashboard" : back.Value;
+    ViewData["Title"] = titleText;
 }
 
 <div class="container mt-4">
