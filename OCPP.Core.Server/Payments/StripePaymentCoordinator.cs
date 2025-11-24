@@ -208,7 +208,8 @@ namespace OCPP.Core.Server.Payments
                 reservation.Status = PaymentReservationStatus.Authorized;
                 reservation.AuthorizedAtUtc = DateTime.UtcNow;
                 reservation.UpdatedAtUtc = reservation.AuthorizedAtUtc.Value;
-                reservation.MaxAmountCents = paymentIntent.Amount ?? reservation.MaxAmountCents;
+                var paymentIntentAmount = (long?)paymentIntent.Amount;
+                reservation.MaxAmountCents = paymentIntentAmount ?? reservation.MaxAmountCents;
 
                 dbContext.SaveChanges();
 
@@ -327,9 +328,11 @@ namespace OCPP.Core.Server.Payments
                 {
                     if (amountToCapture > 0)
                     {
+                        var paymentIntentAmount = (long?)paymentIntent.Amount;
+                        var maxCaptureAmount = paymentIntentAmount ?? amountToCapture;
                         var captureOptions = new PaymentIntentCaptureOptions
                         {
-                            AmountToCapture = Math.Min(amountToCapture, paymentIntent.Amount ?? amountToCapture)
+                            AmountToCapture = Math.Min(amountToCapture, maxCaptureAmount)
                         };
                         var captured = _paymentIntentService.Capture(paymentIntent.Id, captureOptions);
                         reservation.CapturedAmountCents = captureOptions.AmountToCapture;

@@ -43,7 +43,9 @@
 </form>
 <br />
 @if (Model.Groups.Count == 0)
-    @Localizer["NoData"]
+{
+    <p>@Localizer["NoData"]</p>
+}
 else
 {
     <p>&nbsp;</p>
