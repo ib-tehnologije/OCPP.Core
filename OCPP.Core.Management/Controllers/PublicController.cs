@@ -62,19 +62,32 @@ namespace OCPP.Core.Management.Controllers
                 returnBaseUrl = $"{Request.Scheme}://{Request.Host}"
             });
 
+            string checkoutUrl = ExtractCheckoutUrl(apiResult.Payload);
+            string status = ExtractStatus(apiResult.Payload);
+
             if (!apiResult.Success)
             {
                 model.ErrorMessage = ExtractMessage(apiResult.Payload) ?? apiResult.ErrorMessage ?? "Unable to start the transaction.";
                 return View(model);
             }
 
-            string checkoutUrl = ExtractCheckoutUrl(apiResult.Payload);
-            string status = ExtractStatus(apiResult.Payload);
-
             if (!string.IsNullOrWhiteSpace(checkoutUrl) &&
                 string.Equals(status, "Redirect", StringComparison.OrdinalIgnoreCase))
             {
                 return Redirect(checkoutUrl);
+            }
+
+            if (string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase))
+            {
+                var resultModel = new PaymentResultViewModel
+                {
+                    Status = "Accepted",
+                    Success = true,
+                    Message = "Payment authorized. Charging session will start shortly.",
+                    Origin = "public",
+                    ReturnUrl = Url.Action("Start", "Public")
+                };
+                return View("~/Views/Payments/PublicResult.cshtml", resultModel);
             }
 
             model.ErrorMessage = ExtractMessage(apiResult.Payload) ?? "Unable to start the transaction.";

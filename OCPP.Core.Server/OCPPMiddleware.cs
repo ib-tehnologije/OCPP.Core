@@ -815,6 +815,25 @@ namespace OCPP.Core.Server
                 return;
             }
 
+            var chargePoint = dbContext.ChargePoints.Find(request.ChargePointId);
+            bool isFree = chargePoint != null &&
+                          (chargePoint.FreeChargingEnabled ||
+                           ((chargePoint.PricePerKwh <= 0m) && (chargePoint.ConnectorUsageFeePerMinute <= 0m)));
+
+            if (isFree)
+            {
+                EnsureChargeTagExists(dbContext, request.ChargeTagId);
+                string apiResult = await ExecuteRemoteStartAsync(status, dbContext, request.ConnectorId.ToString(), request.ChargeTagId);
+                if (string.IsNullOrWhiteSpace(apiResult))
+                {
+                    apiResult = "{\"status\":\"Error\"}";
+                }
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(apiResult);
+                return;
+            }
+
             try
             {
                 var result = _paymentCoordinator.CreateCheckoutSession(dbContext, request);
@@ -1000,6 +1019,24 @@ namespace OCPP.Core.Server
                 context.Request.Body.Position = 0;
                 return body;
             }
+        }
+
+        private static void EnsureChargeTagExists(OCPPCoreContext dbContext, string tagId)
+        {
+            if (dbContext == null || string.IsNullOrWhiteSpace(tagId)) return;
+
+            var existing = dbContext.ChargeTags.Find(tagId);
+            if (existing != null) return;
+
+            var newTag = new ChargeTag
+            {
+                TagId = tagId,
+                TagName = $"Web session {tagId}",
+                Blocked = false
+            };
+
+            dbContext.ChargeTags.Add(newTag);
+            dbContext.SaveChanges();
         }
 
         public void NotifyTransactionStarted(OCPPCoreContext dbContext, ChargePointStatus chargePointStatus, int connectorId, string chargeTagId, int transactionId)
