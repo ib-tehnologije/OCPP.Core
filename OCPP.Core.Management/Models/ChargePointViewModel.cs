@@ -42,6 +42,9 @@ namespace OCPP.Core.Management.Models
         [StringLength(100)]
         public string Comment { get; set; }
 
+        [StringLength(500)]
+        public string Description { get; set; }
+
         [StringLength(50)]
         public string Username { get; set; }
 
@@ -50,5 +53,22 @@ namespace OCPP.Core.Management.Models
 
         [StringLength(100)]
         public string ClientCertThumb { get; set; }
+
+        public bool FreeChargingEnabled { get; set; }
+
+        [Range(0, 100000)]
+        public double MaxSessionKwh { get; set; }
+
+        [Range(0, 10000)]
+        public decimal PricePerKwh { get; set; }
+
+        [Range(0, 100000)]
+        public int StartUsageFeeAfterMinutes { get; set; }
+
+        [Range(0, 100000)]
+        public int MaxUsageFeeMinutes { get; set; }
+
+        [Range(0, 10000)]
+        public decimal ConnectorUsageFeePerMinute { get; set; }
     }
 }

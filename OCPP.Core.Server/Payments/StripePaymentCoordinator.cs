@@ -51,8 +51,38 @@ namespace OCPP.Core.Server.Payments
             if (string.IsNullOrWhiteSpace(request.ChargePointId)) throw new ArgumentException("ChargePointId is required.", nameof(request));
             if (string.IsNullOrWhiteSpace(request.ChargeTagId)) throw new ArgumentException("ChargeTagId is required.", nameof(request));
 
+            var chargePoint = dbContext.ChargePoints.Find(request.ChargePointId);
+            if (chargePoint == null)
+            {
+                throw new ArgumentException($"Charge point '{request.ChargePointId}' not found.", nameof(request.ChargePointId));
+            }
+
+            double maxEnergyKwh = chargePoint.MaxSessionKwh;
+            decimal pricePerKwh = chargePoint.PricePerKwh;
+            int startUsageFeeAfterMinutes = Math.Max(0, chargePoint.StartUsageFeeAfterMinutes);
+            int maxUsageFeeMinutes = Math.Max(0, chargePoint.MaxUsageFeeMinutes);
+            decimal usageFeePerMinute = chargePoint.ConnectorUsageFeePerMinute;
+
+            if ((maxEnergyKwh <= 0 && usageFeePerMinute <= 0) || (pricePerKwh <= 0 && usageFeePerMinute <= 0))
+            {
+                throw new InvalidOperationException("Pricing is not configured for this charge point.");
+            }
+
             var now = DateTime.UtcNow;
             var normalizedTag = NormalizeChargeTag(request.ChargeTagId);
+
+            EnsureChargeTagExists(dbContext, normalizedTag);
+
+            var maxEnergyCents = CalculateAmountInCents(maxEnergyKwh, pricePerKwh);
+            var maxUsageFeeCents = CalculateUsageFeeInCents(
+                Math.Max(0, maxUsageFeeMinutes - startUsageFeeAfterMinutes),
+                usageFeePerMinute);
+            var maxTotalCents = maxEnergyCents + maxUsageFeeCents;
+
+            if (maxTotalCents <= 0)
+            {
+                throw new InvalidOperationException("Calculated maximum amount is zero. Check pricing configuration.");
+            }
 
             var reservation = new ChargePaymentReservation
             {
@@ -60,17 +90,31 @@ namespace OCPP.Core.Server.Payments
                 ChargePointId = request.ChargePointId,
                 ConnectorId = request.ConnectorId,
                 ChargeTagId = normalizedTag,
-                MaxEnergyKwh = _options.MaxSessionKwh,
-                PricePerKwh = _options.PricePerKwh,
-                MaxAmountCents = CalculateAmountInCents(_options.MaxSessionKwh, _options.PricePerKwh),
+                MaxEnergyKwh = maxEnergyKwh,
+                PricePerKwh = pricePerKwh,
+                UsageFeePerMinute = usageFeePerMinute,
+                StartUsageFeeAfterMinutes = startUsageFeeAfterMinutes,
+                MaxUsageFeeMinutes = maxUsageFeeMinutes,
+                MaxAmountCents = maxTotalCents,
                 Currency = string.IsNullOrWhiteSpace(_options.Currency) ? "eur" : _options.Currency.ToLowerInvariant(),
                 Status = PaymentReservationStatus.Pending,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now
             };
 
-            var successUrl = $"{TrimTrailingSlash(_options.ReturnBaseUrl)}/Payments/Success?reservationId={reservation.ReservationId}&session_id={{CHECKOUT_SESSION_ID}}";
-            var cancelUrl = $"{TrimTrailingSlash(_options.ReturnBaseUrl)}/Payments/Cancel?reservationId={reservation.ReservationId}";
+            var baseReturnUrl = string.IsNullOrWhiteSpace(request.ReturnBaseUrl)
+                ? _options.ReturnBaseUrl
+                : request.ReturnBaseUrl;
+
+            var successUrl = $"{TrimTrailingSlash(baseReturnUrl)}/Payments/Success?reservationId={reservation.ReservationId}&session_id={{CHECKOUT_SESSION_ID}}";
+            var cancelUrl = $"{TrimTrailingSlash(baseReturnUrl)}/Payments/Cancel?reservationId={reservation.ReservationId}";
+
+            if (!string.IsNullOrWhiteSpace(request.Origin))
+            {
+                var originParam = Uri.EscapeDataString(request.Origin);
+                successUrl += $"&origin={originParam}";
+                cancelUrl += $"&origin={originParam}";
+            }
 
             var sessionOptions = new SessionCreateOptions
             {
@@ -320,6 +364,19 @@ namespace OCPP.Core.Server.Payments
 
             var amountToCapture = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
 
+            if (reservation.UsageFeePerMinute > 0 && transaction.StartTime != default)
+            {
+                var stopTime = transaction.StopTime ?? DateTime.UtcNow;
+                var totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTime - transaction.StartTime).TotalMinutes));
+                var billableMinutes = Math.Min(
+                    Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
+                    reservation.MaxUsageFeeMinutes);
+                if (billableMinutes > 0)
+                {
+                    amountToCapture += CalculateUsageFeeInCents(billableMinutes, reservation.UsageFeePerMinute);
+                }
+            }
+
             try
             {
                 var paymentIntent = _paymentIntentService.Get(reservation.StripePaymentIntentId);
@@ -479,6 +536,24 @@ namespace OCPP.Core.Server.Payments
             return separatorIndex >= 0 ? tag.Substring(0, separatorIndex) : tag;
         }
 
+        private static void EnsureChargeTagExists(OCPPCoreContext dbContext, string tagId)
+        {
+            if (string.IsNullOrWhiteSpace(tagId)) return;
+
+            var existing = dbContext.ChargeTags.Find(tagId);
+            if (existing != null) return;
+
+            var newTag = new ChargeTag
+            {
+                TagId = tagId,
+                TagName = $"Web session {tagId}",
+                Blocked = false
+            };
+
+            dbContext.ChargeTags.Add(newTag);
+            dbContext.SaveChanges();
+        }
+
         private static string TrimTrailingSlash(string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return string.Empty;
@@ -489,6 +564,13 @@ namespace OCPP.Core.Server.Payments
         {
             var kwh = Convert.ToDecimal(energyKwh);
             var subtotal = Math.Round(pricePerKwh * kwh, 2, MidpointRounding.AwayFromZero);
+            return (long)Math.Round(subtotal * 100m, 0, MidpointRounding.AwayFromZero);
+        }
+
+        private static long CalculateUsageFeeInCents(int minutes, decimal pricePerMinute)
+        {
+            if (minutes <= 0 || pricePerMinute <= 0) return 0;
+            var subtotal = Math.Round(pricePerMinute * minutes, 2, MidpointRounding.AwayFromZero);
             return (long)Math.Round(subtotal * 100m, 0, MidpointRounding.AwayFromZero);
         }
     }

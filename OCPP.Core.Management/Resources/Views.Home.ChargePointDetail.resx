@@ -195,4 +195,28 @@
   <data name="DialogDelete" xml:space="preserve">
     <value>Do you want to delete this charging station? ALL its Transactions will be deleted!</value>
   </data>
+  <data name="DescriptionLabel" xml:space="preserve">
+    <value>Description</value>
+  </data>
+  <data name="DescriptionPlaceholder" xml:space="preserve">
+    <value>Optional description</value>
+  </data>
+  <data name="FreeChargingEnabledLabel" xml:space="preserve">
+    <value>Free charging enabled</value>
+  </data>
+  <data name="PricePerKwhLabel" xml:space="preserve">
+    <value>Price per kWh</value>
+  </data>
+  <data name="MaxSessionKwhLabel" xml:space="preserve">
+    <value>Maximum kWh per session</value>
+  </data>
+  <data name="StartUsageFeeAfterMinutesLabel" xml:space="preserve">
+    <value>Start connector usage fee after (minutes)</value>
+  </data>
+  <data name="MaxUsageFeeMinutesLabel" xml:space="preserve">
+    <value>Maximum connector usage fee time that can be charged (minutes)</value>
+  </data>
+  <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
+    <value>Connector usage fee (€ / min)</value>
+  </data>
 </root>

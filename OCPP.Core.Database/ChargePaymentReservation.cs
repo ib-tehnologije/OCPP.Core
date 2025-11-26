@@ -32,6 +32,9 @@ namespace OCPP.Core.Database
         public double MaxEnergyKwh { get; set; }
         public decimal PricePerKwh { get; set; }
         public long MaxAmountCents { get; set; }
+        public decimal UsageFeePerMinute { get; set; }
+        public int StartUsageFeeAfterMinutes { get; set; }
+        public int MaxUsageFeeMinutes { get; set; }
         public string Currency { get; set; }
         public string StripeCheckoutSessionId { get; set; }
         public string StripePaymentIntentId { get; set; }

@@ -31,7 +31,7 @@ namespace OCPP.Core.Management.Controllers
             Logger = loggerFactory.CreateLogger<PaymentsController>();
         }
 
-        public async Task<IActionResult> Success(Guid reservationId, string session_id)
+        public async Task<IActionResult> Success(Guid reservationId, string session_id, string origin)
         {
             if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(session_id))
             {
@@ -70,11 +70,13 @@ namespace OCPP.Core.Management.Controllers
 
             var model = BuildResult(status ?? "Error", message);
             model.ReservationId = reservationId;
+            model.Origin = origin;
+            model.ReturnUrl = GetReturnUrl(origin);
 
-            return View("Result", model);
+            return View(GetViewName(origin), model);
         }
 
-        public async Task<IActionResult> Cancel(Guid reservationId)
+        public async Task<IActionResult> Cancel(Guid reservationId, string origin)
         {
             if (reservationId != Guid.Empty)
             {
@@ -85,7 +87,10 @@ namespace OCPP.Core.Management.Controllers
                 });
             }
 
-            return View("Result", BuildResult("Cancelled", L("PaymentCancelled", "Payment cancelled.")));
+            var model = BuildResult("Cancelled", L("PaymentCancelled", "Payment cancelled."));
+            model.Origin = origin;
+            model.ReturnUrl = GetReturnUrl(origin);
+            return View(GetViewName(origin), model);
         }
 
         private PaymentResultViewModel BuildResult(string status, string message)
@@ -96,6 +101,28 @@ namespace OCPP.Core.Management.Controllers
                 Message = message,
                 Success = string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase)
             };
+        }
+
+        private string GetReturnUrl(string origin)
+        {
+            if (!string.IsNullOrWhiteSpace(origin) &&
+                string.Equals(origin, "public", StringComparison.OrdinalIgnoreCase))
+            {
+                return Url.Action("Start", "Public");
+            }
+
+            return Url.Action("Index", "Home");
+        }
+
+        private string GetViewName(string origin)
+        {
+            if (!string.IsNullOrWhiteSpace(origin) &&
+                string.Equals(origin, "public", StringComparison.OrdinalIgnoreCase))
+            {
+                return "PublicResult";
+            }
+
+            return "Result";
         }
 
         private async Task<(bool Success, string Payload, string ErrorMessage)> PostAsync(string relativePath, object payload)

@@ -10,8 +10,6 @@ namespace OCPP.Core.Server.Payments
         public string ApiKey { get; set; }
         public string WebhookSecret { get; set; }
         public string Currency { get; set; } = "eur";
-        public double MaxSessionKwh { get; set; } = 80d;
-        public decimal PricePerKwh { get; set; } = 0.49m;
         public string ReturnBaseUrl { get; set; }
         public string ProductName { get; set; } = "EV charging session";
     }

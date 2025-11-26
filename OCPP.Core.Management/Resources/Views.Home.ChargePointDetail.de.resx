@@ -195,4 +195,28 @@
   <data name="DialogDelete" xml:space="preserve">
     <value>Soll diese Ladestation gelöscht werden? Alle zugehörigen Transaktionen werden damit gelöscht!</value>
   </data>
+  <data name="DescriptionLabel" xml:space="preserve">
+    <value>Beschreibung</value>
+  </data>
+  <data name="DescriptionPlaceholder" xml:space="preserve">
+    <value>Optionale Beschreibung</value>
+  </data>
+  <data name="FreeChargingEnabledLabel" xml:space="preserve">
+    <value>Kostenloses Laden aktiviert</value>
+  </data>
+  <data name="PricePerKwhLabel" xml:space="preserve">
+    <value>Preis pro kWh</value>
+  </data>
+  <data name="MaxSessionKwhLabel" xml:space="preserve">
+    <value>Maximale kWh pro Ladevorgang</value>
+  </data>
+  <data name="StartUsageFeeAfterMinutesLabel" xml:space="preserve">
+    <value>Nutzungsgebühr ab (Minuten)</value>
+  </data>
+  <data name="MaxUsageFeeMinutesLabel" xml:space="preserve">
+    <value>Maximale Zeit für Nutzungsgebühr (Minuten)</value>
+  </data>
+  <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
+    <value>Steckernutzungsgebühr (€ / Min)</value>
+  </data>
 </root>

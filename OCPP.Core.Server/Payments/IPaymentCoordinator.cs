@@ -23,6 +23,8 @@ namespace OCPP.Core.Server.Payments
         public string ChargePointId { get; set; }
         public int ConnectorId { get; set; }
         public string ChargeTagId { get; set; }
+        public string Origin { get; set; }
+        public string ReturnBaseUrl { get; set; }
     }
 
     public class PaymentSessionResult

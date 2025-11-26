@@ -54,6 +54,8 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.Comment).HasMaxLength(200);
 
+                entity.Property(e => e.Description).HasMaxLength(500);
+
                 entity.Property(e => e.Name).HasMaxLength(100);
 
                 entity.Property(e => e.Username).HasMaxLength(50);
@@ -61,6 +63,10 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.Password).HasMaxLength(50);
 
                 entity.Property(e => e.ClientCertThumb).HasMaxLength(100);
+
+                entity.Property(e => e.PricePerKwh).HasColumnType("decimal(18,4)");
+
+                entity.Property(e => e.ConnectorUsageFeePerMinute).HasColumnType("decimal(18,4)");
             });
 
             modelBuilder.Entity<ChargeTag>(entity =>
@@ -161,6 +167,9 @@ namespace OCPP.Core.Database
                     .HasMaxLength(200);
 
                 entity.Property(e => e.PricePerKwh)
+                    .HasColumnType("decimal(18,4)");
+
+                entity.Property(e => e.UsageFeePerMinute)
                     .HasColumnType("decimal(18,4)");
 
                 entity.Property(e => e.LastError)

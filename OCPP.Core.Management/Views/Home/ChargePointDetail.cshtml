@@ -72,6 +72,22 @@
                 </div>
             </div>
 
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="Description">@Localizer["DescriptionLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" data-val="true" data-val-length="@string.Format(Localizer["FieldMaxLength"].Value, 500)" data-val-length-max="500" id="Description" maxlength="500" name="Description" placeholder="@Localizer["DescriptionPlaceholder"]" type="text" value="@Model.Description" />
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="Description" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+
 
             <div class="row">
                 <div class="col-sm-2 align-self-center">
@@ -116,6 +132,85 @@
                 </div>
                 <div class="col-sm-2">
                     <span class="field-validation-valid text-danger" data-valmsg-for="ClientCertThumb" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="FreeChargingEnabled">@Localizer["FreeChargingEnabledLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group form-check">
+                        <input type="checkbox" class="form-check-input" id="FreeChargingEnabled" name="FreeChargingEnabled" value="true" @(Model.FreeChargingEnabled ? "checked" : "") />
+                        <input type="hidden" name="FreeChargingEnabled" value="false" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="PricePerKwh">@Localizer["PricePerKwhLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="PricePerKwh" name="PricePerKwh" type="number" step="0.01" min="0" value="@Model.PricePerKwh" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="MaxSessionKwh">@Localizer["MaxSessionKwhLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="MaxSessionKwh" name="MaxSessionKwh" type="number" step="0.1" min="0" value="@Model.MaxSessionKwh" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="StartUsageFeeAfterMinutes">@Localizer["StartUsageFeeAfterMinutesLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="StartUsageFeeAfterMinutes" name="StartUsageFeeAfterMinutes" type="number" step="1" min="0" value="@Model.StartUsageFeeAfterMinutes" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="MaxUsageFeeMinutes">@Localizer["MaxUsageFeeMinutesLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="MaxUsageFeeMinutes" name="MaxUsageFeeMinutes" type="number" step="1" min="0" value="@Model.MaxUsageFeeMinutes" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="ConnectorUsageFeePerMinute">@Localizer["ConnectorUsageFeePerMinuteLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="ConnectorUsageFeePerMinute" name="ConnectorUsageFeePerMinute" type="number" step="0.01" min="0" value="@Model.ConnectorUsageFeePerMinute" />
+                    </div>
                 </div>
             </div>
 

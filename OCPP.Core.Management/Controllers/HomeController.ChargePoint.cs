@@ -100,9 +100,16 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.ChargePointId = cpvm.ChargePointId;
                             newChargePoint.Name = cpvm.Name;
                             newChargePoint.Comment = cpvm.Comment;
+                            newChargePoint.Description = cpvm.Description;
                             newChargePoint.Username = cpvm.Username;
                             newChargePoint.Password = cpvm.Password;
                             newChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
+                            newChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
+                            newChargePoint.PricePerKwh = cpvm.PricePerKwh;
+                            newChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh;
+                            newChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes;
+                            newChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes;
+                            newChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute;
                             DbContext.ChargePoints.Add(newChargePoint);
                             DbContext.SaveChanges();
                             Logger.LogInformation("ChargePoint: New => charge point saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
@@ -159,9 +166,16 @@ namespace OCPP.Core.Management.Controllers
                             Logger.LogTrace("ChargePoint: Saving charge point '{0}'", Id);
                             currentChargePoint.Name = cpvm.Name;
                             currentChargePoint.Comment = cpvm.Comment;
+                            currentChargePoint.Description = cpvm.Description;
                             currentChargePoint.Username = cpvm.Username;
                             currentChargePoint.Password = cpvm.Password;
                             currentChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
+                            currentChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
+                            currentChargePoint.PricePerKwh = cpvm.PricePerKwh;
+                            currentChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh;
+                            currentChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes;
+                            currentChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes;
+                            currentChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute;
 
                             DbContext.SaveChanges();
                             Logger.LogInformation("ChargePoint: Edit => chargepoint saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
@@ -183,9 +197,16 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.ChargePointId = currentChargePoint.ChargePointId;
                         cpvm.Name = currentChargePoint.Name;
                         cpvm.Comment = currentChargePoint.Comment;
+                        cpvm.Description = currentChargePoint.Description;
                         cpvm.Username = currentChargePoint.Username;
                         cpvm.Password = currentChargePoint.Password;
                         cpvm.ClientCertThumb = currentChargePoint.ClientCertThumb;
+                        cpvm.FreeChargingEnabled = currentChargePoint.FreeChargingEnabled;
+                        cpvm.PricePerKwh = currentChargePoint.PricePerKwh;
+                        cpvm.MaxSessionKwh = currentChargePoint.MaxSessionKwh;
+                        cpvm.StartUsageFeeAfterMinutes = currentChargePoint.StartUsageFeeAfterMinutes;
+                        cpvm.MaxUsageFeeMinutes = currentChargePoint.MaxUsageFeeMinutes;
+                        cpvm.ConnectorUsageFeePerMinute = currentChargePoint.ConnectorUsageFeePerMinute;
                     }
 
                     string viewName = (!string.IsNullOrEmpty(cpvm.ChargePointId) || Id == "@") ? "ChargePointDetail" : "ChargePointList";

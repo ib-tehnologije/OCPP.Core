@@ -8,6 +8,11 @@
     ViewData["Title"] = title.IsResourceNotFound ? "Payment status" : title.Value;
     string headingText = heading.IsResourceNotFound ? "Payment status" : heading.Value;
     string backText = back.IsResourceNotFound ? "Back to dashboard" : back.Value;
+    var isPublic = !string.IsNullOrWhiteSpace(Model.Origin) && Model.Origin.Equals("public", StringComparison.OrdinalIgnoreCase);
+    if (isPublic)
+    {
+        backText = "Start a new session";
+    }
 }
 
 <div class="container mt-4">
@@ -15,7 +20,7 @@
         <div class="card-body">
             <h4 class="card-title mb-3">@headingText</h4>
             <p class="card-text">@Model.Message</p>
-            <a href="@Url.Action("Index", "Home")" class="btn btn-primary">@backText</a>
+            <a href="@(string.IsNullOrWhiteSpace(Model.ReturnUrl) ? Url.Action("Index", "Home") : Model.ReturnUrl)" class="btn btn-primary">@backText</a>
         </div>
     </div>
 </div>
