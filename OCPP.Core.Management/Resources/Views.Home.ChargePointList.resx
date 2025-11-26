@@ -120,11 +120,50 @@
   <data name="AddNew" xml:space="preserve">
     <value>New</value>
   </data>
+  <data name="Actions" xml:space="preserve">
+    <value>Actions</value>
+  </data>
   <data name="ChargePointId" xml:space="preserve">
     <value>ID</value>
   </data>
   <data name="Comment" xml:space="preserve">
     <value>Comment</value>
+  </data>
+  <data name="Transactions" xml:space="preserve">
+    <value>Transactions</value>
+  </data>
+  <data name="EditChargePoint" xml:space="preserve">
+    <value>Edit charging point</value>
+  </data>
+  <data name="ChargingSessions" xml:space="preserve">
+    <value>Charging sessions</value>
+  </data>
+  <data name="RebootChargePoint" xml:space="preserve">
+    <value>Reboot charging point</value>
+  </data>
+  <data name="ConfirmReboot" xml:space="preserve">
+    <value>Do you really want to reboot %?</value>
+  </data>
+  <data name="ExecuteReboot" xml:space="preserve">
+    <value>Reboot is being triggered...</value>
+  </data>
+  <data name="RebootError" xml:space="preserve">
+    <value>An error occurred while rebooting.</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="RequestConfiguration" xml:space="preserve">
+    <value>Request configuration</value>
+  </data>
+  <data name="GetDiagnostics" xml:space="preserve">
+    <value>Get diagnostics</value>
+  </data>
+  <data name="ComingSoon" xml:space="preserve">
+    <value>% will be available soon.</value>
   </data>
   <data name="Name" xml:space="preserve">
     <value>Name</value>

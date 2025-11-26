@@ -14,6 +14,7 @@
                 <th class="th-sm">@Localizer["ChargePointId"]</th>
                 <th class="th-sm">@Localizer["Name"]</th>
                 <th class="th-sm">@Localizer["Comment"]</th>
+                <th class="th-sm">@Localizer["Actions"]</th>
             </tr>
         </thead>
         <tbody>
@@ -25,6 +26,26 @@
                         <td>@cp.ChargePointId</td>
                         <td>@cp.Name</td>
                         <td>@cp.Comment</td>
+                        <td class="text-nowrap">
+                            <a class="btn btn-link" onclick="event.stopPropagation();" href="~/Home/Transactions/@Uri.EscapeDataString(cp.ChargePointId)/1" data-toggle="tooltip" data-placement="top" title="@Localizer["Transactions"]">
+                                <i class="fas fa-receipt"></i>
+                            </a>
+                            <a class="btn btn-link" onclick="event.stopPropagation();" href='@Url.Action("ChargePoint", Constants.HomeController, new { id = cp.ChargePointId })' data-toggle="tooltip" data-placement="top" title="@Localizer["EditChargePoint"]">
+                                <i class="fas fa-pen"></i>
+                            </a>
+                            <a class="btn btn-link" onclick="event.stopPropagation();" href="~/Home/ChargeReport" data-toggle="tooltip" data-placement="top" title="@Localizer["ChargingSessions"]">
+                                <i class="fas fa-bolt"></i>
+                            </a>
+                            <button type="button" class="btn btn-link" onclick="event.stopPropagation(); ResetChargePoint('@cp.ChargePointId.Replace("'", "\\'")', '@cp.Name?.Replace("'", "\\'")');" data-toggle="tooltip" data-placement="top" title="@Localizer["RebootChargePoint"]">
+                                <i class="fas fa-power-off"></i>
+                            </button>
+                            <button type="button" class="btn btn-link" onclick="event.stopPropagation(); ShowComingSoon('@Localizer["RequestConfiguration"]');" data-toggle="tooltip" data-placement="top" title="@Localizer["RequestConfiguration"]">
+                                <i class="fas fa-sliders-h"></i>
+                            </button>
+                            <button type="button" class="btn btn-link" onclick="event.stopPropagation(); ShowComingSoon('@Localizer["GetDiagnostics"]');" data-toggle="tooltip" data-placement="top" title="@Localizer["GetDiagnostics"]">
+                                <i class="fas fa-stethoscope"></i>
+                            </button>
+                        </td>
                     </tr>
                 }
             }
@@ -33,5 +54,67 @@
 
     <br />
     <a class="btn btn-secondary" href="~/Home/ChargePoint/@@">@Localizer["AddNew"]</a>
+}
+
+@section scripts {
+    <script>
+        function ResetChargePoint(chargepointId, chargepointName) {
+            if (!chargepointName || chargepointName.length === 0) {
+                chargepointName = chargepointId;
+            }
+            var dialog = new BootstrapDialog({
+                title: '@Localizer["RebootChargePoint"]',
+                message: '@Localizer["ConfirmReboot"]'.replace('%', chargepointName),
+                spinicon: 'fa fa-spinner fa-fw',
+                buttons: [{
+                    id: 'btnReset',
+                    label: '@Localizer["RebootChargePoint"]',
+                    icon: 'fas fa-power-off',
+                    autospin: true,
+                    action: function (dialogRef) {
+                        dialogRef.enableButtons(false);
+                        dialogRef.setClosable(false);
+                        dialogRef.getModalBody().html('@Localizer["ExecuteReboot"]');
+
+                        var xmlhttp = new XMLHttpRequest();
+                        xmlhttp.onreadystatechange = function () {
+                            if (xmlhttp.readyState == XMLHttpRequest.DONE) {
+                                dialogRef.setClosable(true);
+                                dialogRef.enableButtons(true);
+                                var $resetButton = dialog.getButton('btnReset');
+                                $resetButton.hide();
+                                var $cancelButton = dialog.getButton('btnDialogCancel');
+                                $cancelButton.text('@Localizer["Close"]');
+
+                                if (xmlhttp.status == 200) {
+                                    dialogRef.getModalBody().html(xmlhttp.responseText);
+                                }
+                                else {
+                                    dialogRef.getModalBody().html('@Localizer["RebootError"]');
+                                }
+                            }
+                        };
+                        xmlhttp.open("GET", "@Html.Raw(Url.Content("~/API/Reset/"))" + chargepointId, true);
+                        xmlhttp.send();
+                    }
+                }, {
+                    id: 'btnDialogCancel',
+                    label: '@Localizer["Cancel"]',
+                    action: function (dialogRef) {
+                        dialogRef.close();
+                    }
+                }]
+            });
+            dialog.open();
+        }
+
+        function ShowComingSoon(actionName) {
+            BootstrapDialog.alert({
+                title: actionName,
+                message: '@Localizer["ComingSoon"]'.replace('%', actionName),
+                type: BootstrapDialog.TYPE_INFO
+            });
+        }
+    </script>
 }
 
