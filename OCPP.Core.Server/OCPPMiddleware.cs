@@ -818,7 +818,7 @@ namespace OCPP.Core.Server
             var chargePoint = dbContext.ChargePoints.Find(request.ChargePointId);
             bool isFree = chargePoint != null &&
                           (chargePoint.FreeChargingEnabled ||
-                           ((chargePoint.PricePerKwh <= 0m) && (chargePoint.ConnectorUsageFeePerMinute <= 0m)));
+                           ((chargePoint.PricePerKwh <= 0m) && (chargePoint.ConnectorUsageFeePerMinute <= 0m) && (chargePoint.UserSessionFee <= 0m)));
 
             if (isFree)
             {

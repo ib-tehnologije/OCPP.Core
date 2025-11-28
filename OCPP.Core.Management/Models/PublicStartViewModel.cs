@@ -13,6 +13,7 @@ namespace OCPP.Core.Management.Models
         public string ChargeTagId { get; set; }
         public double MaxSessionKwh { get; set; }
         public decimal PricePerKwh { get; set; }
+        public decimal UserSessionFee { get; set; }
         public int StartUsageFeeAfterMinutes { get; set; }
         public int MaxUsageFeeMinutes { get; set; }
         public decimal ConnectorUsageFeePerMinute { get; set; }

@@ -65,8 +65,15 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.ClientCertThumb).HasMaxLength(100);
 
                 entity.Property(e => e.PricePerKwh).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.UserSessionFee).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerSessionFee).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerCommissionPercent).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerCommissionFixedPerKwh).HasColumnType("decimal(18,4)");
 
                 entity.Property(e => e.ConnectorUsageFeePerMinute).HasColumnType("decimal(18,4)");
+
+                entity.Property(e => e.OwnerName).HasMaxLength(200);
+                entity.Property(e => e.OwnerEmail).HasMaxLength(200);
             });
 
             modelBuilder.Entity<ChargeTag>(entity =>
@@ -129,6 +136,17 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.StopReason).HasMaxLength(100);
 
+                entity.Property(e => e.Currency).HasMaxLength(10);
+                entity.Property(e => e.EnergyCost).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.UserSessionFeeAmount).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerSessionFeeAmount).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerCommissionPercent).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerCommissionFixedPerKwh).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OperatorCommissionAmount).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OperatorRevenueTotal).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerPayoutTotal).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.UsageFeeAmount).HasColumnType("decimal(18,4)");
+
                 entity.HasOne(d => d.ChargePoint)
                     .WithMany(p => p.Transactions)
                     .HasForeignKey(d => d.ChargePointId)
@@ -167,6 +185,14 @@ namespace OCPP.Core.Database
                     .HasMaxLength(200);
 
                 entity.Property(e => e.PricePerKwh)
+                    .HasColumnType("decimal(18,4)");
+                entity.Property(e => e.UserSessionFee)
+                    .HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerSessionFee)
+                    .HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerCommissionPercent)
+                    .HasColumnType("decimal(18,4)");
+                entity.Property(e => e.OwnerCommissionFixedPerKwh)
                     .HasColumnType("decimal(18,4)");
 
                 entity.Property(e => e.UsageFeePerMinute)

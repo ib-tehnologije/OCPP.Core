@@ -59,11 +59,16 @@ namespace OCPP.Core.Server.Payments
 
             double maxEnergyKwh = chargePoint.MaxSessionKwh;
             decimal pricePerKwh = chargePoint.PricePerKwh;
+            decimal userSessionFee = chargePoint.UserSessionFee;
+            decimal ownerSessionFee = chargePoint.OwnerSessionFee;
+            decimal ownerCommissionPercent = chargePoint.OwnerCommissionPercent;
+            decimal ownerCommissionFixedPerKwh = chargePoint.OwnerCommissionFixedPerKwh;
             int startUsageFeeAfterMinutes = Math.Max(0, chargePoint.StartUsageFeeAfterMinutes);
             int maxUsageFeeMinutes = Math.Max(0, chargePoint.MaxUsageFeeMinutes);
             decimal usageFeePerMinute = chargePoint.ConnectorUsageFeePerMinute;
 
-            if ((maxEnergyKwh <= 0 && usageFeePerMinute <= 0) || (pricePerKwh <= 0 && usageFeePerMinute <= 0))
+            if ((maxEnergyKwh <= 0 && usageFeePerMinute <= 0 && userSessionFee <= 0) ||
+                (pricePerKwh <= 0 && usageFeePerMinute <= 0 && userSessionFee <= 0))
             {
                 throw new InvalidOperationException("Pricing is not configured for this charge point.");
             }
@@ -77,7 +82,8 @@ namespace OCPP.Core.Server.Payments
             var maxUsageFeeCents = CalculateUsageFeeInCents(
                 Math.Max(0, maxUsageFeeMinutes - startUsageFeeAfterMinutes),
                 usageFeePerMinute);
-            var maxTotalCents = maxEnergyCents + maxUsageFeeCents;
+            var sessionFeeCents = CalculateFlatAmountInCents(userSessionFee);
+            var maxTotalCents = maxEnergyCents + maxUsageFeeCents + sessionFeeCents;
 
             if (maxTotalCents <= 0)
             {
@@ -92,6 +98,10 @@ namespace OCPP.Core.Server.Payments
                 ChargeTagId = normalizedTag,
                 MaxEnergyKwh = maxEnergyKwh,
                 PricePerKwh = pricePerKwh,
+                UserSessionFee = userSessionFee,
+                OwnerSessionFee = ownerSessionFee,
+                OwnerCommissionPercent = ownerCommissionPercent,
+                OwnerCommissionFixedPerKwh = ownerCommissionFixedPerKwh,
                 UsageFeePerMinute = usageFeePerMinute,
                 StartUsageFeeAfterMinutes = startUsageFeeAfterMinutes,
                 MaxUsageFeeMinutes = maxUsageFeeMinutes,
@@ -362,20 +372,25 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
-            var amountToCapture = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
+            var energyCostCents = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
+            var sessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
+            var usageFeeCents = 0L;
+            var usageFeeMinutes = 0;
 
             if (reservation.UsageFeePerMinute > 0 && transaction.StartTime != default)
             {
                 var stopTime = transaction.StopTime ?? DateTime.UtcNow;
                 var totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTime - transaction.StartTime).TotalMinutes));
-                var billableMinutes = Math.Min(
+                usageFeeMinutes = Math.Min(
                     Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
                     reservation.MaxUsageFeeMinutes);
-                if (billableMinutes > 0)
+                if (usageFeeMinutes > 0)
                 {
-                    amountToCapture += CalculateUsageFeeInCents(billableMinutes, reservation.UsageFeePerMinute);
+                    usageFeeCents = CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute);
                 }
             }
+
+            var amountToCapture = energyCostCents + usageFeeCents + sessionFeeCents;
 
             try
             {
@@ -415,6 +430,8 @@ namespace OCPP.Core.Server.Payments
                 }
 
                 dbContext.SaveChanges();
+
+                PersistTransactionBreakdown(dbContext, transaction, reservation, actualEnergy, energyCostCents, usageFeeMinutes, usageFeeCents, sessionFeeCents, amountToCapture);
             }
             catch (StripeException sex)
             {
@@ -573,5 +590,63 @@ namespace OCPP.Core.Server.Payments
             var subtotal = Math.Round(pricePerMinute * minutes, 2, MidpointRounding.AwayFromZero);
             return (long)Math.Round(subtotal * 100m, 0, MidpointRounding.AwayFromZero);
         }
+
+        private static long CalculateFlatAmountInCents(decimal amount)
+        {
+            if (amount <= 0) return 0;
+            var subtotal = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+            return (long)Math.Round(subtotal * 100m, 0, MidpointRounding.AwayFromZero);
+        }
+
+        private static void PersistTransactionBreakdown(
+            OCPPCoreContext dbContext,
+            Transaction transaction,
+            ChargePaymentReservation reservation,
+            double energyKwh,
+            long energyCostCents,
+            int usageFeeMinutes,
+            long usageFeeCents,
+            long sessionFeeCents,
+            long totalCents)
+        {
+            if (transaction == null) return;
+
+            decimal energyCost = ConvertToDecimal(energyCostCents);
+            decimal usageFee = ConvertToDecimal(usageFeeCents);
+            decimal userSessionFee = ConvertToDecimal(sessionFeeCents);
+            decimal gross = energyCost + usageFee + userSessionFee;
+
+            decimal operatorCommission = 0m;
+            if (reservation.OwnerCommissionPercent > 0)
+            {
+                operatorCommission = Math.Round(gross * (reservation.OwnerCommissionPercent / 100m), 4, MidpointRounding.AwayFromZero);
+            }
+            else if (reservation.OwnerCommissionFixedPerKwh > 0 && energyKwh > 0)
+            {
+                operatorCommission = Math.Round(reservation.OwnerCommissionFixedPerKwh * Convert.ToDecimal(energyKwh), 4, MidpointRounding.AwayFromZero);
+            }
+
+            decimal ownerSessionFee = reservation.OwnerSessionFee;
+            decimal operatorRevenueTotal = operatorCommission + ownerSessionFee;
+            decimal ownerPayout = Math.Max(0m, gross - operatorRevenueTotal);
+
+            transaction.EnergyKwh = energyKwh;
+            transaction.EnergyCost = energyCost;
+            transaction.UsageFeeMinutes = usageFeeMinutes;
+            transaction.UsageFeeAmount = usageFee;
+            transaction.UserSessionFeeAmount = userSessionFee;
+            transaction.OwnerSessionFeeAmount = ownerSessionFee;
+            transaction.OwnerCommissionPercent = reservation.OwnerCommissionPercent;
+            transaction.OwnerCommissionFixedPerKwh = reservation.OwnerCommissionFixedPerKwh;
+            transaction.OperatorCommissionAmount = operatorCommission;
+            transaction.OperatorRevenueTotal = operatorRevenueTotal;
+            transaction.OwnerPayoutTotal = ownerPayout;
+            transaction.Currency = reservation.Currency;
+
+            dbContext.SaveChanges();
+        }
+
+        private static decimal ConvertToDecimal(long cents) =>
+            Math.Round(cents / 100m, 4, MidpointRounding.AwayFromZero);
     }
 }

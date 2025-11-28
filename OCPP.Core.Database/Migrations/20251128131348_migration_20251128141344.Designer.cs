@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OCPP.Core.Database;
 
@@ -11,9 +12,11 @@ using OCPP.Core.Database;
 namespace OCPP.Core.Database.Migrations
 {
     [DbContext(typeof(OCPPCoreContext))]
-    partial class OCPPCoreContextModelSnapshot : ModelSnapshot
+    [Migration("20251128131348_migration_20251128141344")]
+    partial class migration_20251128141344
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -312,39 +315,11 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<int>("ConnectorId")
                         .HasColumnType("int");
 
-                    b.Property<string>("Currency")
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<decimal>("EnergyCost")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<double>("EnergyKwh")
-                        .HasColumnType("float");
-
                     b.Property<double>("MeterStart")
                         .HasColumnType("float");
 
                     b.Property<double?>("MeterStop")
                         .HasColumnType("float");
-
-                    b.Property<decimal>("OperatorCommissionAmount")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("OperatorRevenueTotal")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("OwnerCommissionFixedPerKwh")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("OwnerCommissionPercent")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("OwnerPayoutTotal")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("OwnerSessionFeeAmount")
-                        .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("StartResult")
                         .HasMaxLength(100)
@@ -371,15 +346,6 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<string>("Uid")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
-
-                    b.Property<decimal>("UsageFeeAmount")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<int>("UsageFeeMinutes")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("UserSessionFeeAmount")
-                        .HasColumnType("decimal(18,4)");
 
                     b.HasKey("TransactionId");
 

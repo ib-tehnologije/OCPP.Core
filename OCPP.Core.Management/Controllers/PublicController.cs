@@ -119,6 +119,7 @@ namespace OCPP.Core.Management.Controllers
                 ? chargePoint.ChargePointId
                 : chargePoint.Name;
             model.PricePerKwh = chargePoint.PricePerKwh;
+            model.UserSessionFee = chargePoint.UserSessionFee;
             model.MaxSessionKwh = chargePoint.MaxSessionKwh;
             model.StartUsageFeeAfterMinutes = chargePoint.StartUsageFeeAfterMinutes;
             model.MaxUsageFeeMinutes = chargePoint.MaxUsageFeeMinutes;

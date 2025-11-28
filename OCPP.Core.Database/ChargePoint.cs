@@ -40,10 +40,16 @@ namespace OCPP.Core.Database
         public string ClientCertThumb { get; set; }
         public bool FreeChargingEnabled { get; set; }
         public decimal PricePerKwh { get; set; }
+        public decimal UserSessionFee { get; set; }
+        public decimal OwnerSessionFee { get; set; }
+        public decimal OwnerCommissionPercent { get; set; }
+        public decimal OwnerCommissionFixedPerKwh { get; set; }
         public double MaxSessionKwh { get; set; }
         public int StartUsageFeeAfterMinutes { get; set; }
         public int MaxUsageFeeMinutes { get; set; }
         public decimal ConnectorUsageFeePerMinute { get; set; }
+        public string OwnerName { get; set; }
+        public string OwnerEmail { get; set; }
 
         public virtual ICollection<Transaction> Transactions { get; set; }
     }

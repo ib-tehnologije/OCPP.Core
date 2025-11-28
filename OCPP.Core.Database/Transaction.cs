@@ -38,6 +38,18 @@ namespace OCPP.Core.Database
         public DateTime? StopTime { get; set; }
         public double? MeterStop { get; set; }
         public string StopReason { get; set; }
+        public double EnergyKwh { get; set; }
+        public decimal EnergyCost { get; set; }
+        public int UsageFeeMinutes { get; set; }
+        public decimal UsageFeeAmount { get; set; }
+        public decimal UserSessionFeeAmount { get; set; }
+        public decimal OwnerSessionFeeAmount { get; set; }
+        public decimal OwnerCommissionPercent { get; set; }
+        public decimal OwnerCommissionFixedPerKwh { get; set; }
+        public decimal OperatorCommissionAmount { get; set; }
+        public decimal OperatorRevenueTotal { get; set; }
+        public decimal OwnerPayoutTotal { get; set; }
+        public string Currency { get; set; }
         public virtual ChargePoint ChargePoint { get; set; }
     }
 }

@@ -106,10 +106,16 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
                             newChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
                             newChargePoint.PricePerKwh = cpvm.PricePerKwh;
+                            newChargePoint.UserSessionFee = cpvm.UserSessionFee;
+                            newChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee;
+                            newChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent;
+                            newChargePoint.OwnerCommissionFixedPerKwh = cpvm.OwnerCommissionFixedPerKwh;
                             newChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh;
                             newChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes;
                             newChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes;
                             newChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute;
+                            newChargePoint.OwnerName = cpvm.OwnerName;
+                            newChargePoint.OwnerEmail = cpvm.OwnerEmail;
                             DbContext.ChargePoints.Add(newChargePoint);
                             DbContext.SaveChanges();
                             Logger.LogInformation("ChargePoint: New => charge point saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
@@ -172,10 +178,16 @@ namespace OCPP.Core.Management.Controllers
                             currentChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
                             currentChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
                             currentChargePoint.PricePerKwh = cpvm.PricePerKwh;
+                            currentChargePoint.UserSessionFee = cpvm.UserSessionFee;
+                            currentChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee;
+                            currentChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent;
+                            currentChargePoint.OwnerCommissionFixedPerKwh = cpvm.OwnerCommissionFixedPerKwh;
                             currentChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh;
                             currentChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes;
                             currentChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes;
                             currentChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute;
+                            currentChargePoint.OwnerName = cpvm.OwnerName;
+                            currentChargePoint.OwnerEmail = cpvm.OwnerEmail;
 
                             DbContext.SaveChanges();
                             Logger.LogInformation("ChargePoint: Edit => chargepoint saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
@@ -203,10 +215,16 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.ClientCertThumb = currentChargePoint.ClientCertThumb;
                         cpvm.FreeChargingEnabled = currentChargePoint.FreeChargingEnabled;
                         cpvm.PricePerKwh = currentChargePoint.PricePerKwh;
+                        cpvm.UserSessionFee = currentChargePoint.UserSessionFee;
+                        cpvm.OwnerSessionFee = currentChargePoint.OwnerSessionFee;
+                        cpvm.OwnerCommissionPercent = currentChargePoint.OwnerCommissionPercent;
+                        cpvm.OwnerCommissionFixedPerKwh = currentChargePoint.OwnerCommissionFixedPerKwh;
                         cpvm.MaxSessionKwh = currentChargePoint.MaxSessionKwh;
                         cpvm.StartUsageFeeAfterMinutes = currentChargePoint.StartUsageFeeAfterMinutes;
                         cpvm.MaxUsageFeeMinutes = currentChargePoint.MaxUsageFeeMinutes;
                         cpvm.ConnectorUsageFeePerMinute = currentChargePoint.ConnectorUsageFeePerMinute;
+                        cpvm.OwnerName = currentChargePoint.OwnerName;
+                        cpvm.OwnerEmail = currentChargePoint.OwnerEmail;
                     }
 
                     string viewName = (!string.IsNullOrEmpty(cpvm.ChargePointId) || Id == "@") ? "ChargePointDetail" : "ChargePointList";

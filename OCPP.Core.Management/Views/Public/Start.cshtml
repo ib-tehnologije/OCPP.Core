@@ -215,6 +215,13 @@
                             <div class="info-value">@Model.PricePerKwh.ToString("0.##") €</div>
                         </div>
                     }
+                    @if (Model.UserSessionFee > 0)
+                    {
+                        <div class="info-tile">
+                            <div class="info-label">Session fee</div>
+                            <div class="info-value">@Model.UserSessionFee.ToString("0.##") €</div>
+                        </div>
+                    }
                     @if (Model.MaxSessionKwh > 0)
                     {
                         <div class="info-tile">

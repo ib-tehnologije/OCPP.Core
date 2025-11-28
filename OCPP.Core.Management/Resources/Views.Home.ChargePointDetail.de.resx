@@ -207,8 +207,20 @@
   <data name="PricePerKwhLabel" xml:space="preserve">
     <value>Preis pro kWh</value>
   </data>
+  <data name="UserSessionFeeLabel" xml:space="preserve">
+    <value>Sitzungsgebühr Nutzer (€)</value>
+  </data>
+  <data name="OwnerSessionFeeLabel" xml:space="preserve">
+    <value>Sitzungsgebühr Betreiber (€)</value>
+  </data>
   <data name="MaxSessionKwhLabel" xml:space="preserve">
     <value>Maximale kWh pro Ladevorgang</value>
+  </data>
+  <data name="OwnerCommissionPercentLabel" xml:space="preserve">
+    <value>Betreiberprovision (%)</value>
+  </data>
+  <data name="OwnerCommissionFixedPerKwhLabel" xml:space="preserve">
+    <value>Betreiberprovision (€/kWh)</value>
   </data>
   <data name="StartUsageFeeAfterMinutesLabel" xml:space="preserve">
     <value>Nutzungsgebühr ab (Minuten)</value>
@@ -218,5 +230,11 @@
   </data>
   <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
     <value>Steckernutzungsgebühr (€ / Min)</value>
+  </data>
+  <data name="OwnerNameLabel" xml:space="preserve">
+    <value>Betreibername</value>
+  </data>
+  <data name="OwnerEmailLabel" xml:space="preserve">
+    <value>Betreiber-E-Mail</value>
   </data>
 </root>

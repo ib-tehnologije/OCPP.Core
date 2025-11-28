@@ -31,6 +31,10 @@ namespace OCPP.Core.Database
         public string ChargeTagId { get; set; }
         public double MaxEnergyKwh { get; set; }
         public decimal PricePerKwh { get; set; }
+        public decimal UserSessionFee { get; set; }
+        public decimal OwnerSessionFee { get; set; }
+        public decimal OwnerCommissionPercent { get; set; }
+        public decimal OwnerCommissionFixedPerKwh { get; set; }
         public long MaxAmountCents { get; set; }
         public decimal UsageFeePerMinute { get; set; }
         public int StartUsageFeeAfterMinutes { get; set; }

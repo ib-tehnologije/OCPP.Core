@@ -207,8 +207,20 @@
   <data name="PricePerKwhLabel" xml:space="preserve">
     <value>Price per kWh</value>
   </data>
+  <data name="UserSessionFeeLabel" xml:space="preserve">
+    <value>User session fee (€)</value>
+  </data>
+  <data name="OwnerSessionFeeLabel" xml:space="preserve">
+    <value>Owner session fee (€)</value>
+  </data>
   <data name="MaxSessionKwhLabel" xml:space="preserve">
     <value>Maximum kWh per session</value>
+  </data>
+  <data name="OwnerCommissionPercentLabel" xml:space="preserve">
+    <value>Owner commission (%)</value>
+  </data>
+  <data name="OwnerCommissionFixedPerKwhLabel" xml:space="preserve">
+    <value>Owner commission (€/kWh)</value>
   </data>
   <data name="StartUsageFeeAfterMinutesLabel" xml:space="preserve">
     <value>Start connector usage fee after (minutes)</value>
@@ -218,5 +230,11 @@
   </data>
   <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
     <value>Connector usage fee (€ / min)</value>
+  </data>
+  <data name="OwnerNameLabel" xml:space="preserve">
+    <value>Owner name</value>
+  </data>
+  <data name="OwnerEmailLabel" xml:space="preserve">
+    <value>Owner email</value>
   </data>
 </root>

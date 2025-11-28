@@ -62,6 +62,18 @@ namespace OCPP.Core.Management.Models
         [Range(0, 10000)]
         public decimal PricePerKwh { get; set; }
 
+        [Range(0, 10000)]
+        public decimal UserSessionFee { get; set; }
+
+        [Range(0, 10000)]
+        public decimal OwnerSessionFee { get; set; }
+
+        [Range(0, 100)]
+        public decimal OwnerCommissionPercent { get; set; }
+
+        [Range(0, 10000)]
+        public decimal OwnerCommissionFixedPerKwh { get; set; }
+
         [Range(0, 100000)]
         public int StartUsageFeeAfterMinutes { get; set; }
 
@@ -70,5 +82,11 @@ namespace OCPP.Core.Management.Models
 
         [Range(0, 10000)]
         public decimal ConnectorUsageFeePerMinute { get; set; }
+
+        [StringLength(200)]
+        public string OwnerName { get; set; }
+
+        [StringLength(200)]
+        public string OwnerEmail { get; set; }
     }
 }
