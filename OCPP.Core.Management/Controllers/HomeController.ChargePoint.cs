@@ -95,6 +95,11 @@ namespace OCPP.Core.Management.Controllers
 
                         if (string.IsNullOrEmpty(errorMsg))
                         {
+                            errorMsg = ValidatePricing(cpvm);
+                        }
+
+                        if (string.IsNullOrEmpty(errorMsg))
+                        {
                             // Save tag in DB
                             ChargePoint newChargePoint = new ChargePoint();
                             newChargePoint.ChargePointId = cpvm.ChargePointId;
@@ -105,15 +110,15 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.Password = cpvm.Password;
                             newChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
                             newChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
-                            newChargePoint.PricePerKwh = cpvm.PricePerKwh;
-                            newChargePoint.UserSessionFee = cpvm.UserSessionFee;
-                            newChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee;
-                            newChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent;
-                            newChargePoint.OwnerCommissionFixedPerKwh = cpvm.OwnerCommissionFixedPerKwh;
-                            newChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh;
-                            newChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes;
-                            newChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes;
-                            newChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute;
+                            newChargePoint.PricePerKwh = cpvm.PricePerKwh ?? 0m;
+                            newChargePoint.UserSessionFee = cpvm.UserSessionFee ?? 0m;
+                            newChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee ?? 0m;
+                            newChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent ?? 0m;
+                            newChargePoint.OwnerCommissionFixedPerKwh = cpvm.OwnerCommissionFixedPerKwh ?? 0m;
+                            newChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh ?? 0d;
+                            newChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes ?? 0;
+                            newChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
+                            newChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
                             newChargePoint.OwnerName = cpvm.OwnerName;
                             newChargePoint.OwnerEmail = cpvm.OwnerEmail;
                             DbContext.ChargePoints.Add(newChargePoint);
@@ -168,30 +173,38 @@ namespace OCPP.Core.Management.Controllers
                         }
                         else
                         {
-                            // Save existing charge point
-                            Logger.LogTrace("ChargePoint: Saving charge point '{0}'", Id);
-                            currentChargePoint.Name = cpvm.Name;
-                            currentChargePoint.Comment = cpvm.Comment;
-                            currentChargePoint.Description = cpvm.Description;
-                            currentChargePoint.Username = cpvm.Username;
-                            currentChargePoint.Password = cpvm.Password;
-                            currentChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
-                            currentChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
-                            currentChargePoint.PricePerKwh = cpvm.PricePerKwh;
-                            currentChargePoint.UserSessionFee = cpvm.UserSessionFee;
-                            currentChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee;
-                            currentChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent;
-                            currentChargePoint.OwnerCommissionFixedPerKwh = cpvm.OwnerCommissionFixedPerKwh;
-                            currentChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh;
-                            currentChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes;
-                            currentChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes;
-                            currentChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute;
-                            currentChargePoint.OwnerName = cpvm.OwnerName;
-                            currentChargePoint.OwnerEmail = cpvm.OwnerEmail;
-
-                            DbContext.SaveChanges();
-                            Logger.LogInformation("ChargePoint: Edit => chargepoint saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
+                            errorMsg = ValidatePricing(cpvm);
                         }
+
+                        if (!string.IsNullOrEmpty(errorMsg))
+                        {
+                            ViewBag.ErrorMsg = errorMsg;
+                            return View("ChargePointDetail", cpvm);
+                        }
+
+                        // Save existing charge point
+                        Logger.LogTrace("ChargePoint: Saving charge point '{0}'", Id);
+                        currentChargePoint.Name = cpvm.Name;
+                        currentChargePoint.Comment = cpvm.Comment;
+                        currentChargePoint.Description = cpvm.Description;
+                        currentChargePoint.Username = cpvm.Username;
+                        currentChargePoint.Password = cpvm.Password;
+                        currentChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
+                        currentChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
+                        currentChargePoint.PricePerKwh = cpvm.PricePerKwh ?? 0m;
+                        currentChargePoint.UserSessionFee = cpvm.UserSessionFee ?? 0m;
+                        currentChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee ?? 0m;
+                        currentChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent ?? 0m;
+                        currentChargePoint.OwnerCommissionFixedPerKwh = cpvm.OwnerCommissionFixedPerKwh ?? 0m;
+                        currentChargePoint.MaxSessionKwh = cpvm.MaxSessionKwh ?? 0d;
+                        currentChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes ?? 0;
+                        currentChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
+                        currentChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
+                        currentChargePoint.OwnerName = cpvm.OwnerName;
+                        currentChargePoint.OwnerEmail = cpvm.OwnerEmail;
+
+                        DbContext.SaveChanges();
+                        Logger.LogInformation("ChargePoint: Edit => chargepoint saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
                     }
 
                     return RedirectToAction("ChargePoint", new { Id = "" });
@@ -237,6 +250,33 @@ namespace OCPP.Core.Management.Controllers
                 TempData["ErrMessage"] = exp.Message;
                 return RedirectToAction("Error", new { Id = "" });
             }
+        }
+
+        private string ValidatePricing(ChargePointViewModel cpvm)
+        {
+            if (cpvm == null) return "Invalid charge point data.";
+            if (cpvm.FreeChargingEnabled) return null;
+
+            decimal pricePerKwh = cpvm.PricePerKwh ?? 0m;
+            decimal usageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
+            decimal sessionFee = cpvm.UserSessionFee ?? 0m;
+
+            bool hasEnergyPrice = pricePerKwh > 0m;
+            bool hasUsageFee = usageFeePerMinute > 0m;
+            bool hasSessionFee = sessionFee > 0m;
+
+            if (!hasEnergyPrice && !hasUsageFee && !hasSessionFee)
+            {
+                return "Set a price per kWh, a usage fee, or a session fee (or enable free charging).";
+            }
+
+            double maxSessionKwh = cpvm.MaxSessionKwh ?? 0d;
+            if (hasEnergyPrice && maxSessionKwh <= 0)
+            {
+                return "When Price per kWh is set, Max session kWh must be greater than zero to calculate the payment cap.";
+            }
+
+            return null;
         }
     }
 }

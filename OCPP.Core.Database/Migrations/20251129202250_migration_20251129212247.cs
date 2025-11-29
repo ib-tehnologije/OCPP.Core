@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace OCPP.Core.Database.Migrations
 {
     /// <inheritdoc />
-    public partial class Initial : Migration
+    public partial class migration_20251129212247 : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -21,7 +21,14 @@ namespace OCPP.Core.Database.Migrations
                     ChargeTagId = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
                     MaxEnergyKwh = table.Column<double>(type: "float", nullable: false),
                     PricePerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    UserSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionPercent = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionFixedPerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
                     MaxAmountCents = table.Column<long>(type: "bigint", nullable: false),
+                    UsageFeePerMinute = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    StartUsageFeeAfterMinutes = table.Column<int>(type: "int", nullable: false),
+                    MaxUsageFeeMinutes = table.Column<int>(type: "int", nullable: false),
                     Currency = table.Column<string>(type: "nvarchar(10)", maxLength: 10, nullable: false),
                     StripeCheckoutSessionId = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
                     StripePaymentIntentId = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
@@ -47,9 +54,22 @@ namespace OCPP.Core.Database.Migrations
                     ChargePointId = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
                     Comment = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
+                    Description = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
                     Username = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
                     Password = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
-                    ClientCertThumb = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true)
+                    ClientCertThumb = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    FreeChargingEnabled = table.Column<bool>(type: "bit", nullable: false),
+                    PricePerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    UserSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionPercent = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionFixedPerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    MaxSessionKwh = table.Column<double>(type: "float", nullable: false),
+                    StartUsageFeeAfterMinutes = table.Column<int>(type: "int", nullable: false),
+                    MaxUsageFeeMinutes = table.Column<int>(type: "int", nullable: false),
+                    ConnectorUsageFeePerMinute = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
+                    OwnerEmail = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -128,7 +148,19 @@ namespace OCPP.Core.Database.Migrations
                     StopTagId = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
                     StopTime = table.Column<DateTime>(type: "datetime2", nullable: true),
                     MeterStop = table.Column<double>(type: "float", nullable: true),
-                    StopReason = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true)
+                    StopReason = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    EnergyKwh = table.Column<double>(type: "float", nullable: false),
+                    EnergyCost = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    UsageFeeMinutes = table.Column<int>(type: "int", nullable: false),
+                    UsageFeeAmount = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    UserSessionFeeAmount = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerSessionFeeAmount = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionPercent = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionFixedPerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OperatorCommissionAmount = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OperatorRevenueTotal = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerPayoutTotal = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    Currency = table.Column<string>(type: "nvarchar(10)", maxLength: 10, nullable: true)
                 },
                 constraints: table =>
                 {

@@ -57,31 +57,31 @@ namespace OCPP.Core.Management.Models
         public bool FreeChargingEnabled { get; set; }
 
         [Range(0, 100000)]
-        public double MaxSessionKwh { get; set; }
+        public double? MaxSessionKwh { get; set; }
 
         [Range(0, 10000)]
-        public decimal PricePerKwh { get; set; }
+        public decimal? PricePerKwh { get; set; }
 
         [Range(0, 10000)]
-        public decimal UserSessionFee { get; set; }
+        public decimal? UserSessionFee { get; set; }
 
         [Range(0, 10000)]
-        public decimal OwnerSessionFee { get; set; }
+        public decimal? OwnerSessionFee { get; set; }
 
         [Range(0, 100)]
-        public decimal OwnerCommissionPercent { get; set; }
+        public decimal? OwnerCommissionPercent { get; set; }
 
         [Range(0, 10000)]
-        public decimal OwnerCommissionFixedPerKwh { get; set; }
+        public decimal? OwnerCommissionFixedPerKwh { get; set; }
 
         [Range(0, 100000)]
-        public int StartUsageFeeAfterMinutes { get; set; }
+        public int? StartUsageFeeAfterMinutes { get; set; }
 
         [Range(0, 100000)]
-        public int MaxUsageFeeMinutes { get; set; }
+        public int? MaxUsageFeeMinutes { get; set; }
 
         [Range(0, 10000)]
-        public decimal ConnectorUsageFeePerMinute { get; set; }
+        public decimal? ConnectorUsageFeePerMinute { get; set; }
 
         [StringLength(200)]
         public string OwnerName { get; set; }
