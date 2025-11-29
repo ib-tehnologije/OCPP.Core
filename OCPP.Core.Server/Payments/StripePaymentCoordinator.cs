@@ -14,7 +14,7 @@ using Stripe.Checkout;
 
 namespace OCPP.Core.Server.Payments
 {
-    public class StripePaymentCoordinator : IPaymentCoordinator
+    public partial class StripePaymentCoordinator : IPaymentCoordinator
     {
         private readonly StripeOptions _options;
         private readonly ILogger<StripePaymentCoordinator> _logger;
