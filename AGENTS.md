@@ -21,3 +21,6 @@ Commit messages stay short, capitalized, and action-oriented (e.g., `Start trans
 
 ## Configuration & Security Tips
 Do not commit real certificates or secrets; `localhost.pfx` and `appsettings.Development.json` are development placeholders. Store SQL Server passwords, API keys, and similar values in user secrets or environment variables as outlined in `Installation.md`. When sharing configuration examples, redact the secrets but preserve the shape of the connection strings for clarity.
+
+## Migration Policy
+- Do not generate or commit EF Core migration files manually. Schema changes must be handled through the agreed automation or by the maintainers; leave existing migrations untouched.

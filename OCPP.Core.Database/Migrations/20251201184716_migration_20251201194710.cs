@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace OCPP.Core.Database.Migrations
 {
     /// <inheritdoc />
-    public partial class migration_20251129212247 : Migration
+    public partial class migration_20251201194710 : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -48,35 +48,6 @@ namespace OCPP.Core.Database.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "ChargePoint",
-                columns: table => new
-                {
-                    ChargePointId = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
-                    Comment = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
-                    Description = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
-                    Username = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
-                    Password = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
-                    ClientCertThumb = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
-                    FreeChargingEnabled = table.Column<bool>(type: "bit", nullable: false),
-                    PricePerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    UserSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    OwnerSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    OwnerCommissionPercent = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    OwnerCommissionFixedPerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    MaxSessionKwh = table.Column<double>(type: "float", nullable: false),
-                    StartUsageFeeAfterMinutes = table.Column<int>(type: "int", nullable: false),
-                    MaxUsageFeeMinutes = table.Column<int>(type: "int", nullable: false),
-                    ConnectorUsageFeePerMinute = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
-                    OwnerName = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
-                    OwnerEmail = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ChargePoint", x => x.ChargePointId);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "ChargeTags",
                 columns: table => new
                 {
@@ -107,6 +78,54 @@ namespace OCPP.Core.Database.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_MessageLog", x => x.LogId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Owner",
+                columns: table => new
+                {
+                    OwnerId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                    Email = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Owner", x => x.OwnerId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ChargePoint",
+                columns: table => new
+                {
+                    ChargePointId = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    Comment = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
+                    Description = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    Username = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
+                    Password = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
+                    ClientCertThumb = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    FreeChargingEnabled = table.Column<bool>(type: "bit", nullable: false),
+                    PricePerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    UserSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerSessionFee = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionPercent = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerCommissionFixedPerKwh = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    MaxSessionKwh = table.Column<double>(type: "float", nullable: false),
+                    StartUsageFeeAfterMinutes = table.Column<int>(type: "int", nullable: false),
+                    MaxUsageFeeMinutes = table.Column<int>(type: "int", nullable: false),
+                    ConnectorUsageFeePerMinute = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                    OwnerId = table.Column<int>(type: "int", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ChargePoint", x => x.ChargePointId);
+                    table.ForeignKey(
+                        name: "FK_ChargePoint_Owner_OwnerId",
+                        column: x => x.OwnerId,
+                        principalTable: "Owner",
+                        principalColumn: "OwnerId",
+                        onDelete: ReferentialAction.SetNull);
                 });
 
             migrationBuilder.CreateTable(
@@ -189,6 +208,11 @@ namespace OCPP.Core.Database.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_ChargePoint_OwnerId",
+                table: "ChargePoint",
+                column: "OwnerId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_MessageLog_ChargePointId",
                 table: "MessageLog",
                 column: "LogTime");
@@ -219,6 +243,9 @@ namespace OCPP.Core.Database.Migrations
 
             migrationBuilder.DropTable(
                 name: "ChargePoint");
+
+            migrationBuilder.DropTable(
+                name: "Owner");
         }
     }
 }

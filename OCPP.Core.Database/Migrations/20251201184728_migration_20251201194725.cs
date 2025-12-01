@@ -5,7 +5,7 @@
 namespace OCPP.Core.Database.Migrations
 {
     /// <inheritdoc />
-    public partial class migration_20251201193550 : Migration
+    public partial class migration_20251201194725 : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

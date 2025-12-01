@@ -12,8 +12,8 @@ using OCPP.Core.Database;
 namespace OCPP.Core.Database.Migrations
 {
     [DbContext(typeof(OCPPCoreContext))]
-    [Migration("20251201183555_migration_20251201193550")]
-    partial class migration_20251201193550
+    [Migration("20251201184716_migration_20251201194710")]
+    partial class migration_20251201194710
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
