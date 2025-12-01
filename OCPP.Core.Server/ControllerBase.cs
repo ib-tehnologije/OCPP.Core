@@ -200,6 +200,7 @@ namespace OCPP.Core.Server
                 isNew = true; // append later when all values are correct
             }
 
+            double? previousChargeKW = ocs?.ChargeRateKW;
             ocs.ChargeRateKW = currentChargeKW;
             if (meterKWH >= 0 && !currentChargeKW.HasValue &&
                 ocs.MeterKWH.HasValue && ocs.MeterKWH <= meterKWH &&
@@ -220,6 +221,13 @@ namespace OCPP.Core.Server
             ocs.MeterKWH = meterKWH;
             ocs.MeterValueDate = meterTime;
             ocs.SoC = stateOfCharge;
+
+            if (previousChargeKW.HasValue && previousChargeKW.Value > 0.1 &&
+                ocs.ChargeRateKW.HasValue && ocs.ChargeRateKW.Value <= 0.1)
+            {
+                // Charging just dropped to ~0kW => mark charging end
+                MarkChargingEnded(connectorId, meterTime);
+            }
 
             if (isNew)
             {
@@ -263,6 +271,32 @@ namespace OCPP.Core.Server
             get
             {
                 return DateTime.UtcNow.Date.AddYears(1);
+            }
+        }
+
+        protected void MarkChargingEnded(int connectorId, DateTimeOffset? timestamp)
+        {
+            try
+            {
+                var tx = DbContext.Transactions
+                    .Where(t => t.ChargePointId == ChargePointStatus.Id
+                        && t.ConnectorId == connectorId
+                        && !t.StopTime.HasValue
+                        && !t.ChargingEndedAtUtc.HasValue)
+                    .OrderByDescending(t => t.TransactionId)
+                    .FirstOrDefault();
+
+                if (tx != null)
+                {
+                    tx.ChargingEndedAtUtc = (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime;
+                    DbContext.SaveChanges();
+                    Logger.LogInformation("MarkChargingEnded => ChargePoint={0} Connector={1} Tx={2} Time={3}",
+                        ChargePointStatus?.Id, connectorId, tx.TransactionId, tx.ChargingEndedAtUtc);
+                }
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp, "MarkChargingEnded => Error setting charging end for ChargePoint={0} Connector={1}", ChargePointStatus?.Id, connectorId);
             }
         }
     }

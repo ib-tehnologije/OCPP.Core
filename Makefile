@@ -23,8 +23,8 @@ run-management: restore
 
 # Scaffold a new migration with a generated timestamped name
 migrate: restore
-	$(DOTNET) ef migrations add $(MIGRATION_NAME) --project $(DB_PROJECT) --startup-project $(STARTUP) --context $(DB_CONTEXT)
-	$(DOTNET) ef database update --project $(DB_PROJECT) --startup-project $(STARTUP) --context $(DB_CONTEXT)
+	$(DOTNET) ef migrations add $(MIGRATION_NAME) --project $(DB_PROJECT) --startup-project $(STARTUP) --context $(DB_CONTEXT) --verbose
+	$(DOTNET) ef database update --project $(DB_PROJECT) --startup-project $(STARTUP) --context $(DB_CONTEXT) --verbose
 
 # Update database schema to latest migration
 dbupdate: restore

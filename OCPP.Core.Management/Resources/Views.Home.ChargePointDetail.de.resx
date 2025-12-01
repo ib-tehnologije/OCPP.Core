@@ -231,6 +231,12 @@
   <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
     <value>Steckernutzungsgebühr (€ / Min)</value>
   </data>
+  <data name="UsageFeeAfterChargingEndsLabel" xml:space="preserve">
+    <value>Nutzungsgebühr nach Ladeende berechnen</value>
+  </data>
+  <data name="UsageFeeAfterChargingEndsHint" xml:space="preserve">
+    <value>Idle-Gebühr ab Ende der Energieabgabe berechnen; sonst ab Sitzungsstart.</value>
+  </data>
   <data name="OwnerLabel" xml:space="preserve">
     <value>Eigentümer</value>
   </data>

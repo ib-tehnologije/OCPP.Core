@@ -66,6 +66,7 @@ namespace OCPP.Core.Server.Payments
             int startUsageFeeAfterMinutes = Math.Max(0, chargePoint.StartUsageFeeAfterMinutes);
             int maxUsageFeeMinutes = Math.Max(0, chargePoint.MaxUsageFeeMinutes);
             decimal usageFeePerMinute = chargePoint.ConnectorUsageFeePerMinute;
+            int usageFeeAnchorMinutes = chargePoint.UsageFeeAfterChargingEnds ? 1 : 0;
 
             if ((maxEnergyKwh <= 0 && usageFeePerMinute <= 0 && userSessionFee <= 0) ||
                 (pricePerKwh <= 0 && usageFeePerMinute <= 0 && userSessionFee <= 0))
@@ -105,6 +106,7 @@ namespace OCPP.Core.Server.Payments
                 UsageFeePerMinute = usageFeePerMinute,
                 StartUsageFeeAfterMinutes = startUsageFeeAfterMinutes,
                 MaxUsageFeeMinutes = maxUsageFeeMinutes,
+                UsageFeeAnchorMinutes = usageFeeAnchorMinutes,
                 MaxAmountCents = maxTotalCents,
                 Currency = string.IsNullOrWhiteSpace(_options.Currency) ? "eur" : _options.Currency.ToLowerInvariant(),
                 Status = PaymentReservationStatus.Pending,
@@ -377,16 +379,35 @@ namespace OCPP.Core.Server.Payments
             var usageFeeCents = 0L;
             var usageFeeMinutes = 0;
 
+            bool usageAfterChargingEnds = reservation.UsageFeeAnchorMinutes == 1;
+
             if (reservation.UsageFeePerMinute > 0 && transaction.StartTime != default)
             {
                 var stopTime = transaction.StopTime ?? DateTime.UtcNow;
-                var totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTime - transaction.StartTime).TotalMinutes));
-                usageFeeMinutes = Math.Min(
-                    Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
-                    reservation.MaxUsageFeeMinutes);
-                if (usageFeeMinutes > 0)
+                DateTime? anchorStart = transaction.StartTime;
+
+                if (usageAfterChargingEnds)
                 {
-                    usageFeeCents = CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute);
+                    if (transaction.ChargingEndedAtUtc.HasValue)
+                    {
+                        anchorStart = transaction.ChargingEndedAtUtc.Value;
+                    }
+                    else
+                    {
+                        anchorStart = null; // no anchor => do not charge idle fee
+                    }
+                }
+
+                if (anchorStart.HasValue && stopTime > anchorStart.Value)
+                {
+                    var totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTime - anchorStart.Value).TotalMinutes));
+                    usageFeeMinutes = Math.Min(
+                        Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
+                        reservation.MaxUsageFeeMinutes);
+                    if (usageFeeMinutes > 0)
+                    {
+                        usageFeeCents = CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute);
+                    }
                 }
             }
 
@@ -630,11 +651,14 @@ namespace OCPP.Core.Server.Payments
             decimal operatorRevenueTotal = operatorCommission + ownerSessionFee;
             decimal ownerPayout = Math.Max(0m, gross - operatorRevenueTotal);
 
+            bool usageAfterChargingEnds = reservation?.UsageFeeAnchorMinutes == 1;
             transaction.EnergyKwh = energyKwh;
             transaction.EnergyCost = energyCost;
             transaction.UsageFeeMinutes = usageFeeMinutes;
             transaction.UsageFeeAmount = usageFee;
             transaction.UserSessionFeeAmount = userSessionFee;
+            transaction.IdleUsageFeeMinutes = usageAfterChargingEnds ? usageFeeMinutes : 0;
+            transaction.IdleUsageFeeAmount = usageAfterChargingEnds ? usageFee : 0;
             transaction.OwnerSessionFeeAmount = ownerSessionFee;
             transaction.OwnerCommissionPercent = reservation.OwnerCommissionPercent;
             transaction.OwnerCommissionFixedPerKwh = reservation.OwnerCommissionFixedPerKwh;

@@ -83,6 +83,8 @@ namespace OCPP.Core.Management.Models
         [Range(0, 10000)]
         public decimal? ConnectorUsageFeePerMinute { get; set; }
 
+        public bool UsageFeeAfterChargingEnds { get; set; }
+
         public int? OwnerId { get; set; }
 
         public List<Owner> Owners { get; set; } = new List<Owner>();

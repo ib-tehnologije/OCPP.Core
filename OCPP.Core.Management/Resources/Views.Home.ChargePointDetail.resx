@@ -231,6 +231,12 @@
   <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
     <value>Connector usage fee (€ / min)</value>
   </data>
+  <data name="UsageFeeAfterChargingEndsLabel" xml:space="preserve">
+    <value>Charge usage fee after charging ends</value>
+  </data>
+  <data name="UsageFeeAfterChargingEndsHint" xml:space="preserve">
+    <value>Use idle fee starting when energy delivery stops; otherwise count from session start.</value>
+  </data>
   <data name="OwnerLabel" xml:space="preserve">
     <value>Owner</value>
   </data>

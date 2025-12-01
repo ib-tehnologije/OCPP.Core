@@ -80,6 +80,13 @@ namespace OCPP.Core.Server
                         errorCode = ErrorCodes.InternalError;
                     }
 
+                    if (statusNotificationRequest.Status == StatusNotificationRequestStatus.Finishing ||
+                        statusNotificationRequest.Status == StatusNotificationRequestStatus.SuspendedEV ||
+                        statusNotificationRequest.Status == StatusNotificationRequestStatus.SuspendedEVSE)
+                    {
+                        MarkChargingEnded(connectorId, statusNotificationRequest.Timestamp);
+                    }
+
                     if (ChargePointStatus.OnlineConnectors.ContainsKey(connectorId))
                     {
                         OnlineConnectorStatus ocs = ChargePointStatus.OnlineConnectors[connectorId];

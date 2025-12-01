@@ -133,6 +133,7 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes ?? 0;
                             newChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
                             newChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
+                            newChargePoint.UsageFeeAfterChargingEnds = cpvm.UsageFeeAfterChargingEnds;
                             newChargePoint.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
                             DbContext.ChargePoints.Add(newChargePoint);
                             DbContext.SaveChanges();
@@ -219,6 +220,7 @@ namespace OCPP.Core.Management.Controllers
                         currentChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes ?? 0;
                         currentChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
                         currentChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
+                        currentChargePoint.UsageFeeAfterChargingEnds = cpvm.UsageFeeAfterChargingEnds;
                         currentChargePoint.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
 
                         DbContext.SaveChanges();
@@ -255,6 +257,7 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.StartUsageFeeAfterMinutes = currentChargePoint.StartUsageFeeAfterMinutes;
                         cpvm.MaxUsageFeeMinutes = currentChargePoint.MaxUsageFeeMinutes;
                         cpvm.ConnectorUsageFeePerMinute = currentChargePoint.ConnectorUsageFeePerMinute;
+                        cpvm.UsageFeeAfterChargingEnds = currentChargePoint.UsageFeeAfterChargingEnds;
                         cpvm.OwnerId = NormalizeOwnerId(currentChargePoint.OwnerId);
                         cpvm.Owners = owners;
                         cpvm.CurrentId = Id;

@@ -73,6 +73,8 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.ConnectorUsageFeePerMinute).HasColumnType("decimal(18,4)");
 
+                entity.Property(e => e.UsageFeeAfterChargingEnds).HasColumnType("bit");
+
                 entity.HasOne(d => d.Owner)
                     .WithMany(p => p.ChargePoints)
                     .HasForeignKey(d => d.OwnerId)
@@ -166,6 +168,7 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.OperatorRevenueTotal).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.OwnerPayoutTotal).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.UsageFeeAmount).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.IdleUsageFeeAmount).HasColumnType("decimal(18,4)");
 
                 entity.HasOne(d => d.ChargePoint)
                     .WithMany(p => p.Transactions)
@@ -217,6 +220,7 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.UsageFeePerMinute)
                     .HasColumnType("decimal(18,4)");
+                entity.Property(e => e.UsageFeeAnchorMinutes);
 
                 entity.Property(e => e.LastError)
                     .HasMaxLength(500);

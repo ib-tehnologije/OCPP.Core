@@ -39,6 +39,7 @@ namespace OCPP.Core.Database
         public decimal UsageFeePerMinute { get; set; }
         public int StartUsageFeeAfterMinutes { get; set; }
         public int MaxUsageFeeMinutes { get; set; }
+        public int UsageFeeAnchorMinutes { get; set; } // 0 = from session start, 1 = from charging end
         public string Currency { get; set; }
         public string StripeCheckoutSessionId { get; set; }
         public string StripePaymentIntentId { get; set; }

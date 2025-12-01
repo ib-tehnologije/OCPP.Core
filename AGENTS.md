@@ -24,3 +24,7 @@ Do not commit real certificates or secrets; `localhost.pfx` and `appsettings.Dev
 
 ## Migration Policy
 - Do not generate or commit EF Core migration files manually. Schema changes must be handled through the agreed automation or by the maintainers; leave existing migrations untouched.
+- The models can be changed, but tell the user to run the actual migrations for you instead.
+
+## Other
+- Never run dotnet commands, they do not work in LLM context
