@@ -1,0 +1,108 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Title" xml:space="preserve">
+    <value>Owner report</value>
+  </data>
+  <data name="StartDate" xml:space="preserve">
+    <value>Start date</value>
+  </data>
+  <data name="StopDate" xml:space="preserve">
+    <value>End date</value>
+  </data>
+  <data name="Refresh" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="DownloadCsv" xml:space="preserve">
+    <value>Download CSV</value>
+  </data>
+  <data name="DownloadXlsx" xml:space="preserve">
+    <value>Download XLSX</value>
+  </data>
+  <data name="SendEmails" xml:space="preserve">
+    <value>Send to owners</value>
+  </data>
+  <data name="OwnerName" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="OwnerEmail" xml:space="preserve">
+    <value>Owner email</value>
+  </data>
+  <data name="EnergyKwh" xml:space="preserve">
+    <value>Energy (kWh)</value>
+  </data>
+  <data name="EnergyRevenue" xml:space="preserve">
+    <value>Energy revenue</value>
+  </data>
+  <data name="UsageFees" xml:space="preserve">
+    <value>Idle/usage fees</value>
+  </data>
+  <data name="UserSessionFees" xml:space="preserve">
+    <value>User session fees</value>
+  </data>
+  <data name="OwnerSessionFees" xml:space="preserve">
+    <value>Owner session fees</value>
+  </data>
+  <data name="GrossTotal" xml:space="preserve">
+    <value>Gross</value>
+  </data>
+  <data name="OperatorCommission" xml:space="preserve">
+    <value>Operator commission</value>
+  </data>
+  <data name="OperatorRevenue" xml:space="preserve">
+    <value>Operator revenue</value>
+  </data>
+  <data name="OwnerPayout" xml:space="preserve">
+    <value>Owner payout</value>
+  </data>
+  <data name="SessionCount" xml:space="preserve">
+    <value>Sessions</value>
+  </data>
+  <data name="SessionDetails" xml:space="preserve">
+    <value>Session details</value>
+  </data>
+  <data name="ChargePoint" xml:space="preserve">
+    <value>Charge point</value>
+  </data>
+  <data name="Connector" xml:space="preserve">
+    <value>Connector</value>
+  </data>
+  <data name="OwnerReportSummary" xml:space="preserve">
+    <value>Summary</value>
+  </data>
+  <data name="OwnerReportDetails" xml:space="preserve">
+    <value>Details</value>
+  </data>
+  <data name="OwnerUnassigned" xml:space="preserve">
+    <value>Unassigned owner</value>
+  </data>
+  <data name="EmailDisabled" xml:space="preserve">
+    <value>Email sending is disabled in configuration.</value>
+  </data>
+  <data name="EmailNoRecipients" xml:space="preserve">
+    <value>No owner email addresses found for the selected period.</value>
+  </data>
+  <data name="EmailSendSuccess" xml:space="preserve">
+    <value>Sent {0} owner report email(s).</value>
+  </data>
+  <data name="EmailSendPartial" xml:space="preserve">
+    <value>Sent {0} email(s); {1} failed.</value>
+  </data>
+  <data name="OwnerReportSubject" xml:space="preserve">
+    <value>Owner report {0} - {1}</value>
+  </data>
+  <data name="OwnerReportBody" xml:space="preserve">
+    <value>Hello {0}, your charging report for {1} to {2} is attached.</value>
+  </data>
+</root>

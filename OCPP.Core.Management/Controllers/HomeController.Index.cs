@@ -37,15 +37,18 @@ namespace OCPP.Core.Management.Controllers
     public partial class HomeController : BaseController
     {
         private readonly IStringLocalizer<HomeController> _localizer;
+        private readonly Services.IOwnerReportService _ownerReportService;
 
         public HomeController(
             IUserManager userManager,
             IStringLocalizer<HomeController> localizer,
+            Services.IOwnerReportService ownerReportService,
             ILoggerFactory loggerFactory,
             IConfiguration config,
             OCPPCoreContext dbContext) : base(userManager, loggerFactory, config, dbContext)
         {
             _localizer = localizer;
+            _ownerReportService = ownerReportService;
             Logger = loggerFactory.CreateLogger<HomeController>();
         }
 

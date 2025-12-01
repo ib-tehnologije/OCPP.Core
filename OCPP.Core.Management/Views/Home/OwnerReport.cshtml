@@ -1,0 +1,132 @@
+﻿@using Microsoft.AspNetCore.Mvc.Localization
+@model OwnerReportViewModel
+@inject IViewLocalizer Localizer
+@{
+    ViewData["Title"] = Localizer["Title"];
+    string startVal = Model.StartDate.ToString("yyyy-MM-dd");
+    string stopVal = Model.StopDate.ToString("yyyy-MM-dd");
+}
+<br />
+
+<form method="get" class="form-inline mb-3">
+    <div class="form-group mr-2">
+        <label class="mr-2" for="startDate">@Localizer["StartDate"]</label>
+        <input type="date" class="form-control" id="startDate" name="startDate" value="@startVal" />
+    </div>
+    <div class="form-group mr-2">
+        <label class="mr-2" for="stopDate">@Localizer["StopDate"]</label>
+        <input type="date" class="form-control" id="stopDate" name="stopDate" value="@stopVal" />
+    </div>
+    <button type="submit" class="btn btn-primary mr-2">@Localizer["Refresh"]</button>
+    <a class="btn btn-secondary mr-2" href="~/Home/OwnerReportCsv?startDate=@startVal&stopDate=@stopVal">@Localizer["DownloadCsv"]</a>
+    <a class="btn btn-secondary" href="~/Home/OwnerReportXlsx?startDate=@startVal&stopDate=@stopVal">@Localizer["DownloadXlsx"]</a>
+    <span class="mx-2">&nbsp;</span>
+    @using (Html.BeginForm("SendOwnerReportEmails", "Home", FormMethod.Post))
+    {
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="startDate" value="@startVal" />
+        <input type="hidden" name="stopDate" value="@stopVal" />
+        <button type="submit" class="btn btn-warning">@Localizer["SendEmails"]</button>
+    }
+</form>
+
+@if (!string.IsNullOrEmpty(TempData["InfoMsg"] as string))
+{
+    <div class="alert alert-success">@TempData["InfoMsg"]</div>
+}
+@if (!string.IsNullOrEmpty(TempData["ErrMessage"] as string))
+{
+    <div class="alert alert-danger">@TempData["ErrMessage"]</div>
+}
+
+<div class="table-responsive">
+    <table class="table table-striped table-bordered table-sm">
+        <thead>
+            <tr>
+                <th>@Localizer["OwnerName"]</th>
+                <th>@Localizer["OwnerEmail"]</th>
+                <th class="text-right">@Localizer["EnergyKwh"]</th>
+                <th class="text-right">@Localizer["EnergyRevenue"]</th>
+                <th class="text-right">@Localizer["UsageFees"]</th>
+                <th class="text-right">@Localizer["UserSessionFees"]</th>
+                <th class="text-right">@Localizer["OwnerSessionFees"]</th>
+                <th class="text-right">@Localizer["GrossTotal"]</th>
+                <th class="text-right">@Localizer["OperatorCommission"]</th>
+                <th class="text-right">@Localizer["OperatorRevenue"]</th>
+                <th class="text-right">@Localizer["OwnerPayout"]</th>
+                <th class="text-right">@Localizer["SessionCount"]</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model?.Owners != null)
+            {
+                foreach (var owner in Model.Owners)
+                {
+                    <tr>
+                        <td>@owner.OwnerName</td>
+                        <td>@owner.OwnerEmail</td>
+                        <td class="text-right">@owner.EnergyKwh.ToString("0.###")</td>
+                        <td class="text-right">@owner.EnergyRevenue.ToString("0.0000")</td>
+                        <td class="text-right">@owner.UsageFeeTotal.ToString("0.0000")</td>
+                        <td class="text-right">@owner.UserSessionFeeTotal.ToString("0.0000")</td>
+                        <td class="text-right">@owner.OwnerSessionFeeTotal.ToString("0.0000")</td>
+                        <td class="text-right">@owner.GrossTotal.ToString("0.0000")</td>
+                        <td class="text-right">@owner.OperatorCommissionTotal.ToString("0.0000")</td>
+                        <td class="text-right">@owner.OperatorRevenueTotal.ToString("0.0000")</td>
+                        <td class="text-right">@owner.OwnerPayoutTotal.ToString("0.0000")</td>
+                        <td class="text-right">@owner.SessionCount</td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+<h5>@Localizer["SessionDetails"]</h5>
+<div class="table-responsive">
+    <table class="table table-striped table-bordered table-sm">
+        <thead>
+            <tr>
+                <th>@Localizer["OwnerName"]</th>
+                <th>@Localizer["ChargePoint"]</th>
+                <th>@Localizer["Connector"]</th>
+                <th>@Localizer["StartTime"]</th>
+                <th>@Localizer["StopTime"]</th>
+                <th class="text-right">@Localizer["EnergyKwh"]</th>
+                <th class="text-right">@Localizer["EnergyRevenue"]</th>
+                <th class="text-right">@Localizer["UsageFees"]</th>
+                <th class="text-right">@Localizer["UserSessionFees"]</th>
+                <th class="text-right">@Localizer["OwnerSessionFees"]</th>
+                <th class="text-right">@Localizer["OperatorCommission"]</th>
+                <th class="text-right">@Localizer["OperatorRevenue"]</th>
+                <th class="text-right">@Localizer["OwnerPayout"]</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model?.Owners != null)
+            {
+                foreach (var owner in Model.Owners)
+                {
+                    foreach (var tr in owner.Transactions)
+                    {
+                        <tr>
+                            <td>@owner.OwnerName</td>
+                            <td>@(string.IsNullOrEmpty(tr.ChargePointName) ? tr.ChargePointId : tr.ChargePointName)</td>
+                            <td>@tr.ConnectorId</td>
+                            <td>@tr.StartTime.ToLocalTime()</td>
+                            <td>@tr.StopTime?.ToLocalTime()</td>
+                            <td class="text-right">@tr.EnergyKwh.ToString("0.###")</td>
+                            <td class="text-right">@tr.EnergyRevenue.ToString("0.0000")</td>
+                            <td class="text-right">@tr.UsageFee.ToString("0.0000")</td>
+                            <td class="text-right">@tr.UserSessionFee.ToString("0.0000")</td>
+                            <td class="text-right">@tr.OwnerSessionFee.ToString("0.0000")</td>
+                            <td class="text-right">@tr.OperatorCommission.ToString("0.0000")</td>
+                            <td class="text-right">@tr.OperatorRevenueTotal.ToString("0.0000")</td>
+                            <td class="text-right">@tr.OwnerPayoutTotal.ToString("0.0000")</td>
+                        </tr>
+                    }
+                }
+            }
+        </tbody>
+    </table>
+</div>

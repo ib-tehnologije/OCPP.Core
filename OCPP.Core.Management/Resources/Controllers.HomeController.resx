@@ -195,4 +195,52 @@
   <data name="OwnerInUse" xml:space="preserve">
     <value>Owner is still assigned to one or more charge points and cannot be deleted.</value>
   </data>
+  <data name="OwnerName" xml:space="preserve">
+    <value>Owner</value>
+  </data>
+  <data name="OwnerEmail" xml:space="preserve">
+    <value>Owner email</value>
+  </data>
+  <data name="EnergyKwh" xml:space="preserve">
+    <value>Energy (kWh)</value>
+  </data>
+  <data name="EnergyRevenue" xml:space="preserve">
+    <value>Energy revenue</value>
+  </data>
+  <data name="UsageFees" xml:space="preserve">
+    <value>Idle/usage fees</value>
+  </data>
+  <data name="UserSessionFees" xml:space="preserve">
+    <value>User session fees</value>
+  </data>
+  <data name="OwnerSessionFees" xml:space="preserve">
+    <value>Owner session fees</value>
+  </data>
+  <data name="GrossTotal" xml:space="preserve">
+    <value>Gross</value>
+  </data>
+  <data name="OperatorCommission" xml:space="preserve">
+    <value>Operator commission</value>
+  </data>
+  <data name="OperatorRevenue" xml:space="preserve">
+    <value>Operator revenue</value>
+  </data>
+  <data name="OwnerPayout" xml:space="preserve">
+    <value>Owner payout</value>
+  </data>
+  <data name="SessionCount" xml:space="preserve">
+    <value>Sessions</value>
+  </data>
+  <data name="OwnerReportSummary" xml:space="preserve">
+    <value>Summary</value>
+  </data>
+  <data name="OwnerReportDetails" xml:space="preserve">
+    <value>Details</value>
+  </data>
+  <data name="OwnerUnassigned" xml:space="preserve">
+    <value>Unassigned owner</value>
+  </data>
+  <data name="ChargePoint" xml:space="preserve">
+    <value>Charge point</value>
+  </data>
 </root>

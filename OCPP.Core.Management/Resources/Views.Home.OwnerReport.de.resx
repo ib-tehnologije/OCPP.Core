@@ -1,0 +1,108 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Title" xml:space="preserve">
+    <value>Eigentümer-Report</value>
+  </data>
+  <data name="StartDate" xml:space="preserve">
+    <value>Startdatum</value>
+  </data>
+  <data name="StopDate" xml:space="preserve">
+    <value>Enddatum</value>
+  </data>
+  <data name="Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="DownloadCsv" xml:space="preserve">
+    <value>CSV herunterladen</value>
+  </data>
+  <data name="DownloadXlsx" xml:space="preserve">
+    <value>XLSX herunterladen</value>
+  </data>
+  <data name="SendEmails" xml:space="preserve">
+    <value>E-Mails an Eigentümer senden</value>
+  </data>
+  <data name="OwnerName" xml:space="preserve">
+    <value>Eigentümer</value>
+  </data>
+  <data name="OwnerEmail" xml:space="preserve">
+    <value>E-Mail Eigentümer</value>
+  </data>
+  <data name="EnergyKwh" xml:space="preserve">
+    <value>Energie (kWh)</value>
+  </data>
+  <data name="EnergyRevenue" xml:space="preserve">
+    <value>Erlös Energie</value>
+  </data>
+  <data name="UsageFees" xml:space="preserve">
+    <value>Nutzungsgebühren</value>
+  </data>
+  <data name="UserSessionFees" xml:space="preserve">
+    <value>Sitzungsgebühren Nutzer</value>
+  </data>
+  <data name="OwnerSessionFees" xml:space="preserve">
+    <value>Sitzungsgebühren Betreiber</value>
+  </data>
+  <data name="GrossTotal" xml:space="preserve">
+    <value>Brutto</value>
+  </data>
+  <data name="OperatorCommission" xml:space="preserve">
+    <value>Betreiberprovision</value>
+  </data>
+  <data name="OperatorRevenue" xml:space="preserve">
+    <value>Erlös Betreiber</value>
+  </data>
+  <data name="OwnerPayout" xml:space="preserve">
+    <value>Auszahlung Eigentümer</value>
+  </data>
+  <data name="SessionCount" xml:space="preserve">
+    <value>Anzahl Sitzungen</value>
+  </data>
+  <data name="SessionDetails" xml:space="preserve">
+    <value>Sitzungsdetails</value>
+  </data>
+  <data name="ChargePoint" xml:space="preserve">
+    <value>Ladestation</value>
+  </data>
+  <data name="Connector" xml:space="preserve">
+    <value>Stecker</value>
+  </data>
+  <data name="OwnerReportSummary" xml:space="preserve">
+    <value>Übersicht</value>
+  </data>
+  <data name="OwnerReportDetails" xml:space="preserve">
+    <value>Details</value>
+  </data>
+  <data name="OwnerUnassigned" xml:space="preserve">
+    <value>Ohne Eigentümer</value>
+  </data>
+  <data name="EmailDisabled" xml:space="preserve">
+    <value>E-Mail-Versand ist in der Konfiguration deaktiviert.</value>
+  </data>
+  <data name="EmailNoRecipients" xml:space="preserve">
+    <value>Keine Eigentümer-E-Mail-Adressen für den ausgewählten Zeitraum gefunden.</value>
+  </data>
+  <data name="EmailSendSuccess" xml:space="preserve">
+    <value>{0} Eigentümer-Report-E-Mail(s) gesendet.</value>
+  </data>
+  <data name="EmailSendPartial" xml:space="preserve">
+    <value>{0} E-Mail(s) gesendet; {1} fehlgeschlagen.</value>
+  </data>
+  <data name="OwnerReportSubject" xml:space="preserve">
+    <value>Eigentümer-Report {0} - {1}</value>
+  </data>
+  <data name="OwnerReportBody" xml:space="preserve">
+    <value>Hallo {0}, dein Lade-Report für {1} bis {2} ist angehängt.</value>
+  </data>
+</root>

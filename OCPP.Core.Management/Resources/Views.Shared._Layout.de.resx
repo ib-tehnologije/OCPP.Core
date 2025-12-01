@@ -129,6 +129,9 @@
   <data name="ChargeReport" xml:space="preserve">
     <value>Lade-Auswertung</value>
   </data>
+  <data name="OwnerReport" xml:space="preserve">
+    <value>Eigentümer-Report</value>
+  </data>
   <data name="ChargeTags" xml:space="preserve">
     <value>RFID-Karten</value>
   </data>

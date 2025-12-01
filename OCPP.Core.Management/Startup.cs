@@ -32,7 +32,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Hangfire;
 using OCPP.Core.Database;
+using OCPP.Core.Management.Models;
 
 namespace OCPP.Core.Management
 {
@@ -50,6 +52,15 @@ namespace OCPP.Core.Management
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddOCPPDbContext(Configuration);
+
+            services.AddHangfire((serviceProvider, config) =>
+            {
+                var cs = Configuration.GetConnectionString("SqlServer");
+                config.UseSimpleAssemblyNameTypeSerializer()
+                      .UseRecommendedSerializerSettings()
+                      .UseSqlServerStorage(cs);
+            });
+            services.AddHangfireServer();
 
             services.AddControllersWithViews();
 
@@ -76,7 +87,11 @@ namespace OCPP.Core.Management
             });
 
             services.AddScoped<IUserManager, UserManager>();
+            services.AddScoped<Services.IEmailSender, Services.EmailSender>();
+            services.AddScoped<Services.IOwnerReportService, Services.OwnerReportService>();
             services.AddDistributedMemoryCache();
+            services.Configure<EmailSettings>(Configuration.GetSection("Email"));
+            services.Configure<OwnerReportScheduleSettings>(Configuration.GetSection("OwnerReportSchedule"));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -109,6 +124,23 @@ namespace OCPP.Core.Management
                     name: "default",
                     pattern: "{controller=Home}/{action=Index}/{id?}/{connectorId?}/{param?}/");
             });
+
+            var scopeFactory = app.ApplicationServices.GetService<IServiceScopeFactory>();
+            using (var scope = scopeFactory.CreateScope())
+            {
+                var ownerReportService = scope.ServiceProvider.GetService<Services.IOwnerReportService>();
+                ownerReportService?.ScheduleRecurringReport();
+            }
+
+            var enableDashboard = Configuration.GetValue<bool>("Hangfire:EnableDashboard");
+            if (enableDashboard)
+            {
+                var dashboardPath = Configuration.GetValue<string>("Hangfire:DashboardPath") ?? "/hangfire";
+                app.UseHangfireDashboard(dashboardPath, new DashboardOptions
+                {
+                    Authorization = new[] { new HangfireDashboardAuthorization() }
+                });
+            }
         }
     }
 }
