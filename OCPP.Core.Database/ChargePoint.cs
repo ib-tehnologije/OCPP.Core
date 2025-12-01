@@ -49,6 +49,9 @@ namespace OCPP.Core.Database
         public int MaxUsageFeeMinutes { get; set; }
         public decimal ConnectorUsageFeePerMinute { get; set; }
         public bool UsageFeeAfterChargingEnds { get; set; }
+        public double? Latitude { get; set; }
+        public double? Longitude { get; set; }
+        public string LocationDescription { get; set; }
         public int? OwnerId { get; set; }
 
         public virtual Owner Owner { get; set; }

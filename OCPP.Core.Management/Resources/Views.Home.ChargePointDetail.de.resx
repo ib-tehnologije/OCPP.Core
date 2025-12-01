@@ -237,6 +237,42 @@
   <data name="UsageFeeAfterChargingEndsHint" xml:space="preserve">
     <value>Idle-Gebühr ab Ende der Energieabgabe berechnen; sonst ab Sitzungsstart.</value>
   </data>
+  <data name="LatitudeLabel" xml:space="preserve">
+    <value>Breitengrad</value>
+  </data>
+  <data name="LongitudeLabel" xml:space="preserve">
+    <value>Längengrad</value>
+  </data>
+  <data name="LocationDescriptionLabel" xml:space="preserve">
+    <value>Standortbeschreibung</value>
+  </data>
+  <data name="LocationDescriptionHint" xml:space="preserve">
+    <value>Optionale Adresse oder Orientierungspunkt für die öffentliche Karte.</value>
+  </data>
+  <data name="MapPickerLabel" xml:space="preserve">
+    <value>Karten-Auswahl</value>
+  </data>
+  <data name="MapPickerButton" xml:space="preserve">
+    <value>Auf Karte wählen</value>
+  </data>
+  <data name="MapPickerHint" xml:space="preserve">
+    <value>Klicken Sie auf die Karte, um die Koordinaten genau zu setzen.</value>
+  </data>
+  <data name="MapSearchPlaceholder" xml:space="preserve">
+    <value>Adresse oder Ort suchen</value>
+  </data>
+  <data name="MapSearchButton" xml:space="preserve">
+    <value>Suchen</value>
+  </data>
+  <data name="MapSearchHint" xml:space="preserve">
+    <value>Basierend auf OpenStreetMap Nominatim. Klicken Sie auf das Ergebnis auf der Karte, um Koordinaten zu setzen.</value>
+  </data>
+  <data name="MapSearchNoResults" xml:space="preserve">
+    <value>Keine Ergebnisse gefunden.</value>
+  </data>
+  <data name="MapSearchError" xml:space="preserve">
+    <value>Suche fehlgeschlagen. Bitte andere Eingabe versuchen.</value>
+  </data>
   <data name="OwnerLabel" xml:space="preserve">
     <value>Eigentümer</value>
   </data>

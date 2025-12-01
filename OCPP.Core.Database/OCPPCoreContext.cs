@@ -74,6 +74,11 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.ConnectorUsageFeePerMinute).HasColumnType("decimal(18,4)");
 
                 entity.Property(e => e.UsageFeeAfterChargingEnds).HasColumnType("bit");
+                entity.Property(e => e.Latitude).HasColumnType("float");
+                entity.Property(e => e.Longitude).HasColumnType("float");
+                entity.Property(e => e.LocationDescription).HasMaxLength(500);
+
+                entity.Property(e => e.UsageFeeAfterChargingEnds).HasColumnType("bit");
 
                 entity.HasOne(d => d.Owner)
                     .WithMany(p => p.ChargePoints)

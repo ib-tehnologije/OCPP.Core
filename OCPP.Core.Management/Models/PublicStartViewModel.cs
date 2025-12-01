@@ -17,6 +17,12 @@ namespace OCPP.Core.Management.Models
         public int StartUsageFeeAfterMinutes { get; set; }
         public int MaxUsageFeeMinutes { get; set; }
         public decimal ConnectorUsageFeePerMinute { get; set; }
+        public bool UsageFeeAfterChargingEnds { get; set; }
+        public bool FreeChargingEnabled { get; set; }
+        public decimal EstimatedMaxHold { get; set; }
+        public int MaxUsageFeeBillableMinutes { get; set; }
+        public string CurrencySymbol { get; set; } = "€";
+        public bool HasIdleFee => ConnectorUsageFeePerMinute > 0;
         public string ErrorMessage { get; set; }
         public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
     }

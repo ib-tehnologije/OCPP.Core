@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -94,6 +95,69 @@ namespace OCPP.Core.Management.Controllers
             return View(model);
         }
 
+        [HttpGet]
+        public IActionResult Map()
+        {
+            var vm = BuildMapViewModel();
+            return View(vm);
+        }
+
+        private PublicMapViewModel BuildMapViewModel()
+        {
+            var vm = new PublicMapViewModel();
+
+            var chargePoints = DbContext.ChargePoints.ToList<ChargePoint>();
+            var connectorStatuses = DbContext.ConnectorStatuses.ToList<ConnectorStatus>();
+
+            foreach (var cp in chargePoints)
+            {
+                var statuses = connectorStatuses.Where(c => c.ChargePointId == cp.ChargePointId).ToList();
+                string aggregatedStatus = "Unknown";
+                DateTime? statusTime = null;
+
+                if (statuses.Any())
+                {
+                    if (statuses.Any(s => string.Equals(s.LastStatus, "Faulted", StringComparison.InvariantCultureIgnoreCase)))
+                    {
+                        aggregatedStatus = "Faulted";
+                    }
+                    else if (statuses.Any(s => string.Equals(s.LastStatus, "Occupied", StringComparison.InvariantCultureIgnoreCase)))
+                    {
+                        aggregatedStatus = "Occupied";
+                    }
+                    else if (statuses.All(s => string.Equals(s.LastStatus, "Available", StringComparison.InvariantCultureIgnoreCase)))
+                    {
+                        aggregatedStatus = "Available";
+                    }
+                    else
+                    {
+                        aggregatedStatus = statuses.First().LastStatus;
+                    }
+
+                    statusTime = statuses.Where(s => s.LastStatusTime.HasValue).OrderByDescending(s => s.LastStatusTime).FirstOrDefault()?.LastStatusTime;
+                }
+
+                vm.ChargePoints.Add(new PublicMapChargePoint
+                {
+                    ChargePointId = cp.ChargePointId,
+                    Name = string.IsNullOrWhiteSpace(cp.Name) ? cp.ChargePointId : cp.Name,
+                    ConnectorCount = statuses.Count(),
+                    Status = aggregatedStatus,
+                    StatusTime = statusTime,
+                    Latitude = cp.Latitude,
+                    Longitude = cp.Longitude,
+                    LocationDescription = cp.LocationDescription,
+                    PricePerKwh = cp.PricePerKwh,
+                    UserSessionFee = cp.UserSessionFee,
+                    ConnectorUsageFeePerMinute = cp.ConnectorUsageFeePerMinute,
+                    StartUsageFeeAfterMinutes = cp.StartUsageFeeAfterMinutes,
+                    UsageFeeAfterChargingEnds = cp.UsageFeeAfterChargingEnds
+                });
+            }
+
+            return vm;
+        }
+
         private PublicStartViewModel BuildViewModel(string chargePointId, int connectorId)
         {
             var model = new PublicStartViewModel
@@ -124,6 +188,14 @@ namespace OCPP.Core.Management.Controllers
             model.StartUsageFeeAfterMinutes = chargePoint.StartUsageFeeAfterMinutes;
             model.MaxUsageFeeMinutes = chargePoint.MaxUsageFeeMinutes;
             model.ConnectorUsageFeePerMinute = chargePoint.ConnectorUsageFeePerMinute;
+            model.UsageFeeAfterChargingEnds = chargePoint.UsageFeeAfterChargingEnds;
+            model.FreeChargingEnabled = chargePoint.FreeChargingEnabled;
+            model.MaxUsageFeeBillableMinutes = Math.Max(0, model.MaxUsageFeeMinutes - model.StartUsageFeeAfterMinutes);
+
+            // Approximate max preauthorization similar to backend: energy cap + idle cap + session fee
+            decimal energyCap = (decimal)model.MaxSessionKwh * model.PricePerKwh;
+            decimal idleCap = model.ConnectorUsageFeePerMinute * model.MaxUsageFeeBillableMinutes;
+            model.EstimatedMaxHold = Math.Max(0, energyCap) + Math.Max(0, idleCap) + Math.Max(0, model.UserSessionFee);
 
             var connector = DbContext.ConnectorStatuses.Find(chargePointId, model.ConnectorId);
             if (connector != null)

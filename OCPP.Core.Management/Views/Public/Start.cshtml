@@ -176,7 +176,7 @@
             <div>
                 <p class="status-chip">
                     <span class="status-dot"></span>
-                    Ready to start
+                    @((Model.FreeChargingEnabled || (Model.PricePerKwh <= 0 && Model.ConnectorUsageFeePerMinute <= 0 && Model.UserSessionFee <= 0)) ? "Free charging" : "Ready to start")
                 </p>
                 <h1 class="heading">@chargePointLabel</h1>
                 <p class="subheading">@connectorLabel</p>
@@ -212,14 +212,14 @@
                     {
                         <div class="info-tile">
                             <div class="info-label">Price per kWh</div>
-                            <div class="info-value">@Model.PricePerKwh.ToString("0.##") €</div>
+                            <div class="info-value">@Model.PricePerKwh.ToString("0.##") @Model.CurrencySymbol</div>
                         </div>
                     }
                     @if (Model.UserSessionFee > 0)
                     {
                         <div class="info-tile">
                             <div class="info-label">Session fee</div>
-                            <div class="info-value">@Model.UserSessionFee.ToString("0.##") €</div>
+                            <div class="info-value">@Model.UserSessionFee.ToString("0.##") @Model.CurrencySymbol</div>
                         </div>
                     }
                     @if (Model.MaxSessionKwh > 0)
@@ -232,8 +232,8 @@
                     @if (Model.ConnectorUsageFeePerMinute > 0)
                     {
                         <div class="info-tile">
-                            <div class="info-label">Usage fee</div>
-                            <div class="info-value">@Model.ConnectorUsageFeePerMinute.ToString("0.##") € / min</div>
+                            <div class="info-label">Idle/usage fee</div>
+                            <div class="info-value">@Model.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol / min</div>
                         </div>
                     }
                     @if (Model.StartUsageFeeAfterMinutes > 0)
@@ -248,6 +248,21 @@
                         <div class="info-tile">
                             <div class="info-label">Max usage fee time</div>
                             <div class="info-value">@Model.MaxUsageFeeMinutes min</div>
+                        </div>
+                    }
+                    @if (Model.ConnectorUsageFeePerMinute > 0)
+                    {
+                        <div class="info-tile">
+                            <div class="info-label">How idle fee is applied</div>
+                            <div class="info-value">@(Model.UsageFeeAfterChargingEnds ? "Starts after charging stops (plugged in)" : "Starts from session start after grace period")</div>
+                        </div>
+                    }
+                    @if (Model.EstimatedMaxHold > 0)
+                    {
+                        <div class="info-tile">
+                            <div class="info-label">Max preauthorization (est.)</div>
+                            <div class="info-value">@Model.EstimatedMaxHold.ToString("0.##") @Model.CurrencySymbol</div>
+                            <div class="info-label" style="margin-top:4px;">Based on max energy cap and max idle fee window.</div>
                         </div>
                     }
                 </div>
@@ -277,7 +292,18 @@
                     </button>
 
                     <div class="footnote">
-                        You’ll be redirected to Stripe to reserve the maximum session amount. The charger must be online.
+                        @if (Model.FreeChargingEnabled)
+                        {
+                            <span>This connector is currently free to use. No payment will be charged.</span>
+                        }
+                        else
+                        {
+                            <span>You’ll be redirected to Stripe to reserve the maximum session amount. The charger must be online.</span>
+                            @if (Model.HasIdleFee)
+                            {
+                                <div style="margin-top:6px;">Idle fees: grace @Model.StartUsageFeeAfterMinutes min, max billed @Model.MaxUsageFeeBillableMinutes min, rate @Model.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min.</div>
+                            }
+                        }
                     </div>
                 </form>
             </div>

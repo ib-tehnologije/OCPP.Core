@@ -315,6 +315,65 @@
                     </div>
                 </div>
             </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="Latitude">@Localizer["LatitudeLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="Latitude" name="Latitude" type="number" step="0.000001" min="-90" max="90" value="@Model.Latitude" />
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="Longitude">@Localizer["LongitudeLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="Longitude" name="Longitude" type="number" step="0.000001" min="-180" max="180" value="@Model.Longitude" />
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="LocationDescription">@Localizer["LocationDescriptionLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" id="LocationDescription" name="LocationDescription" type="text" maxlength="500" value="@Model.LocationDescription" />
+                        <small class="form-text text-muted">@Localizer["LocationDescriptionHint"]</small>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label">@Localizer["MapPickerLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <button type="button" class="btn btn-outline-secondary" id="btnToggleMap">@Localizer["MapPickerButton"]</button>
+                    <div style="margin-top:8px; display:none;" id="mapSearchContainer">
+                        <div class="input-group mb-2">
+                            <input type="text" class="form-control" id="LocationSearchInput" placeholder="@Localizer["MapSearchPlaceholder"]" />
+                            <div class="input-group-append">
+                                <button type="button" class="btn btn-secondary" id="LocationSearchBtn">@Localizer["MapSearchButton"]</button>
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">@Localizer["MapSearchHint"]</small>
+                        <div id="LocationSearchResult" class="text-muted" style="margin-top:4px;"></div>
+                    </div>
+                    <div id="mapPicker" style="height: 320px; margin-top: 10px; display: none; border: 1px solid #ccc; border-radius: 6px;"></div>
+                    <small class="form-text text-muted">@Localizer["MapPickerHint"]</small>
+                </div>
+            </div>
 
             <div class="row">
                 <div class="col-sm-12 text-danger">
@@ -364,6 +423,21 @@
 
 
     @section scripts {
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <style>
+            #mapPicker {
+                height: 320px;
+                width: 100%;
+                position: relative;
+                overflow: hidden;
+            }
+            #mapPicker .leaflet-container {
+                height: 100% !important;
+                width: 100% !important;
+            }
+            #mapPicker .leaflet-pane, #mapPicker .leaflet-control-container { z-index: 400; }
+        </style>
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
             (function () {
                 var ownerInput = document.getElementById('OwnerLookup');
@@ -396,6 +470,103 @@
                 ownerInput.addEventListener('input', syncOwnerSelection);
                 ownerInput.addEventListener('change', syncOwnerSelection);
                 syncOwnerSelection();
+            })();
+
+            (function () {
+                var map, marker;
+                var mapVisible = false;
+                var latInput = document.getElementById('Latitude');
+                var lonInput = document.getElementById('Longitude');
+                var mapDiv = document.getElementById('mapPicker');
+                var btnToggle = document.getElementById('btnToggleMap');
+                var searchInput = document.getElementById('LocationSearchInput');
+                var searchBtn = document.getElementById('LocationSearchBtn');
+                var searchResult = document.getElementById('LocationSearchResult');
+                var searchContainer = document.getElementById('mapSearchContainer');
+
+                function initMap() {
+                    if (map) return;
+                    var lat = parseFloat(latInput.value) || 45.0;
+                    var lon = parseFloat(lonInput.value) || 15.0;
+                    map = L.map('mapPicker').setView([lat, lon], 12);
+                    map.invalidateSize();
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; OpenStreetMap contributors'
+                    }).addTo(map);
+                    marker = L.marker([lat, lon], { draggable: false }).addTo(map);
+                    map.on('click', function (e) {
+                        var coords = e.latlng;
+                        marker.setLatLng(coords);
+                        latInput.value = coords.lat.toFixed(6);
+                        lonInput.value = coords.lng.toFixed(6);
+                    });
+                }
+
+                if (btnToggle && mapDiv && latInput && lonInput) {
+                    btnToggle.addEventListener('click', function () {
+                        mapVisible = !mapVisible;
+                        mapDiv.style.display = mapVisible ? 'block' : 'none';
+                        if (searchContainer) {
+                            searchContainer.style.display = mapVisible ? 'block' : 'none';
+                        }
+                        if (mapVisible) {
+                            initMap();
+                            setTimeout(function () {
+                                map.invalidateSize();
+                            }, 150);
+                        }
+                    });
+                }
+
+                async function searchLocation() {
+                    if (!searchInput || !searchInput.value) {
+                        return;
+                    }
+                    if (!map) {
+                        initMap();
+                    }
+                    if (searchResult) {
+                        searchResult.textContent = 'Searching...';
+                    }
+                    try {
+                        const q = encodeURIComponent(searchInput.value);
+                        const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}`);
+                        const data = await resp.json();
+                        if (data && data.length > 0) {
+                            const first = data[0];
+                            const lat = parseFloat(first.lat);
+                            const lon = parseFloat(first.lon);
+                            latInput.value = lat.toFixed(6);
+                            lonInput.value = lon.toFixed(6);
+                            if (marker) {
+                                marker.setLatLng([lat, lon]);
+                            } else {
+                                marker = L.marker([lat, lon], { draggable: false }).addTo(map);
+                            }
+                            map.setView([lat, lon], 14);
+                            if (searchResult) {
+                                searchResult.textContent = first.display_name;
+                            }
+                        } else if (searchResult) {
+                            searchResult.textContent = '@Localizer["MapSearchNoResults"]';
+                        }
+                    } catch (err) {
+                        if (searchResult) {
+                            searchResult.textContent = '@Localizer["MapSearchError"]';
+                        }
+                    }
+                }
+
+                if (searchBtn) {
+                    searchBtn.addEventListener('click', searchLocation);
+                }
+                if (searchInput) {
+                    searchInput.addEventListener('keyup', function (e) {
+                        if (e.key === 'Enter') {
+                            searchLocation();
+                        }
+                    });
+                }
             })();
         </script>
         @if (!string.IsNullOrWhiteSpace(Model.ChargePointId))

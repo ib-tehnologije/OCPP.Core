@@ -1,0 +1,156 @@
+﻿@model OCPP.Core.Management.Models.PublicMapViewModel
+@{
+    Layout = null;
+    ViewData["Title"] = "Charging locations";
+    var hasCoords = Model.ChargePoints?.Any(cp => cp.Latitude.HasValue && cp.Longitude.HasValue) == true;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Charging locations</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin:0; font-family: 'Inter','Space Grotesk', system-ui, -apple-system, sans-serif; background:#0b1021; color:#e5e7eb; }
+        .page { padding:16px; }
+        h1 { margin:12px 0 8px; }
+        .map-container { height: 420px; border-radius: 12px; overflow: hidden; box-shadow: 0 15px 40px rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); }
+        #map { height:100%; }
+        .card-grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap:12px; margin-top:16px; }
+        .card { background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:14px; }
+        .status { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:12px; font-size:0.9rem; }
+        .dot { width:8px; height:8px; border-radius:50%; }
+        .status.available { background:rgba(82,255,168,0.12); color:#b8ffd8; }
+        .status.available .dot { background:#52ffa8; box-shadow:0 0 8px rgba(82,255,168,0.8); }
+        .status.occupied { background:rgba(255,193,7,0.18); color:#ffe8a3; }
+        .status.occupied .dot { background:#ffc107; box-shadow:0 0 8px rgba(255,193,7,0.8); }
+        .status.faulted { background:rgba(255,75,109,0.18); color:#ffd5e0; }
+        .status.faulted .dot { background:#ff4b6d; box-shadow:0 0 8px rgba(255,75,109,0.8); }
+        .muted { color:#9ca3af; font-size:0.9rem; }
+        a.btn { display:inline-flex; padding:8px 12px; border-radius:10px; background:linear-gradient(120deg,#6ddcff,#7f5af0); color:#0b1021; text-decoration:none; font-weight:700; margin-top:8px; }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <h1>Charging locations</h1>
+        <p class="muted">Tap a location for details or start a session.</p>
+
+        <div style="margin:10px 0 16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <input type="search" id="searchInput" placeholder="Search by name or location" style="padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.06); color:#e5e7eb; min-width:240px;">
+            <span class="muted">Filters both list and map markers.</span>
+        </div>
+
+        @if (hasCoords)
+        {
+            <div class="map-container">
+                <div id="map"></div>
+            </div>
+        }
+        else
+        {
+            <div class="card">No map data available (missing coordinates).</div>
+        }
+
+        <div class="card-grid" id="cpList">
+            @foreach (var cp in Model.ChargePoints)
+            {
+                var statusClass = "available";
+                if (string.Equals(cp.Status, "Faulted", StringComparison.InvariantCultureIgnoreCase)) statusClass = "faulted";
+                else if (!string.Equals(cp.Status, "Available", StringComparison.InvariantCultureIgnoreCase)) statusClass = "occupied";
+                var searchText = $"{cp.Name} {cp.LocationDescription} {cp.ChargePointId}";
+                <div class="card cp-card" data-search="@searchText">
+                    <div class="status @statusClass"><span class="dot"></span>@cp.Status</div>
+                    <h3 style="margin:8px 0 4px;">@cp.Name</h3>
+                    <div class="muted">@cp.LocationDescription</div>
+                    <div class="muted" style="margin-top:6px;">@cp.ConnectorCount connector(s)</div>
+                    <div class="muted">
+                        @if (cp.PricePerKwh > 0) { <span>@cp.PricePerKwh.ToString("0.##") @Model.CurrencySymbol / kWh</span> }
+                        else { <span>Free energy</span> }
+                    </div>
+                    @if (cp.ConnectorUsageFeePerMinute > 0)
+                    {
+                        <div class="muted">Idle fee: @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (@(cp.UsageFeeAfterChargingEnds ? "after charge" : "from start") | grace @cp.StartUsageFeeAfterMinutes min)</div>
+                    }
+                    <a class="btn" href="~/Public/Start?cp=@cp.ChargePointId&conn=1">Start session</a>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (hasCoords)
+    {
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script>
+            const points = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.ChargePoints));
+            const map = L.map('map');
+            const coords = points.filter(p => p.latitude && p.longitude);
+            const markerLookup = {};
+            if (coords.length > 0) {
+                const bounds = L.latLngBounds(coords.map(p => [p.latitude, p.longitude]));
+                map.fitBounds(bounds.pad(0.2));
+            } else {
+                map.setView([0,0], 2);
+            }
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap'
+            }).addTo(map);
+
+            coords.forEach(p => {
+                const status = (p.status || '').toLowerCase();
+                let color = '#52ffa8';
+                if (status.includes('fault')) color = '#ff4b6d';
+                else if (!status.includes('avail')) color = '#ffc107';
+
+                const marker = L.circleMarker([p.latitude, p.longitude], {
+                    radius: 8,
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.8,
+                    weight: 1
+                }).addTo(map);
+
+                const price = p.pricePerKwh > 0 ? `${p.pricePerKwh.toFixed(2)} @Model.CurrencySymbol / kWh` : 'Free energy';
+                const idle = p.connectorUsageFeePerMinute > 0 ? `<br/>Idle: ${p.connectorUsageFeePerMinute.toFixed(2)} @Model.CurrencySymbol/min (${p.usageFeeAfterChargingEnds ? 'after charge' : 'from start'}, grace ${p.startUsageFeeAfterMinutes} min)` : '';
+                const link = `~/Public/Start?cp=${encodeURIComponent(p.chargePointId)}&conn=1`;
+                marker.bindPopup(`<strong>${p.name}</strong><br/>${price}${idle}<br/><a href='${link}'>Start session</a>`);
+                markerLookup[p.chargePointId] = marker;
+            });
+
+            function filterMapAndList(query) {
+                const term = (query || '').toLowerCase();
+                const cards = document.querySelectorAll('.cp-card');
+                const visibleMarkers = [];
+
+                cards.forEach(card => {
+                    const text = (card.dataset.search || '').toLowerCase();
+                    const match = term.length === 0 || text.indexOf(term) >= 0;
+                    card.style.display = match ? '' : 'none';
+                    const cpId = card.querySelector('.btn')?.getAttribute('href')?.split('cp=')[1]?.split('&')[0];
+                    const marker = cpId ? markerLookup[decodeURIComponent(cpId)] : null;
+                    if (marker) {
+                        if (match) {
+                            marker.addTo(map);
+                            visibleMarkers.push(marker.getLatLng());
+                        } else {
+                            map.removeLayer(marker);
+                        }
+                    }
+                });
+
+                if (visibleMarkers.length > 0) {
+                    const bounds = L.latLngBounds(visibleMarkers);
+                    map.fitBounds(bounds.pad(0.2));
+                }
+            }
+
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.addEventListener('input', function () {
+                    filterMapAndList(this.value);
+                });
+            }
+        </script>
+    }
+</body>
+</html>

@@ -134,6 +134,9 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
                             newChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
                             newChargePoint.UsageFeeAfterChargingEnds = cpvm.UsageFeeAfterChargingEnds;
+                            newChargePoint.Latitude = cpvm.Latitude;
+                            newChargePoint.Longitude = cpvm.Longitude;
+                            newChargePoint.LocationDescription = cpvm.LocationDescription;
                             newChargePoint.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
                             DbContext.ChargePoints.Add(newChargePoint);
                             DbContext.SaveChanges();
@@ -221,6 +224,9 @@ namespace OCPP.Core.Management.Controllers
                         currentChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
                         currentChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
                         currentChargePoint.UsageFeeAfterChargingEnds = cpvm.UsageFeeAfterChargingEnds;
+                        currentChargePoint.Latitude = cpvm.Latitude;
+                        currentChargePoint.Longitude = cpvm.Longitude;
+                        currentChargePoint.LocationDescription = cpvm.LocationDescription;
                         currentChargePoint.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
 
                         DbContext.SaveChanges();
@@ -258,6 +264,9 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.MaxUsageFeeMinutes = currentChargePoint.MaxUsageFeeMinutes;
                         cpvm.ConnectorUsageFeePerMinute = currentChargePoint.ConnectorUsageFeePerMinute;
                         cpvm.UsageFeeAfterChargingEnds = currentChargePoint.UsageFeeAfterChargingEnds;
+                        cpvm.Latitude = currentChargePoint.Latitude;
+                        cpvm.Longitude = currentChargePoint.Longitude;
+                        cpvm.LocationDescription = currentChargePoint.LocationDescription;
                         cpvm.OwnerId = NormalizeOwnerId(currentChargePoint.OwnerId);
                         cpvm.Owners = owners;
                         cpvm.CurrentId = Id;

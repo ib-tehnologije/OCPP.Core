@@ -237,6 +237,42 @@
   <data name="UsageFeeAfterChargingEndsHint" xml:space="preserve">
     <value>Use idle fee starting when energy delivery stops; otherwise count from session start.</value>
   </data>
+  <data name="LatitudeLabel" xml:space="preserve">
+    <value>Latitude</value>
+  </data>
+  <data name="LongitudeLabel" xml:space="preserve">
+    <value>Longitude</value>
+  </data>
+  <data name="LocationDescriptionLabel" xml:space="preserve">
+    <value>Location description</value>
+  </data>
+  <data name="LocationDescriptionHint" xml:space="preserve">
+    <value>Optional address or landmark for public map.</value>
+  </data>
+  <data name="MapPickerLabel" xml:space="preserve">
+    <value>Map picker</value>
+  </data>
+  <data name="MapPickerButton" xml:space="preserve">
+    <value>Pick on map</value>
+  </data>
+  <data name="MapPickerHint" xml:space="preserve">
+    <value>Click the map to set latitude/longitude precisely.</value>
+  </data>
+  <data name="MapSearchPlaceholder" xml:space="preserve">
+    <value>Search address or place</value>
+  </data>
+  <data name="MapSearchButton" xml:space="preserve">
+    <value>Search</value>
+  </data>
+  <data name="MapSearchHint" xml:space="preserve">
+    <value>Powered by OpenStreetMap Nominatim. Click a result on the map to set coordinates.</value>
+  </data>
+  <data name="MapSearchNoResults" xml:space="preserve">
+    <value>No results found.</value>
+  </data>
+  <data name="MapSearchError" xml:space="preserve">
+    <value>Search failed. Try a different query.</value>
+  </data>
   <data name="OwnerLabel" xml:space="preserve">
     <value>Owner</value>
   </data>
