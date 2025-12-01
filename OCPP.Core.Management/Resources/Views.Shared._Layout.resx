@@ -123,6 +123,9 @@
   <data name="ChargePoints" xml:space="preserve">
     <value>Charge points</value>
   </data>
+  <data name="Owners" xml:space="preserve">
+    <value>Owners</value>
+  </data>
   <data name="ChargeReport" xml:space="preserve">
     <value>Charge Report</value>
   </data>

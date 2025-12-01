@@ -1,8 +1,12 @@
 ﻿@using Microsoft.AspNetCore.Mvc.Localization
+@using System.Linq
 @model ChargePointViewModel
 @inject IViewLocalizer Localizer
 @{
     ViewData["Title"] = @Localizer["Title"];
+    var selectedOwner = Model?.Owners?.FirstOrDefault(o => o.OwnerId == Model.OwnerId);
+    var ownerDisplay = (selectedOwner != null && !string.IsNullOrWhiteSpace(selectedOwner.Email)) ? $"{selectedOwner.Name} ({selectedOwner.Email})" : selectedOwner?.Name;
+    var ownerEmail = selectedOwner?.Email;
 }
 <br />
 
@@ -157,7 +161,7 @@
                 </div>
                 <div class="col-sm-3">
                     <div class="form-group">
-                        <input class="form-control" id="PricePerKwh" name="PricePerKwh" type="number" step="0.01" min="0" value="@Model.PricePerKwh" />
+                        <input class="form-control" id="PricePerKwh" name="PricePerKwh" type="number" step="0.0001" min="0" value="@Model.PricePerKwh" />
                     </div>
                 </div>
             </div>
@@ -170,7 +174,7 @@
                 </div>
                 <div class="col-sm-3">
                     <div class="form-group">
-                        <input class="form-control" id="UserSessionFee" name="UserSessionFee" type="number" step="0.01" min="0" value="@Model.UserSessionFee" />
+                        <input class="form-control" id="UserSessionFee" name="UserSessionFee" type="number" step="0.0001" min="0" value="@Model.UserSessionFee" />
                     </div>
                 </div>
             </div>
@@ -183,7 +187,7 @@
                 </div>
                 <div class="col-sm-3">
                     <div class="form-group">
-                        <input class="form-control" id="OwnerSessionFee" name="OwnerSessionFee" type="number" step="0.01" min="0" value="@Model.OwnerSessionFee" />
+                        <input class="form-control" id="OwnerSessionFee" name="OwnerSessionFee" type="number" step="0.0001" min="0" value="@Model.OwnerSessionFee" />
                     </div>
                 </div>
             </div>
@@ -209,7 +213,7 @@
                 </div>
                 <div class="col-sm-3">
                     <div class="form-group">
-                        <input class="form-control" id="OwnerCommissionPercent" name="OwnerCommissionPercent" type="number" step="0.01" min="0" value="@Model.OwnerCommissionPercent" />
+                        <input class="form-control" id="OwnerCommissionPercent" name="OwnerCommissionPercent" type="number" step="0.0001" min="0" value="@Model.OwnerCommissionPercent" />
                     </div>
                 </div>
             </div>
@@ -222,7 +226,7 @@
                 </div>
                 <div class="col-sm-3">
                     <div class="form-group">
-                        <input class="form-control" id="OwnerCommissionFixedPerKwh" name="OwnerCommissionFixedPerKwh" type="number" step="0.01" min="0" value="@Model.OwnerCommissionFixedPerKwh" />
+                        <input class="form-control" id="OwnerCommissionFixedPerKwh" name="OwnerCommissionFixedPerKwh" type="number" step="0.0001" min="0" value="@Model.OwnerCommissionFixedPerKwh" />
                     </div>
                 </div>
             </div>
@@ -256,25 +260,31 @@
             <div class="row">
                 <div class="col-sm-2 align-self-center">
                     <div class="form-group">
-                        <label class="inline-label" for="OwnerName">@Localizer["OwnerNameLabel"]</label>
+                        <label class="inline-label" for="OwnerLookup">@Localizer["OwnerLabel"]</label>
                     </div>
                 </div>
                 <div class="col-sm-4">
                     <div class="form-group">
-                        <input class="form-control" id="OwnerName" name="OwnerName" type="text" maxlength="200" value="@Model.OwnerName" />
-                    </div>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col-sm-2 align-self-center">
-                    <div class="form-group">
-                        <label class="inline-label" for="OwnerEmail">@Localizer["OwnerEmailLabel"]</label>
+                        <input class="form-control" id="OwnerLookup" name="OwnerLookup" type="text" list="OwnerOptions" placeholder="@Localizer["OwnerPlaceholder"]" value="@ownerDisplay" autocomplete="off" />
+                        <datalist id="OwnerOptions">
+                            @if (Model.Owners != null)
+                            {
+                                foreach (var owner in Model.Owners)
+                                {
+                                    var ownerLabel = string.IsNullOrWhiteSpace(owner.Email) ? owner.Name : $"{owner.Name} ({owner.Email})";
+                                    <option value="@ownerLabel" data-owner-id="@owner.OwnerId" data-owner-email="@owner.Email"></option>
+                                }
+                            }
+                        </datalist>
+                        <input type="hidden" id="OwnerId" name="OwnerId" value="@Model.OwnerId" />
+                        <small class="form-text text-muted">
+                            <a href="~/Home/Owner">@Localizer["ManageOwners"]</a>
+                        </small>
                     </div>
                 </div>
                 <div class="col-sm-4">
                     <div class="form-group">
-                        <input class="form-control" id="OwnerEmail" name="OwnerEmail" type="email" maxlength="200" value="@Model.OwnerEmail" />
+                        <input class="form-control" id="OwnerEmailDisplay" type="text" value="@ownerEmail" placeholder="@Localizer["OwnerEmailPlaceholder"]" readonly />
                     </div>
                 </div>
             </div>
@@ -287,7 +297,7 @@
                 </div>
                 <div class="col-sm-3">
                     <div class="form-group">
-                        <input class="form-control" id="ConnectorUsageFeePerMinute" name="ConnectorUsageFeePerMinute" type="number" step="0.01" min="0" value="@Model.ConnectorUsageFeePerMinute" />
+                        <input class="form-control" id="ConnectorUsageFeePerMinute" name="ConnectorUsageFeePerMinute" type="number" step="0.0001" min="0" value="@Model.ConnectorUsageFeePerMinute" />
                     </div>
                 </div>
             </div>
@@ -340,6 +350,40 @@
 
 
     @section scripts {
+        <script>
+            (function () {
+                var ownerInput = document.getElementById('OwnerLookup');
+                var ownerOptions = document.getElementById('OwnerOptions');
+                var ownerId = document.getElementById('OwnerId');
+                var ownerEmail = document.getElementById('OwnerEmailDisplay');
+
+                if (!ownerInput || !ownerOptions || !ownerId) {
+                    return;
+                }
+
+                function syncOwnerSelection() {
+                    var match = Array.from(ownerOptions.options).find(function (option) {
+                        return option.value === ownerInput.value;
+                    });
+
+                    if (match) {
+                        ownerId.value = match.dataset.ownerId;
+                        if (ownerEmail) {
+                            ownerEmail.value = match.dataset.ownerEmail || '';
+                        }
+                    } else {
+                        ownerId.value = '';
+                        if (ownerEmail) {
+                            ownerEmail.value = '';
+                        }
+                    }
+                }
+
+                ownerInput.addEventListener('input', syncOwnerSelection);
+                ownerInput.addEventListener('change', syncOwnerSelection);
+                syncOwnerSelection();
+            })();
+        </script>
         @if (!string.IsNullOrWhiteSpace(Model.ChargePointId))
         {
             <script>

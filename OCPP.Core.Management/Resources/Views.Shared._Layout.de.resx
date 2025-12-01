@@ -123,6 +123,9 @@
   <data name="ChargePoints" xml:space="preserve">
     <value>Ladestationen</value>
   </data>
+  <data name="Owners" xml:space="preserve">
+    <value>Eigentümer</value>
+  </data>
   <data name="ChargeReport" xml:space="preserve">
     <value>Lade-Auswertung</value>
   </data>

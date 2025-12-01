@@ -34,6 +34,7 @@ namespace OCPP.Core.Database
         {
         }
 
+        public virtual DbSet<Owner> Owners { get; set; }
         public virtual DbSet<ChargePoint> ChargePoints { get; set; }
         public virtual DbSet<ChargeTag> ChargeTags { get; set; }
         public virtual DbSet<ConnectorStatus> ConnectorStatuses { get; set; }
@@ -72,8 +73,27 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.ConnectorUsageFeePerMinute).HasColumnType("decimal(18,4)");
 
-                entity.Property(e => e.OwnerName).HasMaxLength(200);
-                entity.Property(e => e.OwnerEmail).HasMaxLength(200);
+                entity.HasOne(d => d.Owner)
+                    .WithMany(p => p.ChargePoints)
+                    .HasForeignKey(d => d.OwnerId)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<Owner>(entity =>
+            {
+                entity.ToTable("Owner");
+
+                entity.HasKey(e => e.OwnerId);
+
+                entity.Property(e => e.OwnerId)
+                    .ValueGeneratedOnAdd();
+
+                entity.Property(e => e.Name)
+                    .HasMaxLength(200)
+                    .IsRequired();
+
+                entity.Property(e => e.Email)
+                    .HasMaxLength(200);
             });
 
             modelBuilder.Entity<ChargeTag>(entity =>

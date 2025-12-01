@@ -186,4 +186,13 @@
   <data name="TransactionID" xml:space="preserve">
     <value>Transaktions-ID</value>
   </data>
+  <data name="OwnerNameRequired" xml:space="preserve">
+    <value>Eigentümername ist erforderlich.</value>
+  </data>
+  <data name="OwnerDuplicate" xml:space="preserve">
+    <value>Ein Eigentümer mit diesem Namen und dieser E-Mail existiert bereits.</value>
+  </data>
+  <data name="OwnerInUse" xml:space="preserve">
+    <value>Eigentümer ist noch Ladestationen zugeordnet und kann nicht gelöscht werden.</value>
+  </data>
 </root>

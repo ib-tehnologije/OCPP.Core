@@ -231,10 +231,16 @@
   <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
     <value>Steckernutzungsgebühr (€ / Min)</value>
   </data>
-  <data name="OwnerNameLabel" xml:space="preserve">
-    <value>Betreibername</value>
+  <data name="OwnerLabel" xml:space="preserve">
+    <value>Eigentümer</value>
   </data>
-  <data name="OwnerEmailLabel" xml:space="preserve">
-    <value>Betreiber-E-Mail</value>
+  <data name="OwnerPlaceholder" xml:space="preserve">
+    <value>Eigentümer suchen oder auswählen</value>
+  </data>
+  <data name="OwnerEmailPlaceholder" xml:space="preserve">
+    <value>E-Mail des Eigentümers</value>
+  </data>
+  <data name="ManageOwners" xml:space="preserve">
+    <value>Eigentümer verwalten</value>
   </data>
 </root>

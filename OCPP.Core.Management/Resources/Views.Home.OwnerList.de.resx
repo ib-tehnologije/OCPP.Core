@@ -117,61 +117,19 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AddNew" xml:space="preserve">
-    <value>Neu</value>
-  </data>
-  <data name="Actions" xml:space="preserve">
-    <value>Aktionen</value>
-  </data>
-  <data name="ChargePointId" xml:space="preserve">
-    <value>Kennung</value>
-  </data>
-  <data name="Comment" xml:space="preserve">
-    <value>Notiz</value>
-  </data>
-  <data name="Owner" xml:space="preserve">
+  <data name="Title" xml:space="preserve">
     <value>Eigentümer</value>
   </data>
-  <data name="Transactions" xml:space="preserve">
-    <value>Transaktionen</value>
-  </data>
-  <data name="EditChargePoint" xml:space="preserve">
-    <value>Ladestation bearbeiten</value>
-  </data>
-  <data name="ChargingSessions" xml:space="preserve">
-    <value>Ladevorgänge</value>
-  </data>
-  <data name="RebootChargePoint" xml:space="preserve">
-    <value>Ladestation neu starten</value>
-  </data>
-  <data name="ConfirmReboot" xml:space="preserve">
-    <value>Soll die Ladestation % wirklich neu gestartet werden?</value>
-  </data>
-  <data name="ExecuteReboot" xml:space="preserve">
-    <value>Neustart wird ausgelöst...</value>
-  </data>
-  <data name="RebootError" xml:space="preserve">
-    <value>Fehler beim Neustart.</value>
-  </data>
-  <data name="Cancel" xml:space="preserve">
-    <value>Abbrechen</value>
-  </data>
-  <data name="Close" xml:space="preserve">
-    <value>Schließen</value>
-  </data>
-  <data name="RequestConfiguration" xml:space="preserve">
-    <value>Konfiguration anfordern</value>
-  </data>
-  <data name="GetDiagnostics" xml:space="preserve">
-    <value>Diagnose abrufen</value>
-  </data>
-  <data name="ComingSoon" xml:space="preserve">
-    <value>% wird bald verfügbar sein.</value>
-  </data>
   <data name="Name" xml:space="preserve">
-    <value>Bezeichnung</value>
+    <value>Name</value>
   </data>
-  <data name="Title" xml:space="preserve">
-    <value>Management</value>
+  <data name="Email" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="ChargePoints" xml:space="preserve">
+    <value>Ladestationen</value>
+  </data>
+  <data name="AddNew" xml:space="preserve">
+    <value>Neu</value>
   </data>
 </root>

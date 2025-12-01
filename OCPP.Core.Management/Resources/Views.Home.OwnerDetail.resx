@@ -117,61 +117,52 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AddNew" xml:space="preserve">
-    <value>Neu</value>
+  <data name="Title" xml:space="preserve">
+    <value>Owner</value>
   </data>
-  <data name="Actions" xml:space="preserve">
-    <value>Aktionen</value>
+  <data name="EditOwner" xml:space="preserve">
+    <value>Edit owner</value>
   </data>
-  <data name="ChargePointId" xml:space="preserve">
-    <value>Kennung</value>
+  <data name="NameLabel" xml:space="preserve">
+    <value>Name</value>
   </data>
-  <data name="Comment" xml:space="preserve">
-    <value>Notiz</value>
+  <data name="NamePlaceholder" xml:space="preserve">
+    <value>Owner name</value>
   </data>
-  <data name="Owner" xml:space="preserve">
-    <value>Eigentümer</value>
+  <data name="EmailLabel" xml:space="preserve">
+    <value>Email</value>
   </data>
-  <data name="Transactions" xml:space="preserve">
-    <value>Transaktionen</value>
+  <data name="EmailPlaceholder" xml:space="preserve">
+    <value>Owner email</value>
   </data>
-  <data name="EditChargePoint" xml:space="preserve">
-    <value>Ladestation bearbeiten</value>
+  <data name="EmailValidation" xml:space="preserve">
+    <value>Enter a valid email address.</value>
   </data>
-  <data name="ChargingSessions" xml:space="preserve">
-    <value>Ladevorgänge</value>
+  <data name="FieldMaxLength" xml:space="preserve">
+    <value>Maximum length: {0} characters</value>
   </data>
-  <data name="RebootChargePoint" xml:space="preserve">
-    <value>Ladestation neu starten</value>
+  <data name="RequiredField" xml:space="preserve">
+    <value>Required field</value>
   </data>
-  <data name="ConfirmReboot" xml:space="preserve">
-    <value>Soll die Ladestation % wirklich neu gestartet werden?</value>
+  <data name="SaveNew" xml:space="preserve">
+    <value>Save new</value>
   </data>
-  <data name="ExecuteReboot" xml:space="preserve">
-    <value>Neustart wird ausgelöst...</value>
+  <data name="Save" xml:space="preserve">
+    <value>Save</value>
   </data>
-  <data name="RebootError" xml:space="preserve">
-    <value>Fehler beim Neustart.</value>
+  <data name="Back" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="TitleDelete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="DialogDelete" xml:space="preserve">
+    <value>Do you really want to delete this owner?</value>
   </data>
   <data name="Cancel" xml:space="preserve">
-    <value>Abbrechen</value>
-  </data>
-  <data name="Close" xml:space="preserve">
-    <value>Schließen</value>
-  </data>
-  <data name="RequestConfiguration" xml:space="preserve">
-    <value>Konfiguration anfordern</value>
-  </data>
-  <data name="GetDiagnostics" xml:space="preserve">
-    <value>Diagnose abrufen</value>
-  </data>
-  <data name="ComingSoon" xml:space="preserve">
-    <value>% wird bald verfügbar sein.</value>
-  </data>
-  <data name="Name" xml:space="preserve">
-    <value>Bezeichnung</value>
-  </data>
-  <data name="Title" xml:space="preserve">
-    <value>Management</value>
+    <value>Cancel</value>
   </data>
 </root>

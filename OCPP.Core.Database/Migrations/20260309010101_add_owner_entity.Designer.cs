@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OCPP.Core.Database;
 
@@ -11,9 +12,10 @@ using OCPP.Core.Database;
 namespace OCPP.Core.Database.Migrations
 {
     [DbContext(typeof(OCPPCoreContext))]
-    partial class OCPPCoreContextModelSnapshot : ModelSnapshot
+    [Migration("20260309010101_add_owner_entity")]
+    partial class add_owner_entity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -190,12 +192,34 @@ namespace OCPP.Core.Database.Migrations
 
                     b.HasKey("ChargePointId");
 
-                    b.HasIndex("OwnerId");
-
                     b.HasIndex(new[] { "ChargePointId" }, "ChargePoint_Identifier")
                         .IsUnique();
 
+                    b.HasIndex("OwnerId");
+
                     b.ToTable("ChargePoint", (string)null);
+                });
+
+            modelBuilder.Entity("OCPP.Core.Database.Owner", b =>
+                {
+                    b.Property<int>("OwnerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("OwnerId"));
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("OwnerId");
+
+                    b.ToTable("Owner", (string)null);
                 });
 
             modelBuilder.Entity("OCPP.Core.Database.ChargeTag", b =>
@@ -293,28 +317,6 @@ namespace OCPP.Core.Database.Migrations
                     b.ToTable("MessageLog", (string)null);
                 });
 
-            modelBuilder.Entity("OCPP.Core.Database.Owner", b =>
-                {
-                    b.Property<int>("OwnerId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("OwnerId"));
-
-                    b.Property<string>("Email")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.HasKey("OwnerId");
-
-                    b.ToTable("Owner", (string)null);
-                });
-
             modelBuilder.Entity("OCPP.Core.Database.Transaction", b =>
                 {
                     b.Property<int>("TransactionId")
@@ -407,16 +409,6 @@ namespace OCPP.Core.Database.Migrations
                     b.ToTable("Transactions");
                 });
 
-            modelBuilder.Entity("OCPP.Core.Database.ChargePoint", b =>
-                {
-                    b.HasOne("OCPP.Core.Database.Owner", "Owner")
-                        .WithMany("ChargePoints")
-                        .HasForeignKey("OwnerId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Owner");
-                });
-
             modelBuilder.Entity("OCPP.Core.Database.ConnectorStatus", b =>
                 {
                     b.HasOne("OCPP.Core.Database.ChargePoint", "ChargePoint")
@@ -441,6 +433,12 @@ namespace OCPP.Core.Database.Migrations
 
             modelBuilder.Entity("OCPP.Core.Database.ChargePoint", b =>
                 {
+                    b.HasOne("OCPP.Core.Database.Owner", "Owner")
+                        .WithMany("ChargePoints")
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Owner");
                     b.Navigation("Transactions");
                 });
 

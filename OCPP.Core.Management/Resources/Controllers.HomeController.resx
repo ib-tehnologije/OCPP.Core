@@ -186,4 +186,13 @@
   <data name="TransactionID" xml:space="preserve">
     <value>Transaction ID</value>
   </data>
+  <data name="OwnerNameRequired" xml:space="preserve">
+    <value>Owner name is required.</value>
+  </data>
+  <data name="OwnerDuplicate" xml:space="preserve">
+    <value>An owner with the same name and email already exists.</value>
+  </data>
+  <data name="OwnerInUse" xml:space="preserve">
+    <value>Owner is still assigned to one or more charge points and cannot be deleted.</value>
+  </data>
 </root>

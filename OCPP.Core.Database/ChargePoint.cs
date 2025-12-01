@@ -48,9 +48,9 @@ namespace OCPP.Core.Database
         public int StartUsageFeeAfterMinutes { get; set; }
         public int MaxUsageFeeMinutes { get; set; }
         public decimal ConnectorUsageFeePerMinute { get; set; }
-        public string OwnerName { get; set; }
-        public string OwnerEmail { get; set; }
+        public int? OwnerId { get; set; }
 
+        public virtual Owner Owner { get; set; }
         public virtual ICollection<Transaction> Transactions { get; set; }
     }
 }

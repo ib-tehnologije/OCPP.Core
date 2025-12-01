@@ -46,8 +46,21 @@ namespace OCPP.Core.Management.Controllers
                 cpvm.CurrentId = Id;
 
                 Logger.LogTrace("ChargePoint: Loading charge points...");
-                List<ChargePoint> dbChargePoints = DbContext.ChargePoints.OrderBy(x => x.Name).ToList<ChargePoint>();
+                List<ChargePoint> dbChargePoints = DbContext.ChargePoints.Include(cp => cp.Owner).OrderBy(x => x.Name).ToList<ChargePoint>();
                 Logger.LogInformation("ChargePoint: Found {0} chargepoints", dbChargePoints.Count);
+
+                List<Owner> owners = DbContext.Owners.OrderBy(x => x.Name).ToList();
+                Logger.LogInformation("ChargePoint: Found {0} owners", owners.Count);
+
+                int? NormalizeOwnerId(int? ownerId)
+                {
+                    if (!ownerId.HasValue)
+                    {
+                        return null;
+                    }
+
+                    return owners.Any(o => o.OwnerId == ownerId.Value) ? ownerId : null;
+                }
 
                 ChargePoint currentChargePoint = null;
                 if (!string.IsNullOrEmpty(Id))
@@ -65,6 +78,7 @@ namespace OCPP.Core.Management.Controllers
 
                 if (Request.Method == "POST")
                 {
+                    cpvm.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
                     string errorMsg = null;
 
                     if (Id == "@")
@@ -119,8 +133,7 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes ?? 0;
                             newChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
                             newChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
-                            newChargePoint.OwnerName = cpvm.OwnerName;
-                            newChargePoint.OwnerEmail = cpvm.OwnerEmail;
+                            newChargePoint.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
                             DbContext.ChargePoints.Add(newChargePoint);
                             DbContext.SaveChanges();
                             Logger.LogInformation("ChargePoint: New => charge point saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
@@ -128,6 +141,9 @@ namespace OCPP.Core.Management.Controllers
                         else
                         {
                             ViewBag.ErrorMsg = errorMsg;
+                            cpvm.Owners = owners;
+                            cpvm.ChargePoints = dbChargePoints;
+                            cpvm.CurrentId = Id;
                             return View("ChargePointDetail", cpvm);
                         }
                     }
@@ -179,6 +195,9 @@ namespace OCPP.Core.Management.Controllers
                         if (!string.IsNullOrEmpty(errorMsg))
                         {
                             ViewBag.ErrorMsg = errorMsg;
+                            cpvm.Owners = owners;
+                            cpvm.ChargePoints = dbChargePoints;
+                            cpvm.CurrentId = Id;
                             return View("ChargePointDetail", cpvm);
                         }
 
@@ -200,8 +219,7 @@ namespace OCPP.Core.Management.Controllers
                         currentChargePoint.StartUsageFeeAfterMinutes = cpvm.StartUsageFeeAfterMinutes ?? 0;
                         currentChargePoint.MaxUsageFeeMinutes = cpvm.MaxUsageFeeMinutes ?? 0;
                         currentChargePoint.ConnectorUsageFeePerMinute = cpvm.ConnectorUsageFeePerMinute ?? 0m;
-                        currentChargePoint.OwnerName = cpvm.OwnerName;
-                        currentChargePoint.OwnerEmail = cpvm.OwnerEmail;
+                        currentChargePoint.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
 
                         DbContext.SaveChanges();
                         Logger.LogInformation("ChargePoint: Edit => chargepoint saved: {0} / {1}", cpvm.ChargePointId, cpvm.Name);
@@ -215,6 +233,7 @@ namespace OCPP.Core.Management.Controllers
                     cpvm = new ChargePointViewModel();
                     cpvm.ChargePoints = dbChargePoints;
                     cpvm.CurrentId = Id;
+                    cpvm.Owners = owners;
 
                     if (currentChargePoint!= null)
                     {
@@ -236,8 +255,9 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.StartUsageFeeAfterMinutes = currentChargePoint.StartUsageFeeAfterMinutes;
                         cpvm.MaxUsageFeeMinutes = currentChargePoint.MaxUsageFeeMinutes;
                         cpvm.ConnectorUsageFeePerMinute = currentChargePoint.ConnectorUsageFeePerMinute;
-                        cpvm.OwnerName = currentChargePoint.OwnerName;
-                        cpvm.OwnerEmail = currentChargePoint.OwnerEmail;
+                        cpvm.OwnerId = NormalizeOwnerId(currentChargePoint.OwnerId);
+                        cpvm.Owners = owners;
+                        cpvm.CurrentId = Id;
                     }
 
                     string viewName = (!string.IsNullOrEmpty(cpvm.ChargePointId) || Id == "@") ? "ChargePointDetail" : "ChargePointList";
@@ -267,7 +287,7 @@ namespace OCPP.Core.Management.Controllers
 
             if (!hasEnergyPrice && !hasUsageFee && !hasSessionFee)
             {
-                return "Set a price per kWh, a usage fee, or a session fee (or enable free charging).";
+                return "Add a price per kWh, connector usage fee, or user session fee, or enable free charging. Owner commission fields are optional.";
             }
 
             double maxSessionKwh = cpvm.MaxSessionKwh ?? 0d;

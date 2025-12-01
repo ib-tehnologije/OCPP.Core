@@ -231,10 +231,16 @@
   <data name="ConnectorUsageFeePerMinuteLabel" xml:space="preserve">
     <value>Connector usage fee (€ / min)</value>
   </data>
-  <data name="OwnerNameLabel" xml:space="preserve">
-    <value>Owner name</value>
+  <data name="OwnerLabel" xml:space="preserve">
+    <value>Owner</value>
   </data>
-  <data name="OwnerEmailLabel" xml:space="preserve">
+  <data name="OwnerPlaceholder" xml:space="preserve">
+    <value>Search or select an owner</value>
+  </data>
+  <data name="OwnerEmailPlaceholder" xml:space="preserve">
     <value>Owner email</value>
+  </data>
+  <data name="ManageOwners" xml:space="preserve">
+    <value>Manage owners</value>
   </data>
 </root>

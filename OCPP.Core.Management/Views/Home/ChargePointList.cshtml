@@ -14,6 +14,7 @@
                 <th class="th-sm">@Localizer["ChargePointId"]</th>
                 <th class="th-sm">@Localizer["Name"]</th>
                 <th class="th-sm">@Localizer["Comment"]</th>
+                <th class="th-sm">@Localizer["Owner"]</th>
                 <th class="th-sm">@Localizer["Actions"]</th>
             </tr>
         </thead>
@@ -26,6 +27,7 @@
                         <td>@cp.ChargePointId</td>
                         <td>@cp.Name</td>
                         <td>@cp.Comment</td>
+                        <td>@(cp.Owner?.Name ?? "-")</td>
                         <td class="text-nowrap">
                             <a class="btn btn-link" onclick="event.stopPropagation();" href="~/Home/Transactions/@Uri.EscapeDataString(cp.ChargePointId)/1" data-toggle="tooltip" data-placement="top" title="@Localizer["Transactions"]">
                                 <i class="fas fa-receipt"></i>
@@ -117,4 +119,3 @@
         }
     </script>
 }
-
