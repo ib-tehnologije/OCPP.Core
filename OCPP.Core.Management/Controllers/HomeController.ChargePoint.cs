@@ -79,6 +79,13 @@ namespace OCPP.Core.Management.Controllers
                 if (Request.Method == "POST")
                 {
                     cpvm.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
+                    if (!ModelState.IsValid)
+                    {
+                        cpvm.Owners = owners;
+                        cpvm.ChargePoints = dbChargePoints;
+                        cpvm.CurrentId = Id;
+                        return View("ChargePointDetail", cpvm);
+                    }
                     string errorMsg = null;
 
                     if (Id == "@")
@@ -144,6 +151,7 @@ namespace OCPP.Core.Management.Controllers
                         }
                         else
                         {
+                            ModelState.AddModelError(string.Empty, errorMsg);
                             ViewBag.ErrorMsg = errorMsg;
                             cpvm.Owners = owners;
                             cpvm.ChargePoints = dbChargePoints;
@@ -198,6 +206,7 @@ namespace OCPP.Core.Management.Controllers
 
                         if (!string.IsNullOrEmpty(errorMsg))
                         {
+                            ModelState.AddModelError(string.Empty, errorMsg);
                             ViewBag.ErrorMsg = errorMsg;
                             cpvm.Owners = owners;
                             cpvm.ChargePoints = dbChargePoints;

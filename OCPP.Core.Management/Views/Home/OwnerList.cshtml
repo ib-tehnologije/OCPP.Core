@@ -33,5 +33,5 @@
     </table>
 
     <br />
-    <a class="btn btn-secondary" href="~/Home/Owner/@@">@Localizer["AddNew"]</a>
+    <a class="btn btn-secondary" href='@Url.Action("Owner", Constants.HomeController, new { id = "@" })'>@Localizer["AddNew"]</a>
 }

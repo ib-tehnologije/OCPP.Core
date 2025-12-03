@@ -55,7 +55,7 @@
     </table>
 
     <br />
-    <a class="btn btn-secondary" href="~/Home/ChargePoint/@@">@Localizer["AddNew"]</a>
+    <a class="btn btn-secondary" href='@Url.Action("ChargePoint", Constants.HomeController, new { id = "@" })'>@Localizer["AddNew"]</a>
 }
 
 @section scripts {

@@ -36,6 +36,5 @@
     </table>
 
     <br />
-    <a class="btn btn-secondary" href="~/Home/ChargeTag/@@">@Localizer["AddNew"]</a>
+    <a class="btn btn-secondary" href='@Url.Action("ChargeTag", Constants.HomeController, new { id = "@" })'>@Localizer["AddNew"]</a>
 }
-
