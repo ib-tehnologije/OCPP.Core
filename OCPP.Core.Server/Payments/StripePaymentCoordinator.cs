@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -194,7 +195,14 @@ namespace OCPP.Core.Server.Payments
                 reservation.UpdatedAtUtc = _utcNow();
 
                 dbContext.Add(reservation);
-                dbContext.SaveChanges();
+                try
+                {
+                    dbContext.SaveChanges();
+                }
+                catch (DbUpdateException dbUpdateEx) when (IsActiveReservationConflict(dbUpdateEx))
+                {
+                    throw new InvalidOperationException("ConnectorBusy", dbUpdateEx);
+                }
 
                 return new PaymentSessionResult
                 {
@@ -510,6 +518,20 @@ namespace OCPP.Core.Server.Payments
                     _logger.LogDebug("Unhandled Stripe event type: {Type}", stripeEvent.Type);
                     break;
             }
+        }
+
+        private static bool IsActiveReservationConflict(DbUpdateException dbUpdateEx)
+        {
+            if (dbUpdateEx == null) return false;
+
+            var message = dbUpdateEx.InnerException?.Message ?? dbUpdateEx.Message;
+            if (string.IsNullOrWhiteSpace(message)) return false;
+
+            // SQL Server includes the unique index name; SQLite reports the column list.
+            return message.Contains("UX_PaymentReservations_ActiveConnector", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("ChargePaymentReservation.ChargePointId", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("ChargePaymentReservations.ChargePointId", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase);
         }
 
         private void HandleCheckoutCompleted(OCPPCoreContext dbContext, Event stripeEvent)

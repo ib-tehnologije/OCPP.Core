@@ -13,11 +13,20 @@
 @if (Model != null)
 {
     @using (Html.BeginForm())
-    {
-        @Html.AntiForgeryToken()
+            {
+                @Html.AntiForgeryToken()
 
         <h4>@Localizer["EditChargePoint"]</h4>
         <div asp-validation-summary="All" class="alert alert-danger" role="alert"></div>
+        @if (!string.IsNullOrWhiteSpace(Model.ChargePointId))
+        {
+            var publicUrl = Url.Content($"~/Public/Start?cp={Uri.EscapeDataString(Model.ChargePointId)}&conn=1");
+            <div class="alert alert-info" role="alert">
+                <strong>Public start link:</strong>
+                <a href="@publicUrl" target="_blank" rel="noopener">@publicUrl</a>
+                <div class="small text-muted">Share this for QR codes. Adjust the <code>conn</code> parameter for other connectors.</div>
+            </div>
+        }
         <br />
         <div class="container">
             <div class="row">

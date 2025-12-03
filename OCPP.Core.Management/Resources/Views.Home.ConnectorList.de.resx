@@ -195,4 +195,7 @@
   <data name="ErrorStopTransaction" xml:space="preserve">
     <value>Es ist ein Fehler aufgetreten.</value>
   </data>
+  <data name="ConnectorBusy" xml:space="preserve">
+    <value>Der Anschluss wird bereits genutzt.</value>
+  </data>
 </root>

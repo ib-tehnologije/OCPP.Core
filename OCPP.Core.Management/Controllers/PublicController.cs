@@ -66,9 +66,23 @@ namespace OCPP.Core.Management.Controllers
             string checkoutUrl = ExtractCheckoutUrl(apiResult.Payload);
             string status = ExtractStatus(apiResult.Payload);
 
-            if (!apiResult.Success)
+            bool isBusy = string.Equals(status, "ConnectorBusy", StringComparison.OrdinalIgnoreCase);
+            bool isOffline = string.Equals(status, "ChargerOffline", StringComparison.OrdinalIgnoreCase);
+
+            if (!apiResult.Success || isBusy || isOffline)
             {
-                model.ErrorMessage = ExtractMessage(apiResult.Payload) ?? apiResult.ErrorMessage ?? "Unable to start the transaction.";
+                if (isBusy)
+                {
+                    model.ErrorMessage = "This connector is currently in use. Please stop the active session first or choose another connector.";
+                }
+                else if (isOffline)
+                {
+                    model.ErrorMessage = "This connector is offline. Please try again when it is available.";
+                }
+                else
+                {
+                    model.ErrorMessage = ExtractMessage(apiResult.Payload) ?? apiResult.ErrorMessage ?? "Unable to start the transaction.";
+                }
                 return View(model);
             }
 

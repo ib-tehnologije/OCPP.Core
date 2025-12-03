@@ -28,3 +28,4 @@ Do not commit real certificates or secrets; `localhost.pfx` and `appsettings.Dev
 
 ## Other
 - Never run dotnet commands, they do not work in LLM context
+- Never touch node_modules, or any build output folders directly

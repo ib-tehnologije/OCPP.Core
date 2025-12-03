@@ -23,6 +23,7 @@ using Newtonsoft.Json;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Extensions.Interfaces;
 using OCPP.Core.Server.Messages_OCPP16;
+using System.Linq;
 
 namespace OCPP.Core.Server
 {
@@ -45,12 +46,27 @@ namespace OCPP.Core.Server
                 Transaction transaction = null;
                 try
                 {
-                    transaction = DbContext.Find<Transaction>(stopTransactionRequest.TransactionId);
+                    if (stopTransactionRequest.TransactionId.HasValue)
+                    {
+                        transaction = DbContext.Find<Transaction>(stopTransactionRequest.TransactionId.Value);
+                    }
                 }
                 catch (Exception exp)
                 {
                     Logger.LogError(exp, "StopTransaction => Exception reading transaction: transactionId={0} / chargepoint={1}", stopTransactionRequest.TransactionId, ChargePointStatus?.Id);
                     errorCode = ErrorCodes.InternalError;
+                }
+
+                // Fallback: if no transaction id was provided or not found, pick the latest open transaction for this charge point
+                if (transaction == null)
+                {
+                    transaction = DbContext.Transactions
+                        .FirstOrDefault(t => t.ChargePointId == ChargePointStatus.Id && t.StopTime == null);
+
+                    if (transaction != null)
+                    {
+                        Logger.LogWarning("StopTransaction => Falling back to open transaction {0} for chargepoint {1} (requested id={2})", transaction.TransactionId, ChargePointStatus.Id, stopTransactionRequest.TransactionId);
+                    }
                 }
 
                 if (transaction != null)
@@ -74,6 +90,22 @@ namespace OCPP.Core.Server
                     Logger.LogError("StopTransaction => Unknown or not matching transaction: id={0} / chargepoint={1} / tag={2}", stopTransactionRequest.TransactionId, ChargePointStatus?.Id, idTag);
                     WriteMessageLog(ChargePointStatus?.Id, transaction?.ConnectorId, msgIn.Action, string.Format("UnknownTransaction:ID={0}/Meter={1}", stopTransactionRequest.TransactionId, stopTransactionRequest.MeterStop), errorCode);
                     errorCode = ErrorCodes.PropertyConstraintViolation;
+
+                    // If we cannot map the stop to a transaction, assume the connector should be freed
+                    if (stopTransactionRequest.TransactionId == null && ChargePointStatus != null)
+                    {
+                        foreach (var connector in DbContext.ConnectorStatuses.Where(cs => cs.ChargePointId == ChargePointStatus.Id))
+                        {
+                            connector.LastStatus = "Available";
+                            connector.LastStatusTime = DateTime.UtcNow;
+                        }
+                        DbContext.SaveChanges();
+
+                        foreach (var kvp in ChargePointStatus.OnlineConnectors)
+                        {
+                            kvp.Value.Status = ConnectorStatusEnum.Available;
+                        }
+                    }
                 }
 
 

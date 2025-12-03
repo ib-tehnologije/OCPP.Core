@@ -235,6 +235,17 @@ namespace OCPP.Core.Database
 
                 entity.HasIndex(e => e.StripePaymentIntentId)
                     .HasDatabaseName("IX_PaymentReservations_PaymentIntent");
+
+                // Prevent more than one active (non-completed) reservation per connector without relying on filtered indexes
+                entity.Property<string>("ActiveConnectorKey")
+                    .IsRequired()
+                    .HasMaxLength(64)
+                    .HasColumnType("nvarchar(64)")
+                    .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
+
+                entity.HasIndex("ChargePointId", "ConnectorId", "ActiveConnectorKey")
+                    .IsUnique()
+                    .HasDatabaseName("UX_PaymentReservations_ActiveConnector");
             });
 
             OnModelCreatingPartial(modelBuilder);
