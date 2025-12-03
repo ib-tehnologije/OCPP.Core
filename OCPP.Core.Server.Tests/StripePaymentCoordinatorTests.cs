@@ -1,7 +1,12 @@
 using System;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using System.Linq;
+using Stripe;
+using Stripe.Checkout;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -14,6 +19,24 @@ namespace OCPP.Core.Server.Tests
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
                 .Options;
             return new OCPPCoreContext(options);
+        }
+
+        private static StripePaymentCoordinator CreateCoordinator(
+            OCPPCoreContext context,
+            FakeSessionService sessionService,
+            FakePaymentIntentService intentService,
+            StripeOptions? stripeOptions = null,
+            Func<DateTime>? now = null,
+            FakeEventFactory? eventFactory = null)
+        {
+            var options = Options.Create(stripeOptions ?? new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" });
+            return new StripePaymentCoordinator(
+                options,
+                NullLogger<StripePaymentCoordinator>.Instance,
+                sessionService,
+                intentService,
+                eventFactory ?? new FakeEventFactory(),
+                now ?? (() => DateTime.UtcNow));
         }
 
         [Theory]
@@ -114,5 +137,400 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0.40m, transaction.OperatorRevenueTotal);
             Assert.Equal(1.60m, transaction.OwnerPayoutTotal);
         }
+
+        [Theory]
+        [InlineData(0, 10, 100, false, 0.00, 0)]   // no per-minute fee or duration
+        [InlineData(10, 0, 100, false, 0.25, 10)]  // usage starts immediately
+        [InlineData(10, 3, 100, false, 0.25, 7)]   // grace period before idle fee
+        [InlineData(10, 3, 5, false, 0.25, 5)]     // max cap applied
+        public void CalculateUsageFeeMinutes_RespectsGraceAndCap(
+            int totalMinutes,
+            int startUsageAfterMinutes,
+            int maxUsageMinutes,
+            bool usageAfterChargingEnds,
+            double pricePerMinute,
+            int expectedMinutes)
+        {
+            var start = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            var stop = start.AddMinutes(totalMinutes);
+
+            var reservation = new ChargePaymentReservation
+            {
+                UsageFeePerMinute = (decimal)pricePerMinute,
+                StartUsageFeeAfterMinutes = startUsageAfterMinutes,
+                MaxUsageFeeMinutes = maxUsageMinutes,
+                UsageFeeAnchorMinutes = usageAfterChargingEnds ? 1 : 0
+            };
+
+            var transaction = new Transaction
+            {
+                StartTime = start,
+                StopTime = stop
+            };
+
+            var minutes = StripePaymentCoordinator.TestCalculateUsageFeeMinutes(transaction, reservation, stop);
+            Assert.Equal(expectedMinutes, minutes);
+        }
+
+        [Theory]
+        [InlineData(10, 2, 10, 8)]   // idle fee after charging ends with cap
+        [InlineData(0, 0, 10, 0)]    // no ChargingEndedAtUtc -> no idle fee
+        [InlineData(0, 0, 0, 0)]     // zero duration
+        public void CalculateUsageFeeMinutes_IdleAnchorUsesChargingEnded(
+            int idleMinutesAfterCharging,
+            int startUsageAfterMinutes,
+            int maxUsageMinutes,
+            int expectedMinutes)
+        {
+            var start = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            var chargingEnded = start.AddMinutes(5);
+            var stop = chargingEnded.AddMinutes(idleMinutesAfterCharging);
+
+            var reservation = new ChargePaymentReservation
+            {
+                UsageFeePerMinute = 0.30m,
+                StartUsageFeeAfterMinutes = startUsageAfterMinutes,
+                MaxUsageFeeMinutes = maxUsageMinutes,
+                UsageFeeAnchorMinutes = 1
+            };
+
+            var transaction = new Transaction
+            {
+                StartTime = start,
+                ChargingEndedAtUtc = idleMinutesAfterCharging > 0 ? chargingEnded : (DateTime?)null,
+                StopTime = stop
+            };
+
+            var minutes = StripePaymentCoordinator.TestCalculateUsageFeeMinutes(transaction, reservation, stop);
+            Assert.Equal(expectedMinutes, minutes);
+        }
+
+        [Fact]
+        public void CreateCheckoutSession_ComputesMaxTotalsAndPersistsReservation()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP1",
+                MaxSessionKwh = 10,
+                PricePerKwh = 0.35m,
+                ConnectorUsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 5,
+                UserSessionFee = 0.50m,
+                OwnerSessionFee = 0.25m,
+                OwnerCommissionPercent = 0.10m,
+                OwnerCommissionFixedPerKwh = 0m
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session
+                {
+                    Id = "sess_123",
+                    Url = "https://checkout/session/123",
+                    PaymentIntentId = "pi_123"
+                }
+            };
+            var intentService = new FakePaymentIntentService();
+            var coordinator = CreateCoordinator(context, sessionService, intentService);
+
+            var result = coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP1",
+                ChargeTagId = "TAG1",
+                ConnectorId = 1,
+                ReturnBaseUrl = "https://custom-return"
+            });
+
+            Assert.Equal("sess_123", result.Reservation.StripeCheckoutSessionId);
+            Assert.Equal("pi_123", result.Reservation.StripePaymentIntentId);
+            // 10 kWh * 0.35 = 3.50 -> 350 cents; usage fee 5 * 0.20 = 100 cents; session fee 50 cents => 500 total
+            Assert.Equal(500, result.Reservation.MaxAmountCents);
+
+            Assert.NotNull(sessionService.LastCreateOptions);
+            Assert.Equal("https://checkout/session/123", result.CheckoutUrl);
+            Assert.Contains("reservation_id", sessionService.LastCreateOptions.Metadata.Keys);
+            Assert.StartsWith("https://custom-return", sessionService.LastCreateOptions.SuccessUrl);
+            Assert.StartsWith("https://custom-return", sessionService.LastCreateOptions.CancelUrl);
+        }
+
+        [Fact]
+        public void ConfirmReservation_CompletesWhenSessionAndIntentValid()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                StripeCheckoutSessionId = "sess_ok",
+                Status = PaymentReservationStatus.Pending,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG1",
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_ok",
+                    PaymentIntentId = "pi_ok",
+                    Status = "complete",
+                    PaymentStatus = "paid"
+                }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_ok",
+                    Status = "requires_capture",
+                    Amount = 123
+                }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, intentService);
+
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_ok");
+
+            Assert.True(result.Success);
+            Assert.Equal(PaymentReservationStatus.Authorized, result.Reservation.Status);
+            Assert.Equal("pi_ok", result.Reservation.StripePaymentIntentId);
+            Assert.Equal(123, result.Reservation.MaxAmountCents);
+        }
+
+        [Fact]
+        public void CompleteReservation_CapturesWhenAmountDue()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripePaymentIntentId = "pi_capture",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 10,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 42,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2025, 1, 1, 12, 5, 0, DateTimeKind.Utc),
+                MeterStart = 0,
+                MeterStop = 1
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_capture", Status = "requires_capture", Amount = 10_000 }
+            };
+            var sessionService = new FakeSessionService();
+            var coordinator = CreateCoordinator(context, sessionService, intentService, now: () => new DateTime(2025, 1, 1, 12, 10, 0, DateTimeKind.Utc));
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.True(intentService.CaptureCalled);
+            Assert.Equal(reservation.CapturedAmountCents, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
+            Assert.True(reservation.CapturedAmountCents > 0);
+        }
+
+        [Fact]
+        public void CompleteReservation_CancelsWhenNoAmountToCapture()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripePaymentIntentId = "pi_cancel",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0m,
+                UserSessionFee = 0m,
+                UsageFeePerMinute = 0m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 0,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 99,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2025, 1, 1, 12, 5, 0, DateTimeKind.Utc),
+                MeterStart = 0,
+                MeterStop = 0
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_cancel", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), intentService);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
+            Assert.True(intentService.CancelCalled);
+            Assert.False(intentService.CaptureCalled);
+        }
+
+        [Fact]
+        public void HandleWebhookEvent_CheckoutCompletedMarksAuthorized()
+        {
+            using var context = CreateContext();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_webhook",
+                Status = PaymentReservationStatus.Pending,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var evt = new Event
+            {
+                Type = Events.CheckoutSessionCompleted,
+                Data = new EventData
+                {
+                    Object = new Session
+                    {
+                        Id = "sess_webhook",
+                        PaymentIntentId = "pi_webhook",
+                        PaymentStatus = "paid"
+                    }
+                }
+            };
+
+            var sessionService = new FakeSessionService();
+            var intentService = new FakePaymentIntentService();
+            var eventFactory = new FakeEventFactory { EventToReturn = evt };
+
+            var options = new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return", WebhookSecret = "whsec_test" };
+            var coordinator = CreateCoordinator(context, sessionService, intentService, stripeOptions: options, eventFactory: eventFactory);
+
+            coordinator.HandleWebhookEvent(context, "payload", "sig");
+
+            var reservation = context.ChargePaymentReservations.Single(r => r.StripeCheckoutSessionId == "sess_webhook");
+            Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
+            Assert.Equal("pi_webhook", reservation.StripePaymentIntentId);
+            Assert.NotNull(reservation.AuthorizedAtUtc);
+        }
+
+        [Fact]
+        public void HandleWebhookEvent_PaymentFailedMarksFailed()
+        {
+            using var context = CreateContext();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripePaymentIntentId = "pi_fail",
+                Status = PaymentReservationStatus.Pending,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var evt = new Event
+            {
+                Type = Events.PaymentIntentPaymentFailed,
+                Data = new EventData
+                {
+                    Object = new PaymentIntent
+                    {
+                        Id = "pi_fail",
+                        LastPaymentError = new StripeError { Message = "card_declined" }
+                    }
+                }
+            };
+
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                new FakePaymentIntentService(),
+                stripeOptions: new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return", WebhookSecret = "whsec_test" },
+                eventFactory: new FakeEventFactory { EventToReturn = evt });
+
+            coordinator.HandleWebhookEvent(context, "payload", "sig");
+
+            var reservation = context.ChargePaymentReservations.Single(r => r.StripePaymentIntentId == "pi_fail");
+            Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
+            Assert.Equal("card_declined", reservation.LastError);
+        }
+    }
+
+    internal class FakeSessionService : IStripeSessionService
+    {
+        public SessionCreateOptions? LastCreateOptions { get; private set; }
+        public Session CreateResponse { get; set; } = new Session();
+        public Session GetResponse { get; set; } = new Session();
+
+        public Session Create(SessionCreateOptions options)
+        {
+            LastCreateOptions = options;
+            return CreateResponse;
+        }
+
+        public Session Get(string id) => GetResponse;
+    }
+
+    internal class FakePaymentIntentService : IStripePaymentIntentService
+    {
+        public PaymentIntent GetResponse { get; set; } = new PaymentIntent();
+        public PaymentIntentCaptureOptions? LastCaptureOptions { get; private set; }
+        public bool CaptureCalled { get; private set; }
+        public bool CancelCalled { get; private set; }
+
+        public PaymentIntent Get(string id) => GetResponse;
+
+        public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options)
+        {
+            CaptureCalled = true;
+            LastCaptureOptions = options;
+            var capturedAmount = options.AmountToCapture ?? 0;
+            return new PaymentIntent { Id = id, Status = "succeeded", AmountReceived = capturedAmount };
+        }
+
+        public void Cancel(string id)
+        {
+            CancelCalled = true;
+        }
+    }
+
+    internal class FakeEventFactory : IStripeEventFactory
+    {
+        public Event EventToReturn { get; set; } = new Event();
+
+        public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret) => EventToReturn;
     }
 }

@@ -18,8 +18,10 @@ namespace OCPP.Core.Server.Payments
     {
         private readonly StripeOptions _options;
         private readonly ILogger<StripePaymentCoordinator> _logger;
-        private readonly SessionService _sessionService;
-        private readonly PaymentIntentService _paymentIntentService;
+        private readonly IStripeSessionService _sessionService;
+        private readonly IStripePaymentIntentService _paymentIntentService;
+        private readonly Func<DateTime> _utcNow;
+        private readonly IStripeEventFactory _eventFactory;
 
         public bool IsEnabled =>
             _options.Enabled &&
@@ -27,17 +29,29 @@ namespace OCPP.Core.Server.Payments
             !string.IsNullOrWhiteSpace(_options.ReturnBaseUrl);
 
         public StripePaymentCoordinator(IOptions<StripeOptions> options, ILogger<StripePaymentCoordinator> logger)
+            : this(options, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow)
+        {
+        }
+
+        internal StripePaymentCoordinator(
+            IOptions<StripeOptions> options,
+            ILogger<StripePaymentCoordinator> logger,
+            IStripeSessionService sessionService,
+            IStripePaymentIntentService paymentIntentService,
+            IStripeEventFactory eventFactory,
+            Func<DateTime> utcNow)
         {
             _options = options?.Value ?? new StripeOptions();
             _logger = logger;
+            _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
+            _paymentIntentService = paymentIntentService ?? throw new ArgumentNullException(nameof(paymentIntentService));
+            _eventFactory = eventFactory ?? throw new ArgumentNullException(nameof(eventFactory));
+            _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
 
             if (!string.IsNullOrWhiteSpace(_options.ApiKey))
             {
                 StripeConfiguration.ApiKey = _options.ApiKey;
             }
-
-            _sessionService = new SessionService();
-            _paymentIntentService = new PaymentIntentService();
         }
 
         public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request)
@@ -74,7 +88,7 @@ namespace OCPP.Core.Server.Payments
                 throw new InvalidOperationException("Pricing is not configured for this charge point.");
             }
 
-            var now = DateTime.UtcNow;
+            var now = _utcNow();
             var normalizedTag = NormalizeChargeTag(request.ChargeTagId);
 
             EnsureChargeTagExists(dbContext, normalizedTag);
@@ -177,7 +191,7 @@ namespace OCPP.Core.Server.Payments
 
                 reservation.StripeCheckoutSessionId = session.Id;
                 reservation.StripePaymentIntentId = session.PaymentIntentId;
-                reservation.UpdatedAtUtc = DateTime.UtcNow;
+                reservation.UpdatedAtUtc = _utcNow();
 
                 dbContext.Add(reservation);
                 dbContext.SaveChanges();
@@ -255,14 +269,14 @@ namespace OCPP.Core.Server.Payments
                     result.Status = paymentIntent.Status;
                     reservation.Status = PaymentReservationStatus.Failed;
                     reservation.LastError = result.Error;
-                    reservation.UpdatedAtUtc = DateTime.UtcNow;
+                    reservation.UpdatedAtUtc = _utcNow();
                     dbContext.SaveChanges();
                     return result;
                 }
 
                 reservation.StripePaymentIntentId = paymentIntentId;
                 reservation.Status = PaymentReservationStatus.Authorized;
-                reservation.AuthorizedAtUtc = DateTime.UtcNow;
+                reservation.AuthorizedAtUtc = _utcNow();
                 reservation.UpdatedAtUtc = reservation.AuthorizedAtUtc.Value;
                 var paymentIntentAmount = (long?)paymentIntent.Amount;
                 reservation.MaxAmountCents = paymentIntentAmount ?? reservation.MaxAmountCents;
@@ -281,7 +295,7 @@ namespace OCPP.Core.Server.Payments
                 result.Status = "StripeError";
                 reservation.Status = PaymentReservationStatus.Failed;
                 reservation.LastError = sex.Message;
-                reservation.UpdatedAtUtc = DateTime.UtcNow;
+                reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
                 return result;
             }
@@ -310,7 +324,7 @@ namespace OCPP.Core.Server.Payments
             finally
             {
                 reservation.Status = PaymentReservationStatus.Cancelled;
-                reservation.UpdatedAtUtc = DateTime.UtcNow;
+                reservation.UpdatedAtUtc = _utcNow();
                 if (!string.IsNullOrWhiteSpace(reason))
                 {
                     reservation.LastError = reason;
@@ -339,7 +353,7 @@ namespace OCPP.Core.Server.Payments
 
             reservation.TransactionId = transactionId;
             reservation.Status = PaymentReservationStatus.Charging;
-            reservation.UpdatedAtUtc = DateTime.UtcNow;
+            reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
         }
 
@@ -364,7 +378,7 @@ namespace OCPP.Core.Server.Payments
             }
 
             reservation.ActualEnergyKwh = actualEnergy;
-            reservation.UpdatedAtUtc = DateTime.UtcNow;
+            reservation.UpdatedAtUtc = _utcNow();
 
             if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
             {
@@ -376,40 +390,10 @@ namespace OCPP.Core.Server.Payments
 
             var energyCostCents = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
             var sessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
-            var usageFeeCents = 0L;
-            var usageFeeMinutes = 0;
-
-            bool usageAfterChargingEnds = reservation.UsageFeeAnchorMinutes == 1;
-
-            if (reservation.UsageFeePerMinute > 0 && transaction.StartTime != default)
-            {
-                var stopTime = transaction.StopTime ?? DateTime.UtcNow;
-                DateTime? anchorStart = transaction.StartTime;
-
-                if (usageAfterChargingEnds)
-                {
-                    if (transaction.ChargingEndedAtUtc.HasValue)
-                    {
-                        anchorStart = transaction.ChargingEndedAtUtc.Value;
-                    }
-                    else
-                    {
-                        anchorStart = null; // no anchor => do not charge idle fee
-                    }
-                }
-
-                if (anchorStart.HasValue && stopTime > anchorStart.Value)
-                {
-                    var totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTime - anchorStart.Value).TotalMinutes));
-                    usageFeeMinutes = Math.Min(
-                        Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
-                        reservation.MaxUsageFeeMinutes);
-                    if (usageFeeMinutes > 0)
-                    {
-                        usageFeeCents = CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute);
-                    }
-                }
-            }
+            var usageFeeMinutes = CalculateUsageFeeMinutes(transaction, reservation, _utcNow());
+            var usageFeeCents = usageFeeMinutes > 0
+                ? CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute)
+                : 0L;
 
             var amountToCapture = energyCostCents + usageFeeCents + sessionFeeCents;
 
@@ -429,7 +413,7 @@ namespace OCPP.Core.Server.Payments
                         };
                         var captured = _paymentIntentService.Capture(paymentIntent.Id, captureOptions);
                         reservation.CapturedAmountCents = captureOptions.AmountToCapture;
-                        reservation.CapturedAtUtc = DateTime.UtcNow;
+                        reservation.CapturedAtUtc = _utcNow();
                         reservation.Status = PaymentReservationStatus.Completed;
                     }
                     else
@@ -441,7 +425,7 @@ namespace OCPP.Core.Server.Payments
                 else if (paymentIntent.Status == "succeeded")
                 {
                     reservation.CapturedAmountCents = paymentIntent.AmountReceived;
-                    reservation.CapturedAtUtc = DateTime.UtcNow;
+                    reservation.CapturedAtUtc = _utcNow();
                     reservation.Status = PaymentReservationStatus.Completed;
                 }
                 else
@@ -459,9 +443,38 @@ namespace OCPP.Core.Server.Payments
                 _logger.LogError(sex, "Stripe capture failed for reservation {ReservationId}", reservation.ReservationId);
                 reservation.Status = PaymentReservationStatus.Failed;
                 reservation.LastError = sex.Message;
-                reservation.UpdatedAtUtc = DateTime.UtcNow;
+                reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
             }
+        }
+
+        private static int CalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, DateTime? nowUtc = null)
+        {
+            if (reservation == null) throw new ArgumentNullException(nameof(reservation));
+            if (transaction == null) throw new ArgumentNullException(nameof(transaction));
+            if (reservation.UsageFeePerMinute <= 0 || transaction.StartTime == default)
+            {
+                return 0;
+            }
+
+            bool usageAfterChargingEnds = reservation.UsageFeeAnchorMinutes == 1;
+            var stopTime = transaction.StopTime ?? nowUtc ?? DateTime.UtcNow;
+            DateTime? anchorStart = transaction.StartTime;
+
+            if (usageAfterChargingEnds)
+            {
+                anchorStart = transaction.ChargingEndedAtUtc;
+            }
+
+            if (!anchorStart.HasValue || stopTime <= anchorStart.Value)
+            {
+                return 0;
+            }
+
+            var totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTime - anchorStart.Value).TotalMinutes));
+            return Math.Min(
+                Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
+                reservation.MaxUsageFeeMinutes);
         }
 
         public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader)
@@ -477,7 +490,7 @@ namespace OCPP.Core.Server.Payments
             Event stripeEvent;
             try
             {
-                stripeEvent = EventUtility.ConstructEvent(payload, signatureHeader, _options.WebhookSecret);
+                stripeEvent = _eventFactory.ConstructEvent(payload, signatureHeader, _options.WebhookSecret);
             }
             catch (Exception ex)
             {
@@ -514,10 +527,10 @@ namespace OCPP.Core.Server.Payments
                 string.Equals(session.PaymentStatus, "paid", StringComparison.OrdinalIgnoreCase))
             {
                 reservation.Status = PaymentReservationStatus.Authorized;
-                reservation.AuthorizedAtUtc = DateTime.UtcNow;
+                reservation.AuthorizedAtUtc = _utcNow();
             }
 
-            reservation.UpdatedAtUtc = DateTime.UtcNow;
+            reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
         }
 
@@ -533,7 +546,7 @@ namespace OCPP.Core.Server.Payments
 
             reservation.Status = PaymentReservationStatus.Failed;
             reservation.LastError = paymentIntent.LastPaymentError?.Message ?? "Payment failed.";
-            reservation.UpdatedAtUtc = DateTime.UtcNow;
+            reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
         }
 
@@ -560,7 +573,7 @@ namespace OCPP.Core.Server.Payments
             if (reservation != null)
             {
                 reservation.TransactionId = transaction.TransactionId;
-                reservation.UpdatedAtUtc = DateTime.UtcNow;
+                reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
             }
 
@@ -672,5 +685,49 @@ namespace OCPP.Core.Server.Payments
 
         private static decimal ConvertToDecimal(long cents) =>
             Math.Round(cents / 100m, 4, MidpointRounding.AwayFromZero);
+    }
+
+    internal interface IStripeSessionService
+    {
+        Session Create(SessionCreateOptions options);
+        Session Get(string id);
+    }
+
+    internal interface IStripePaymentIntentService
+    {
+        PaymentIntent Get(string id);
+        PaymentIntent Capture(string id, PaymentIntentCaptureOptions options);
+        void Cancel(string id);
+    }
+
+    internal interface IStripeEventFactory
+    {
+        Event ConstructEvent(string payload, string signatureHeader, string webhookSecret);
+    }
+
+    internal class StripeSessionServiceWrapper : IStripeSessionService
+    {
+        private readonly SessionService _inner = new SessionService();
+
+        public Session Create(SessionCreateOptions options) => _inner.Create(options);
+
+        public Session Get(string id) => _inner.Get(id);
+    }
+
+    internal class StripePaymentIntentServiceWrapper : IStripePaymentIntentService
+    {
+        private readonly PaymentIntentService _inner = new PaymentIntentService();
+
+        public PaymentIntent Get(string id) => _inner.Get(id);
+
+        public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options) => _inner.Capture(id, options);
+
+        public void Cancel(string id) => _inner.Cancel(id);
+    }
+
+    internal class StripeEventFactoryWrapper : IStripeEventFactory
+    {
+        public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret) =>
+            EventUtility.ConstructEvent(payload, signatureHeader, webhookSecret);
     }
 }

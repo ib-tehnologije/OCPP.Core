@@ -1,3 +1,4 @@
+using System;
 using OCPP.Core.Database;
 
 namespace OCPP.Core.Server.Payments
@@ -14,6 +15,9 @@ namespace OCPP.Core.Server.Payments
             CalculateFlatAmountInCents(amount);
 
         internal static string TestNormalizeChargeTag(string tag) => NormalizeChargeTag(tag);
+
+        internal static int TestCalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, DateTime? nowUtc = null) =>
+            CalculateUsageFeeMinutes(transaction, reservation, nowUtc);
 
         internal static void TestPersistTransactionBreakdown(
             OCPPCoreContext dbContext,

@@ -79,6 +79,22 @@ namespace OCPP.Core.Management.Controllers
                 if (Request.Method == "POST")
                 {
                     cpvm.OwnerId = NormalizeOwnerId(cpvm.OwnerId);
+
+                    // When editing an existing charge point, rehydrate required fields from DB in case the readonly inputs were not posted (browser quirks).
+                    if (Id != "@" && currentChargePoint != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(cpvm.ChargePointId))
+                        {
+                            cpvm.ChargePointId = currentChargePoint.ChargePointId;
+                        }
+                        if (string.IsNullOrWhiteSpace(cpvm.Name))
+                        {
+                            cpvm.Name = currentChargePoint.Name;
+                        }
+                        ModelState.Remove(nameof(cpvm.ChargePointId));
+                        ModelState.Remove(nameof(cpvm.Name));
+                    }
+
                     if (!ModelState.IsValid)
                     {
                         cpvm.Owners = owners;
@@ -280,6 +296,9 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.Owners = owners;
                         cpvm.CurrentId = Id;
                     }
+
+                    // Clear validation state from the initial (empty) model binding on GET so required-field errors are not shown on load.
+                    ModelState.Clear();
 
                     string viewName = (!string.IsNullOrEmpty(cpvm.ChargePointId) || Id == "@") ? "ChargePointDetail" : "ChargePointList";
                     return View(viewName, cpvm);
