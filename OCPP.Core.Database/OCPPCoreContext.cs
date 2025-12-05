@@ -272,11 +272,22 @@ namespace OCPP.Core.Database
                     .HasDatabaseName("IX_PaymentReservations_PaymentIntent");
 
                 // Prevent more than one active (non-completed) reservation per connector without relying on filtered indexes
-                entity.Property<string>("ActiveConnectorKey")
-                    .IsRequired()
+                var activeKey = entity.Property<string>("ActiveConnectorKey")
                     .HasMaxLength(64)
-                    .HasColumnType("nvarchar(64)")
-                    .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
+                    .HasColumnType("nvarchar(64)");
+
+                var isInMemory = string.Equals(Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.OrdinalIgnoreCase);
+                if (isInMemory)
+                {
+                    // InMemory provider ignores computed columns; provide a default so required constraint is satisfied in tests.
+                    activeKey.HasDefaultValue("ACTIVE");
+                }
+                else
+                {
+                    activeKey
+                        .IsRequired()
+                        .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
+                }
 
                 entity.HasIndex("ChargePointId", "ConnectorId", "ActiveConnectorKey")
                     .IsUnique()
