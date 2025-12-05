@@ -37,6 +37,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<Owner> Owners { get; set; }
         public virtual DbSet<ChargePoint> ChargePoints { get; set; }
         public virtual DbSet<ChargeTag> ChargeTags { get; set; }
+        public virtual DbSet<ChargeTagPrivilege> ChargeTagPrivileges { get; set; }
         public virtual DbSet<ConnectorStatus> ConnectorStatuses { get; set; }
         public virtual DbSet<MessageLog> MessageLogs { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
@@ -115,6 +116,39 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.TagName).HasMaxLength(200);
             });
 
+            modelBuilder.Entity<ChargeTagPrivilege>(entity =>
+            {
+                entity.ToTable("ChargeTagPrivilege");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.TagId)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.ChargePointId)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.Note)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.CreatedAtUtc)
+                    .HasDefaultValueSql("getutcdate()");
+
+                entity.HasIndex(e => new { e.TagId, e.ChargePointId })
+                    .HasDatabaseName("IX_ChargeTagPrivilege_Tag_Point");
+
+                entity.HasOne(d => d.Tag)
+                    .WithMany()
+                    .HasForeignKey(d => d.TagId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(d => d.ChargePoint)
+                    .WithMany()
+                    .HasForeignKey(d => d.ChargePointId)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
+
             modelBuilder.Entity<ConnectorStatus>(entity =>
             {
                 entity.HasKey(e => new { e.ChargePointId, e.ConnectorId });
@@ -164,6 +198,7 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.StopReason).HasMaxLength(100);
 
                 entity.Property(e => e.Currency).HasMaxLength(10);
+                entity.Property(e => e.FreeReason).HasMaxLength(200);
                 entity.Property(e => e.EnergyCost).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.UserSessionFeeAmount).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.OwnerSessionFeeAmount).HasColumnType("decimal(18,4)");

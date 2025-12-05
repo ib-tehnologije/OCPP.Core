@@ -123,6 +123,12 @@
   <data name="Blocked" xml:space="preserve">
     <value>Blocked</value>
   </data>
+  <data name="FreeAccess" xml:space="preserve">
+    <value>Free access</value>
+  </data>
+  <data name="FreeScopeAll" xml:space="preserve">
+    <value>All charge points</value>
+  </data>
   <data name="ExpiryDate" xml:space="preserve">
     <value>Expires</value>
   </data>

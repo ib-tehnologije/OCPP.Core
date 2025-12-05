@@ -120,6 +120,21 @@
   <data name="ChargeTagBlockedLabel" xml:space="preserve">
     <value>Blocked</value>
   </data>
+  <data name="FreeChargingLabel" xml:space="preserve">
+    <value>Free charging</value>
+  </data>
+  <data name="FreeScopeAll" xml:space="preserve">
+    <value>All charge points</value>
+  </data>
+  <data name="FreeScopeHint" xml:space="preserve">
+    <value>Pick a charge point to limit this privilege; leave blank for all.</value>
+  </data>
+  <data name="PrivilegeNoteLabel" xml:space="preserve">
+    <value>Note</value>
+  </data>
+  <data name="PrivilegeNotePlaceholder" xml:space="preserve">
+    <value>Optional note (e.g. Hotel VIP)</value>
+  </data>
   <data name="ChargeTagExpirationLabel" xml:space="preserve">
     <value>Expiration</value>
   </data>

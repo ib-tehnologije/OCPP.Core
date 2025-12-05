@@ -29,6 +29,7 @@ namespace OCPP.Core.Management.Models
     public class ChargeTagViewModel
     {
         public List<ChargeTag> ChargeTags { get; set; }
+        public List<ChargePoint> ChargePoints { get; set; }
 
         public string CurrentTagId { get; set; }
 
@@ -46,5 +47,13 @@ namespace OCPP.Core.Management.Models
         public DateTime? ExpiryDate { get; set; }
 
         public bool Blocked { get; set; }
+
+        public bool FreeChargingEnabled { get; set; }
+
+        [StringLength(100)]
+        public string FreeChargePointId { get; set; }
+
+        [StringLength(200)]
+        public string PrivilegeNote { get; set; }
     }
 }

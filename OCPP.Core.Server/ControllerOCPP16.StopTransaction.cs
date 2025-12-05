@@ -90,22 +90,6 @@ namespace OCPP.Core.Server
                     Logger.LogError("StopTransaction => Unknown or not matching transaction: id={0} / chargepoint={1} / tag={2}", stopTransactionRequest.TransactionId, ChargePointStatus?.Id, idTag);
                     WriteMessageLog(ChargePointStatus?.Id, transaction?.ConnectorId, msgIn.Action, string.Format("UnknownTransaction:ID={0}/Meter={1}", stopTransactionRequest.TransactionId, stopTransactionRequest.MeterStop), errorCode);
                     errorCode = ErrorCodes.PropertyConstraintViolation;
-
-                    // If we cannot map the stop to a transaction, assume the connector should be freed
-                    if (stopTransactionRequest.TransactionId == null && ChargePointStatus != null)
-                    {
-                        foreach (var connector in DbContext.ConnectorStatuses.Where(cs => cs.ChargePointId == ChargePointStatus.Id))
-                        {
-                            connector.LastStatus = "Available";
-                            connector.LastStatusTime = DateTime.UtcNow;
-                        }
-                        DbContext.SaveChanges();
-
-                        foreach (var kvp in ChargePointStatus.OnlineConnectors)
-                        {
-                            kvp.Value.Status = ConnectorStatusEnum.Available;
-                        }
-                    }
                 }
 
 

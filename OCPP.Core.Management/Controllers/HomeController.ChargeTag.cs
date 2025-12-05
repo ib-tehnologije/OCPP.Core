@@ -54,9 +54,12 @@ namespace OCPP.Core.Management.Controllers
 
                 Logger.LogTrace("ChargeTag: Loading charge tags...");
                 List<ChargeTag> dbChargeTags = DbContext.ChargeTags.OrderBy(x => x.TagName).ToList<ChargeTag>();
+                List<ChargePoint> dbChargePoints = DbContext.ChargePoints.OrderBy(cp => cp.ChargePointId).ToList();
                 Logger.LogInformation("ChargeTag: Found {0} charge tags", dbChargeTags.Count);
 
                 ChargeTag currentChargeTag = null;
+                ChargeTagPrivilege currentPrivilege = null;
+                ctvm.ChargePoints = dbChargePoints;
                 if (!string.IsNullOrEmpty(Id))
                 {
                     foreach (ChargeTag tag in dbChargeTags)
@@ -65,6 +68,7 @@ namespace OCPP.Core.Management.Controllers
                         {
                             currentChargeTag = tag;
                             Logger.LogTrace("ChargeTag: Current charge tag: {0} / {1}", tag.TagId, tag.TagName);
+                            currentPrivilege = DbContext.ChargeTagPrivileges.FirstOrDefault(p => p.TagId == tag.TagId);
                             break;
                         }
                     }
@@ -111,6 +115,7 @@ namespace OCPP.Core.Management.Controllers
                             newTag.Blocked = ctvm.Blocked;
                             DbContext.ChargeTags.Add(newTag);
                             DbContext.SaveChanges();
+                            UpsertPrivilege(ctvm.TagId, ctvm.FreeChargingEnabled, ctvm.FreeChargePointId, ctvm.PrivilegeNote);
                             Logger.LogInformation("ChargeTag: New => charge tag saved: {0} / {1}", ctvm.TagId, ctvm.TagName);
                         }
                         else
@@ -138,6 +143,7 @@ namespace OCPP.Core.Management.Controllers
                             currentChargeTag.ExpiryDate = ctvm.ExpiryDate;
                             currentChargeTag.Blocked = ctvm.Blocked;
                             DbContext.SaveChanges();
+                            UpsertPrivilege(ctvm.TagId, ctvm.FreeChargingEnabled, ctvm.FreeChargePointId, ctvm.PrivilegeNote);
                             Logger.LogInformation("ChargeTag: Edit => charge tag saved: {0} / {1}", ctvm.TagId, ctvm.TagName);
                         }
                     }
@@ -149,7 +155,12 @@ namespace OCPP.Core.Management.Controllers
                     // List all charge tags
                     ctvm = new ChargeTagViewModel();
                     ctvm.ChargeTags = dbChargeTags;
+                    ctvm.ChargePoints = dbChargePoints;
                     ctvm.CurrentTagId = Id;
+                    ViewBag.Privileges = DbContext.ChargeTagPrivileges
+                        .AsNoTracking()
+                        .Where(p => p.FreeChargingEnabled)
+                        .ToDictionary(p => p.TagId, p => p);
 
                     if (currentChargeTag != null)
                     {
@@ -158,6 +169,12 @@ namespace OCPP.Core.Management.Controllers
                         ctvm.ParentTagId = currentChargeTag.ParentTagId;
                         ctvm.ExpiryDate = currentChargeTag.ExpiryDate;
                         ctvm.Blocked = (currentChargeTag.Blocked != null) && currentChargeTag.Blocked.Value;
+                        if (currentPrivilege != null)
+                        {
+                            ctvm.FreeChargingEnabled = currentPrivilege.FreeChargingEnabled;
+                            ctvm.FreeChargePointId = currentPrivilege.ChargePointId;
+                            ctvm.PrivilegeNote = currentPrivilege.Note;
+                        }
                     }
 
                     string viewName = (!string.IsNullOrEmpty(ctvm.TagId) || Id=="@") ? "ChargeTagDetail" : "ChargeTagList";
@@ -169,6 +186,37 @@ namespace OCPP.Core.Management.Controllers
                 Logger.LogError(exp, "ChargeTag: Error loading oder saving charge tag(s) from database");
                 TempData["ErrMessage"] = exp.Message;
                 return RedirectToAction("Error", new { Id = "" });
+            }
+
+            void UpsertPrivilege(string tagId, bool freeChargingEnabled, string chargePointId, string note)
+            {
+                var privilege = DbContext.ChargeTagPrivileges.FirstOrDefault(p => p.TagId == tagId);
+
+                if (!freeChargingEnabled)
+                {
+                    if (privilege != null)
+                    {
+                        DbContext.ChargeTagPrivileges.Remove(privilege);
+                        DbContext.SaveChanges();
+                    }
+                    return;
+                }
+
+                if (privilege == null)
+                {
+                    privilege = new ChargeTagPrivilege
+                    {
+                        TagId = tagId,
+                        CreatedAtUtc = DateTime.UtcNow
+                    };
+                    DbContext.ChargeTagPrivileges.Add(privilege);
+                }
+
+                privilege.FreeChargingEnabled = true;
+                privilege.ChargePointId = string.IsNullOrWhiteSpace(chargePointId) ? null : chargePointId;
+                privilege.Note = note;
+                privilege.UpdatedAtUtc = DateTime.UtcNow;
+                DbContext.SaveChanges();
             }
         }
     }

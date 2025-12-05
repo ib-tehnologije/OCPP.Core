@@ -97,6 +97,9 @@ namespace OCPP.Core.Server
                 dbContext.Database.Migrate();
             }
 
+            // Startup maintenance: clear stale reservations and stuck connector statuses.
+            StartupMaintenance.Run(dbContext, logger, Configuration);
+
             // Set WebSocketsOptions
             var webSocketOptions = new WebSocketOptions() 
             {

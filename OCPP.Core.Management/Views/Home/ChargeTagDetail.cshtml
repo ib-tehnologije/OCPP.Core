@@ -97,6 +97,37 @@
                 </div>
             </div>
             <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <label class="form-check-label inline-label" for="FreeChargingEnabled">@Localizer["FreeChargingLabel"]</label>
+                </div>
+                <div class="col-sm-2">
+                    <div class="form-check">
+                        @Html.CheckBoxFor(m => m.FreeChargingEnabled, new { @class = "form-check-input checkbox-lg", @id = "FreeChargingEnabled" })
+                    </div>
+                </div>
+                <div class="col-sm-4">
+                    <select class="form-control" id="FreeChargePointId" name="FreeChargePointId" @(Model.FreeChargingEnabled ? "" : "disabled")>
+                        <option value="">@Localizer["FreeScopeAll"]</option>
+                        @if (Model.ChargePoints != null)
+                        {
+                            foreach (var cp in Model.ChargePoints)
+                            {
+                                <option value="@cp.ChargePointId" selected="@(cp.ChargePointId == Model.FreeChargePointId ? "selected" : null)">@cp.ChargePointId</option>
+                            }
+                        }
+                    </select>
+                    <small class="form-text text-muted">@Localizer["FreeScopeHint"]</small>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <label class="inline-label" for="PrivilegeNote">@Localizer["PrivilegeNoteLabel"]</label>
+                </div>
+                <div class="col-sm-6">
+                    <input class="form-control" id="PrivilegeNote" name="PrivilegeNote" maxlength="200" value="@Model.PrivilegeNote" placeholder="@Localizer["PrivilegeNotePlaceholder"]" @(Model.FreeChargingEnabled ? "" : "disabled") />
+                </div>
+            </div>
+            <div class="row">
                 <div class="col-sm-12 text-danger">
                     @ViewBag.ErrorMsg
                 </div>
@@ -132,6 +163,12 @@
                     todayBtn: true,
                     language: "@ViewBag.Language",
                     todayHighlight: true
+                });
+
+                $('#FreeChargingEnabled').change(function () {
+                    var enabled = $(this).is(':checked');
+                    $('#FreeChargePointId').prop('disabled', !enabled);
+                    $('#PrivilegeNote').prop('disabled', !enabled);
                 });
             });
 

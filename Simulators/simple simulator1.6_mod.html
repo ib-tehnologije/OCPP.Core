@@ -53,14 +53,18 @@
 <select style="display:none;"><option value="">OCPP-J1.6</option></select>
 <label>Central Station</label><input id="CP" type="text" placeholder="Id Station" value="ws://localhost:8081/OCPP/Test1234" value_old="ws://192.168.1.253:8080/steve/websocket/CentralSystemService/WB-Dallmann"/>
 <label>Tag</label><input id="TAG" type="text" placeholder="Tag" value="B4A63CDF"/>
+<label>Connector Id</label><input id="ConnectorId" type="number" min="1" step="1" value="1"/>
 <h2>Actions</h2>
 <button id="connect">Connect</button>
 <button id="send">Authorize</button>
 <button id="start">Start Transaction</button>
 <button id="stop">Stop Transaction</button>
+<button id="setAvailable">Set Available</button>
 <button id="heartbeat">Heartbeat</button>
 <label>Meter value</label><input id="metervalue" type="text" placeholder="Meter value" value="1"/>
 <button id="mv">Send Meter Values</button>
+<label>Status</label>
+<input id="statusValue" type="text" placeholder="Available/Charging/Occupied/Faulted" value="Available"/>
 <button id="status">Status Notification</button>
 <button id="data_transfer">Data Tranfer</button>
 
@@ -119,6 +123,14 @@
         return id;
     }
 
+    function getConnectorId() {
+        var cid = parseInt($("#ConnectorId").val());
+        if (isNaN(cid) || cid <= 0) {
+            return 1;
+        }
+        return cid;
+    }
+
     function wsConnect() {
         var wsurl = $('select').val();
         var CP = $('#CP').val();
@@ -155,11 +167,7 @@
 
                         var dd = ddata[2];
                         logMsg("Data exchange successful!");
-                        var array = $.map(dd, function (value, index) {
-                            return [value];
-                        });
-                        //var TransactionId = (array[0]);
-                        var TransactionId = (array[1]);
+                        var TransactionId = dd.transactionId || dd.TransactionId || 0;
                         sessionStorage.setItem('TransactionId', TransactionId);
 
                     }
@@ -253,7 +261,7 @@
         connector_locked = true;
         logMsg("Connector status changed to: " + connector_locked);
         var strtT = JSON.stringify([2, id, "StartTransaction", {
-            "connectorId": 2,
+            "connectorId": getConnectorId(),
             "idTag": $("#TAG").val(),
             "timestamp": formatDate(new Date()),
             "meterStart": 0,
@@ -270,12 +278,27 @@
         logMsg("Connector status changed to: " + connector_locked);
         $('#yellow').show();
         var stpT = JSON.stringify([2, id, "StopTransaction",{
-            "transactionId": parseInt(ssid),
+            "transactionId": parseInt(ssid || 0),
             "idTag": $("#TAG").val(),
             "timestamp": formatDate(new Date()),
             "meterStop": 20
         }]);
         _websocket.send(stpT);
+    }
+
+    function setAvailable(){
+        sessionStorage.setItem('LastAction', "StatusNotification");
+        var SN = JSON.stringify([2, id, "StatusNotification", {
+            "connectorId": getConnectorId(),
+            "status": "Available",
+            "errorCode": "NoError",
+            "info": "",
+            "timestamp": formatDate(new Date()),
+            "vendorId": "",
+            "vendorErrorCode": ""
+        }]);
+        _websocket.send(SN);
+        logMsg("Sent StatusNotification: Available");
     }
 
     function handleData(data, request = false){
@@ -348,16 +371,20 @@
             stopTransaction();
         });
 
+        $('#setAvailable').click(function () {
+            setAvailable();
+        });
+
         $('#mv').click(function () {
             sessionStorage.setItem('LastAction', "MeterValues");
 			ssid = sessionStorage.getItem('TransactionId');
             var val = String($("#metervalue").val());
 			var MV;
-			if (ssid == null)
-				MV = JSON.stringify([2, id, "MeterValues", {"connectorId": 2, "meterValue": [{"timestamp": formatDate(new Date()), "sampledValue": [{"value": val, "measurand": "Energy.Active.Import.Register"},{"value": "800", "measurand": "Power.Active.Import"},{"value": "47", "measurand": "SoC"}]}]}]);
-			else
-				//MV = JSON.stringify([2, id, "MeterValues", {"connectorId": 2, "transactionId": parseInt(ssid), "meterValue": [{"timestamp": formatDate(new Date()), "sampledValue": [{"value": val, "measurand": "Energy.Active.Import.Register"},{"value": "800", "measurand": "Power.Active.Import"},{"value": "47", "measurand": "SoC"}]}]}]);
-				MV = JSON.stringify([2, id, "MeterValues", {"connectorId": 2, "transactionId": parseInt(ssid), "meterValue": [{"timestamp": formatDate(new Date()), "sampledValue": [{"value": val, "measurand": "Energy.Active.Import.Register"}]}]}]);
+            var cid = getConnectorId();
+            if (ssid == null)
+                MV = JSON.stringify([2, id, "MeterValues", {"connectorId": cid, "meterValue": [{"timestamp": formatDate(new Date()), "sampledValue": [{"value": val, "measurand": "Energy.Active.Import.Register"},{"value": "800", "measurand": "Power.Active.Import"},{"value": "47", "measurand": "SoC"}]}]}]);
+            else
+                MV = JSON.stringify([2, id, "MeterValues", {"connectorId": cid, "transactionId": parseInt(ssid), "meterValue": [{"timestamp": formatDate(new Date()), "sampledValue": [{"value": val, "measurand": "Energy.Active.Import.Register"}]}]}]);
             _websocket.send(MV);
 
         });
@@ -368,8 +395,8 @@
         $('#status').click(function () {
             sessionStorage.setItem('LastAction', "StatusNotification");
             var SN = JSON.stringify([2, id, "StatusNotification", {
-                "connectorId": 2,
-                "status": "Available",
+                "connectorId": getConnectorId(),
+                "status": $("#statusValue").val() || "Available",
                 "errorCode": "NoError",
                 "info": "",
                 "timestamp": formatDate(new Date()),

@@ -16,6 +16,7 @@
                 <th class="th-sm">@Localizer["GroupName"]</th>
                 <th class="th-sm">@Localizer["ExpiryDate"]</th>
                 <th class="th-sm">@Localizer["Blocked"]</th>
+                <th class="th-sm">@Localizer["FreeAccess"]</th>
             </tr>
         </thead>
         <tbody>
@@ -23,12 +24,25 @@
             {
                 foreach (ChargeTag tag in Model.ChargeTags)
                 {
+                    var privilege = ViewBag.Privileges != null ? ((IDictionary<string, OCPP.Core.Database.ChargeTagPrivilege>)ViewBag.Privileges).ContainsKey(tag.TagId)
+                        ? ((IDictionary<string, OCPP.Core.Database.ChargeTagPrivilege>)ViewBag.Privileges)[tag.TagId]
+                        : null : null;
                     <tr class="table-row" data-href='@Url.Action("ChargeTag", Constants.HomeController, new { id = tag.TagId })'>
                         <td>@tag.TagId</td>
                         <td>@tag.TagName</td>
                         <td>@tag.ParentTagId</td>
                         <td>@((tag.ExpiryDate != null) ? tag.ExpiryDate.Value.ToString(ViewBag.DatePattern) : "-")</td>
                         <td>@((tag.Blocked == true) ? "1" : "0")</td>
+                        <td>
+                            @if (privilege != null && privilege.FreeChargingEnabled)
+                            {
+                                @((string.IsNullOrWhiteSpace(privilege.ChargePointId) ? Localizer["FreeScopeAll"].Value : privilege.ChargePointId))
+                            }
+                            else
+                            {
+                                @Html.Raw("-")
+                            }
+                        </td>
                     </tr>
                 }
             }

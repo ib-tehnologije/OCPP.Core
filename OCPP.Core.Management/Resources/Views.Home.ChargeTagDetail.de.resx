@@ -120,6 +120,21 @@
   <data name="ChargeTagBlockedLabel" xml:space="preserve">
     <value>Gesperrt</value>
   </data>
+  <data name="FreeChargingLabel" xml:space="preserve">
+    <value>Kostenlos laden</value>
+  </data>
+  <data name="FreeScopeAll" xml:space="preserve">
+    <value>Alle Ladestationen</value>
+  </data>
+  <data name="FreeScopeHint" xml:space="preserve">
+    <value>Station wählen zum Einschränken, leer lassen für alle.</value>
+  </data>
+  <data name="PrivilegeNoteLabel" xml:space="preserve">
+    <value>Notiz</value>
+  </data>
+  <data name="PrivilegeNotePlaceholder" xml:space="preserve">
+    <value>Optionale Notiz (z.B. Hotel VIP)</value>
+  </data>
   <data name="ChargeTagExpirationLabel" xml:space="preserve">
     <value>Ablaufdatum</value>
   </data>

@@ -50,6 +50,7 @@ namespace OCPP.Core.Database
         public decimal OperatorRevenueTotal { get; set; }
         public decimal OwnerPayoutTotal { get; set; }
         public string Currency { get; set; }
+        public string FreeReason { get; set; }
         public DateTime? ChargingEndedAtUtc { get; set; }
         public int IdleUsageFeeMinutes { get; set; }
         public decimal IdleUsageFeeAmount { get; set; }

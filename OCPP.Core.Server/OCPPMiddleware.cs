@@ -53,6 +53,7 @@ namespace OCPP.Core.Server
         // Timeout in ms for waiting for responses from charger (for communication scheme server => charger)
         private int TimoutWaitForCharger = 60 * 1000;   // 60 seconds
 
+        private static readonly TimeSpan PersistedStatusStaleAfter = TimeSpan.FromMinutes(30);
 
         private readonly RequestDelegate _next;
         private readonly ILoggerFactory _logFactory;
@@ -218,18 +219,8 @@ namespace OCPP.Core.Server
 
                                 lock (_chargePointStatusDict)
                                 {
-                                    // Check if this chargepoint already/still hat a status object
-                                    if (_chargePointStatusDict.ContainsKey(chargepointIdentifier))
-                                    {
-                                        // exists => check status
-                                        if (_chargePointStatusDict[chargepointIdentifier].WebSocket.State != WebSocketState.Open)
-                                        {
-                                            // Closed or aborted => remove
-                                            _chargePointStatusDict.Remove(chargepointIdentifier);
-                                        }
-                                    }
-
-                                    _chargePointStatusDict.Add(chargepointIdentifier, chargePointStatus);
+                                    // Replace any existing status entry to avoid duplicate-key errors on reconnects
+                                    _chargePointStatusDict[chargepointIdentifier] = chargePointStatus;
                                     statusSuccess = true;
                                 }
                             }
@@ -809,26 +800,6 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            // Hard gate: block when connector already has an open transaction or active reservation.
-            bool hasOpenTransaction = dbContext.Transactions.Any(t =>
-                t.ChargePointId == request.ChargePointId &&
-                t.ConnectorId == request.ConnectorId &&
-                t.StopTime == null);
-
-            bool hasActiveReservation = dbContext.ChargePaymentReservations.Any(r =>
-                r.ChargePointId == request.ChargePointId &&
-                r.ConnectorId == request.ConnectorId &&
-                r.Status != PaymentReservationStatus.Completed &&
-                r.Status != PaymentReservationStatus.Cancelled &&
-                r.Status != PaymentReservationStatus.Failed);
-
-            if (hasOpenTransaction || hasActiveReservation)
-            {
-                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
-                await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\"}");
-                return;
-            }
-
             if (!_chargePointStatusDict.TryGetValue(request.ChargePointId, out var status) ||
                 status.WebSocket == null ||
                 status.WebSocket.State != WebSocketState.Open)
@@ -838,19 +809,24 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            if (IsConnectorBusy(dbContext, request.ChargePointId, request.ConnectorId, status))
+            if (IsConnectorBusy(dbContext, request.ChargePointId, request.ConnectorId, status, null, out var busyReason))
             {
+                _logger.LogWarning("Payments/Create => Connector busy: {Reason} (ChargePoint={ChargePointId}, Connector={ConnectorId})",
+                    busyReason ?? "Unknown",
+                    request.ChargePointId,
+                    request.ConnectorId);
                 context.Response.StatusCode = (int)HttpStatusCode.Conflict;
                 await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\"}");
                 return;
             }
 
             var chargePoint = dbContext.ChargePoints.Find(request.ChargePointId);
-            bool isFree = chargePoint != null &&
-                          (chargePoint.FreeChargingEnabled ||
-                           ((chargePoint.PricePerKwh <= 0m) && (chargePoint.ConnectorUsageFeePerMinute <= 0m) && (chargePoint.UserSessionFee <= 0m)));
+            bool isFreeChargePoint = chargePoint != null &&
+                                     (chargePoint.FreeChargingEnabled ||
+                                      ((chargePoint.PricePerKwh <= 0m) && (chargePoint.ConnectorUsageFeePerMinute <= 0m) && (chargePoint.UserSessionFee <= 0m)));
+            bool isFreeChargeTag = HasFreeTagAccess(dbContext, chargePoint, request.ChargeTagId);
 
-            if (isFree)
+            if (isFreeChargePoint || isFreeChargeTag)
             {
                 EnsureChargeTagExists(dbContext, request.ChargeTagId);
                 string apiResult = await ExecuteRemoteStartAsync(status, dbContext, request.ConnectorId.ToString(), request.ChargeTagId);
@@ -947,30 +923,13 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            if (IsConnectorBusy(dbContext, reservation.ChargePointId, reservation.ConnectorId, status, reservation.ReservationId))
+            if (IsConnectorBusy(dbContext, reservation.ChargePointId, reservation.ConnectorId, status, reservation.ReservationId, out var busyReason))
             {
-                _paymentCoordinator.CancelReservation(dbContext, reservation.ReservationId, "Connector busy after payment confirmation.");
-                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\"}");
-                return;
-            }
-
-            // Re-check for open transaction or active reservation before triggering another start.
-            bool hasOpenTransaction = dbContext.Transactions.Any(t =>
-                t.ChargePointId == reservation.ChargePointId &&
-                t.ConnectorId == reservation.ConnectorId &&
-                t.StopTime == null);
-            bool hasActiveReservation = dbContext.ChargePaymentReservations.Any(r =>
-                r.ChargePointId == reservation.ChargePointId &&
-                r.ConnectorId == reservation.ConnectorId &&
-                r.ReservationId != reservation.ReservationId &&
-                r.Status != PaymentReservationStatus.Completed &&
-                r.Status != PaymentReservationStatus.Cancelled &&
-                r.Status != PaymentReservationStatus.Failed);
-            if (hasOpenTransaction || hasActiveReservation)
-            {
-                _paymentCoordinator.CancelReservation(dbContext, reservation.ReservationId, "Connector busy after payment confirmation.");
+                _logger.LogWarning("Payments/Confirm => Connector busy: {Reason} (ChargePoint={ChargePointId}, Connector={ConnectorId})",
+                    busyReason ?? "Unknown",
+                    reservation.ChargePointId,
+                    reservation.ConnectorId);
+                _paymentCoordinator.CancelReservation(dbContext, reservation.ReservationId, $"Connector busy after payment confirmation. Reason={busyReason ?? "Unknown"}");
                 context.Response.StatusCode = (int)HttpStatusCode.Conflict;
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\"}");
@@ -1031,38 +990,41 @@ namespace OCPP.Core.Server
             await context.Response.WriteAsync("{\"status\":\"Cancelled\"}");
         }
 
-        private bool IsConnectorBusy(OCPPCoreContext dbContext, string chargePointId, int connectorId, ChargePointStatus chargePointStatus = null, Guid? reservationToIgnore = null)
+        private bool IsConnectorBusy(OCPPCoreContext dbContext, string chargePointId, int connectorId, ChargePointStatus chargePointStatus, Guid? reservationToIgnore, out string busyReason)
         {
-            // In-memory status: occupied or unavailable
+            busyReason = null;
+
             var status = chargePointStatus;
             if (status == null && _chargePointStatusDict.TryGetValue(chargePointId, out var existingStatus))
             {
                 status = existingStatus;
             }
 
+            // Prefer live connector state when the charger is online.
+            OnlineConnectorStatus liveConnectorStatus = null;
             if (status != null &&
                 status.OnlineConnectors != null &&
-                status.OnlineConnectors.TryGetValue(connectorId, out var connectorStatus))
+                status.OnlineConnectors.TryGetValue(connectorId, out liveConnectorStatus))
             {
-                if (connectorStatus.Status != ConnectorStatusEnum.Available)
+                busyReason = $"LiveStatus:{liveConnectorStatus.Status}";
+                if (liveConnectorStatus.Status != ConnectorStatusEnum.Available)
                 {
                     return true;
                 }
             }
-
-            // Persisted connector status fallback
-            bool connectorUnavailable = dbContext.ConnectorStatuses
-                .Where(cs => cs.ChargePointId == chargePointId && cs.ConnectorId == connectorId)
-                .AsEnumerable()
-                .Any(cs => !string.Equals(cs.LastStatus, "Available", StringComparison.InvariantCultureIgnoreCase));
 
             // Active transaction not stopped yet
             bool activeTransaction = dbContext.Transactions.Any(t =>
                 t.ChargePointId == chargePointId &&
                 t.ConnectorId == connectorId &&
                 t.StopTime == null);
+            if (activeTransaction)
+            {
+                busyReason = "OpenTransaction";
+                return true;
+            }
 
-            // Pending/active reservations on this connector
+            // Pending/active reservations on this connector (ignore a provided reservation)
             bool activeReservation = dbContext.ChargePaymentReservations.Any(r =>
                 r.ChargePointId == chargePointId &&
                 r.ConnectorId == connectorId &&
@@ -1070,8 +1032,42 @@ namespace OCPP.Core.Server
                 r.Status != PaymentReservationStatus.Completed &&
                 r.Status != PaymentReservationStatus.Cancelled &&
                 r.Status != PaymentReservationStatus.Failed);
+            if (activeReservation)
+            {
+                busyReason = "ActiveReservation";
+                return true;
+            }
 
-            return connectorUnavailable || activeTransaction || activeReservation;
+            // Persisted connector status fallback, but ignore stale rows and only use when we lack live state.
+            if (liveConnectorStatus == null)
+            {
+                var persistedStatus = dbContext.ConnectorStatuses
+                    .Where(cs => cs.ChargePointId == chargePointId && cs.ConnectorId == connectorId)
+                    .Select(cs => new { cs.LastStatus, cs.LastStatusTime })
+                    .FirstOrDefault();
+
+                if (persistedStatus != null &&
+                    !string.Equals(persistedStatus.LastStatus, "Available", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    bool isStale = persistedStatus.LastStatusTime.HasValue &&
+                                   (_utcNow() - persistedStatus.LastStatusTime.Value) > PersistedStatusStaleAfter;
+                    if (!isStale)
+                    {
+                        busyReason = $"PersistedStatus:{persistedStatus.LastStatus}";
+                        return true;
+                    }
+
+                    busyReason = $"StalePersistedStatus:{persistedStatus.LastStatus}";
+                }
+            }
+
+            busyReason ??= "Available";
+            return false;
+        }
+
+        private bool IsConnectorBusy(OCPPCoreContext dbContext, string chargePointId, int connectorId, ChargePointStatus chargePointStatus = null, Guid? reservationToIgnore = null)
+        {
+            return IsConnectorBusy(dbContext, chargePointId, connectorId, chargePointStatus, reservationToIgnore, out _);
         }
 
         private void SetConnectorStatus(OCPPCoreContext dbContext, string chargePointId, int connectorId, string status)
@@ -1171,6 +1167,25 @@ namespace OCPP.Core.Server
 
             dbContext.ChargeTags.Add(newTag);
             dbContext.SaveChanges();
+        }
+
+        private static bool HasFreeTagAccess(OCPPCoreContext dbContext, ChargePoint chargePoint, string chargeTagId)
+        {
+            if (dbContext == null || string.IsNullOrWhiteSpace(chargeTagId)) return false;
+
+            var tag = dbContext.ChargeTags.Find(chargeTagId);
+            if (tag == null || (tag.Blocked ?? false)) return false;
+
+            var privileges = dbContext.ChargeTagPrivileges
+                .Where(p => p.FreeChargingEnabled && p.TagId == tag.TagId);
+
+            if (chargePoint != null &&
+                privileges.Any(p => p.ChargePointId == chargePoint.ChargePointId))
+            {
+                return true;
+            }
+
+            return privileges.Any(p => p.ChargePointId == null);
         }
 
         public void NotifyTransactionStarted(OCPPCoreContext dbContext, ChargePointStatus chargePointStatus, int connectorId, string chargeTagId, int transactionId)

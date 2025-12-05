@@ -123,6 +123,12 @@
   <data name="Blocked" xml:space="preserve">
     <value>Gesperrt</value>
   </data>
+  <data name="FreeAccess" xml:space="preserve">
+    <value>Kostenlos</value>
+  </data>
+  <data name="FreeScopeAll" xml:space="preserve">
+    <value>Alle Ladestationen</value>
+  </data>
   <data name="ExpiryDate" xml:space="preserve">
     <value>Ablaufdatum</value>
   </data>
