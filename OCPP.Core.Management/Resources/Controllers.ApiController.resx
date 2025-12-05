@@ -159,6 +159,9 @@
   <data name="UnlockConnectorNotSupported" xml:space="preserve">
     <value>The charging station does not support unlocking.</value>
   </data>
+  <data name="NotSupported" xml:space="preserve">
+    <value>The charging station does not support this command.</value>
+  </data>
   <data name="UnknownStatus" xml:space="preserve">
     <value>The charging station returned an unexpected result: '{0}'</value>
   </data>

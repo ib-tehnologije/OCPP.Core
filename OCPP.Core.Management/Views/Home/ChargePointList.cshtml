@@ -41,9 +41,9 @@
                             <button type="button" class="btn btn-link" onclick="event.stopPropagation(); ResetChargePoint('@cp.ChargePointId.Replace("'", "\\'")', '@cp.Name?.Replace("'", "\\'")');" data-toggle="tooltip" data-placement="top" title="@Localizer["RebootChargePoint"]">
                                 <i class="fas fa-power-off"></i>
                             </button>
-                            <button type="button" class="btn btn-link" onclick="event.stopPropagation(); ShowComingSoon('@Localizer["RequestConfiguration"]');" data-toggle="tooltip" data-placement="top" title="@Localizer["RequestConfiguration"]">
+                            <a class="btn btn-link" onclick="event.stopPropagation();" href='@Url.Action("ManageChargePoint", Constants.HomeController, new { id = cp.ChargePointId })' data-toggle="tooltip" data-placement="top" title="@Localizer["Manage"]">
                                 <i class="fas fa-sliders-h"></i>
-                            </button>
+                            </a>
                             <button type="button" class="btn btn-link" onclick="event.stopPropagation(); ShowComingSoon('@Localizer["GetDiagnostics"]');" data-toggle="tooltip" data-placement="top" title="@Localizer["GetDiagnostics"]">
                                 <i class="fas fa-stethoscope"></i>
                             </button>

@@ -285,4 +285,7 @@
   <data name="ManageOwners" xml:space="preserve">
     <value>Eigentümer verwalten</value>
   </data>
+  <data name="ManageCharger" xml:space="preserve">
+    <value>Ladestation steuern</value>
+  </data>
 </root>

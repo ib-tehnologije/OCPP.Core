@@ -130,6 +130,12 @@ namespace OCPP.Core.Server
                 case "RemoteStopTransaction":
                     HandleRemoteStopTransaction(msgIn, msgOut);
                     break;
+                case "GetConfiguration":
+                    HandleGetConfiguration(msgIn, msgOut);
+                    break;
+                case "ChangeConfiguration":
+                    HandleChangeConfiguration(msgIn, msgOut);
+                    break;
                 default:
                     WriteMessageLog(ChargePointStatus.Id, null, msgIn.Action, msgIn.JsonPayload, "Unknown answer");
                     break;

@@ -285,4 +285,7 @@
   <data name="ManageOwners" xml:space="preserve">
     <value>Manage owners</value>
   </data>
+  <data name="ManageCharger" xml:space="preserve">
+    <value>Manage charger</value>
+  </data>
 </root>

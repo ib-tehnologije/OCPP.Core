@@ -159,6 +159,9 @@
   <data name="UnlockConnectorNotSupported" xml:space="preserve">
     <value>Die Ladestation unterstützt keine Entsperrung.</value>
   </data>
+  <data name="NotSupported" xml:space="preserve">
+    <value>Die Ladestation unterstützt diesen Befehl nicht.</value>
+  </data>
   <data name="UnknownStatus" xml:space="preserve">
     <value>Die Ladestation lieferte ein unerwartetes Ergebnis: '{0}'</value>
   </data>

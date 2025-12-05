@@ -162,6 +162,9 @@
   <data name="RequestConfiguration" xml:space="preserve">
     <value>Konfiguration anfordern</value>
   </data>
+  <data name="Manage" xml:space="preserve">
+    <value>Ladestation verwalten</value>
+  </data>
   <data name="GetDiagnostics" xml:space="preserve">
     <value>Diagnose abrufen</value>
   </data>

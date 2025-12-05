@@ -162,6 +162,9 @@
   <data name="RequestConfiguration" xml:space="preserve">
     <value>Request configuration</value>
   </data>
+  <data name="Manage" xml:space="preserve">
+    <value>Manage charger</value>
+  </data>
   <data name="GetDiagnostics" xml:space="preserve">
     <value>Get diagnostics</value>
   </data>

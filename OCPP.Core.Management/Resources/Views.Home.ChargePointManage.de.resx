@@ -1,0 +1,154 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Title" xml:space="preserve">
+    <value>Ladestation verwalten</value>
+  </data>
+  <data name="Header" xml:space="preserve">
+    <value>Ladestation verwalten</value>
+  </data>
+  <data name="Online" xml:space="preserve">
+    <value>Online</value>
+  </data>
+  <data name="Offline" xml:space="preserve">
+    <value>Offline</value>
+  </data>
+  <data name="RemoteControl" xml:space="preserve">
+    <value>Fernsteuerung</value>
+  </data>
+  <data name="Connector" xml:space="preserve">
+    <value>Anschluss</value>
+  </data>
+  <data name="ConnectorDisplay" xml:space="preserve">
+    <value>Anschluss %id% (%name%)</value>
+  </data>
+  <data name="IdTag" xml:space="preserve">
+    <value>Ladekarte</value>
+  </data>
+  <data name="Limit" xml:space="preserve">
+    <value>Leistungsgrenze</value>
+  </data>
+  <data name="Reset" xml:space="preserve">
+    <value>Neustart</value>
+  </data>
+  <data name="Unlock" xml:space="preserve">
+    <value>Entriegeln</value>
+  </data>
+  <data name="Start" xml:space="preserve">
+    <value>Start</value>
+  </data>
+  <data name="Stop" xml:space="preserve">
+    <value>Stopp</value>
+  </data>
+  <data name="SetLimit" xml:space="preserve">
+    <value>Grenze setzen</value>
+  </data>
+  <data name="ClearLimit" xml:space="preserve">
+    <value>Grenze löschen</value>
+  </data>
+  <data name="LiveNote" xml:space="preserve">
+    <value>Befehle erfordern eine Online-Verbindung; Timeout nach 60 Sekunden.</value>
+  </data>
+  <data name="Configuration" xml:space="preserve">
+    <value>Konfiguration</value>
+  </data>
+  <data name="Key" xml:space="preserve">
+    <value>Schlüssel</value>
+  </data>
+  <data name="Value" xml:space="preserve">
+    <value>Wert</value>
+  </data>
+  <data name="Range" xml:space="preserve">
+    <value>Spanne</value>
+  </data>
+  <data name="GetKey" xml:space="preserve">
+    <value>Schlüssel abrufen</value>
+  </data>
+  <data name="GetAll" xml:space="preserve">
+    <value>Alle abrufen</value>
+  </data>
+  <data name="SaveKey" xml:space="preserve">
+    <value>Schlüssel speichern</value>
+  </data>
+  <data name="KeyHelp" xml:space="preserve">
+    <value>Alfen-Schlüssel wählen oder beliebigen OCPP-Schlüssel eingeben.</value>
+  </data>
+  <data name="ValueHelp" xml:space="preserve">
+    <value>Leer lassen, wenn nur gelesen wird.</value>
+  </data>
+  <data name="NoData" xml:space="preserve">
+    <value>Keine Daten</value>
+  </data>
+  <data name="Working" xml:space="preserve">
+    <value>Wird ausgeführt...</value>
+  </data>
+  <data name="MissingKey" xml:space="preserve">
+    <value>Bitte einen Schlüssel eingeben.</value>
+  </data>
+  <data name="MissingTag" xml:space="preserve">
+    <value>Bitte eine Ladekarte auswählen.</value>
+  </data>
+  <data name="MissingLimit" xml:space="preserve">
+    <value>Bitte einen Grenzwert eingeben.</value>
+  </data>
+  <data name="ErrorGeneric" xml:space="preserve">
+    <value>Anfrage fehlgeschlagen</value>
+  </data>
+</root>

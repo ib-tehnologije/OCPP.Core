@@ -89,6 +89,31 @@ Clears the charging limit (power) for a certain connector.
 The answer should be:
  {"status"="Accepted"} or {"status"="Unknown"}
 
+### GetConfiguration (OCPP 1.6)
+Returns configuration keys from the charger. When no key is supplied the charger returns all keys it supports (respecting its internal limit).
+
+	/API/GetConfiguration/station42
+	/API/GetConfiguration/station42/EVConnectionTimeOut
+
+The answer is the raw OCPP payload, e.g.:
+
+```
+{
+  "configurationKey": [
+    {"key":"EVConnectionTimeOut","readonly":false,"value":"120"}
+  ],
+  "unknownKey": []
+}
+```
+
+### ChangeConfiguration (OCPP 1.6)
+Changes a single configuration key on the charger.
+
+	/API/ChangeConfiguration/station42/EVConnectionTimeOut/90
+
+The answer should be:
+{"status"="Accepted"} or {"status"="Rejected"} or {"status"="RebootRequired"} or {"status"="NotSupported"}
+
 
 
 ### RemoteStartTransaction

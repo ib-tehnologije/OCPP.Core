@@ -1,0 +1,354 @@
+﻿@using Microsoft.AspNetCore.Mvc.Localization
+@using Newtonsoft.Json
+@model ChargePointManageViewModel
+@inject IViewLocalizer Localizer
+@{
+    ViewData["Title"] = @Localizer["Title"];
+    var online = Model?.OnlineConnectorStatuses != null && Model.OnlineConnectorStatuses.ContainsKey(Model.ChargePoint.ChargePointId);
+}
+<br />
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">@Localizer["Header"] <small class="text-muted">@Model.ChargePoint.ChargePointId</small></h4>
+    <div>
+        @if (online)
+        {
+            <span class="badge badge-success"><i class="fas fa-link"></i> @Localizer["Online"]</span>
+        }
+        else
+        {
+            <span class="badge badge-secondary"><i class="fas fa-unlink"></i> @Localizer["Offline"]</span>
+        }
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">@Localizer["RemoteControl"]</div>
+    <div class="card-body">
+        <div class="form-row">
+            <div class="form-group col-md-3">
+                <label for="connectorSelect">@Localizer["Connector"]</label>
+                <select id="connectorSelect" class="form-control">
+                    @foreach (var c in Model.ConnectorStatuses)
+                    {
+                        <option value="@c.ConnectorId">@Localizer["ConnectorDisplay"].Value.Replace("%id%", c.ConnectorId.ToString()).Replace("%name%", string.IsNullOrWhiteSpace(c.ConnectorName) ? c.ConnectorId.ToString() : c.ConnectorName)</option>
+                    }
+                </select>
+            </div>
+            <div class="form-group col-md-4">
+                <label for="tagSelect">@Localizer["IdTag"]</label>
+                <select id="tagSelect" class="form-control">
+                    @foreach (var t in Model.ChargeTags)
+                    {
+                        var display = string.IsNullOrWhiteSpace(t.TagName) ? t.TagId : $"{t.TagName} ({t.TagId})";
+                        <option value="@t.TagId">@display</option>
+                    }
+                </select>
+            </div>
+            <div class="form-group col-md-3">
+                <label for="limitValue">@Localizer["Limit"]</label>
+                <div class="input-group">
+                    <input type="number" min="0" step="1" class="form-control" id="limitValue" placeholder="16000">
+                    <div class="input-group-append">
+                        <select class="custom-select" id="limitUnit">
+                            <option value="W">W</option>
+                            <option value="A">A</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group col-md-2 align-self-end">
+                <button type="button" class="btn btn-primary btn-block" onclick="resetCp()"><i class="fas fa-power-off"></i> @Localizer["Reset"]</button>
+            </div>
+        </div>
+
+        <div class="btn-toolbar flex-wrap" role="toolbar">
+            <div class="btn-group mr-2 mb-2" role="group">
+                <button type="button" class="btn btn-outline-primary" onclick="unlockConnector()"><i class="fas fa-lock-open"></i> @Localizer["Unlock"]</button>
+                <button type="button" class="btn btn-outline-success" onclick="startTransaction()"><i class="fa-solid fa-plug-circle-check"></i> @Localizer["Start"]</button>
+                <button type="button" class="btn btn-outline-danger" onclick="stopTransaction()"><i class="fa-solid fa-plug-circle-xmark"></i> @Localizer["Stop"]</button>
+            </div>
+            <div class="btn-group mr-2 mb-2" role="group">
+                <button type="button" class="btn btn-outline-secondary" onclick="setLimit()"><i class="fas fa-sliders-h"></i> @Localizer["SetLimit"]</button>
+                <button type="button" class="btn btn-outline-secondary" onclick="clearLimit()"><i class="fas fa-eraser"></i> @Localizer["ClearLimit"]</button>
+            </div>
+        </div>
+
+        <div id="actionResult" class="small text-monospace text-muted"></div>
+        <div class="text-muted small mt-2">@Localizer["LiveNote"]</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">@Localizer["Configuration"]</div>
+    <div class="card-body">
+        <div class="form-row">
+            <div class="form-group col-md-4">
+                <label for="cfgKeyPicker">@Localizer["Key"]</label>
+                <select class="form-control" id="cfgKeyPicker"></select>
+                <input type="hidden" id="cfgKey" />
+                <small class="form-text text-muted">@Localizer["KeyHelp"]</small>
+            </div>
+            <div class="form-group col-md-5">
+                <label class="d-flex justify-content-between">
+                    <span>@Localizer["Value"]</span>
+                    <small id="cfgType" class="text-muted"></small>
+                </label>
+                <input type="text" class="form-control" id="cfgValue" placeholder="120" />
+                <select class="form-control d-none mt-2" id="cfgSelectValue"></select>
+                <div class="form-check mt-2 d-none" id="cfgBoolWrap">
+                    <input class="form-check-input" type="checkbox" id="cfgBool">
+                    <label class="form-check-label" for="cfgBool">@Localizer["Value"]</label>
+                </div>
+                <small class="form-text text-muted" id="cfgRange"></small>
+            </div>
+            <div class="form-group col-md-3 d-flex align-items-end">
+                <div class="btn-group btn-group-sm w-100" role="group">
+                    <button type="button" class="btn btn-outline-primary" onclick="getConfiguration(false)">@Localizer["GetKey"]</button>
+                    <button type="button" class="btn btn-outline-primary" onclick="getConfiguration(true)">@Localizer["GetAll"]</button>
+                    <button type="button" class="btn btn-success" onclick="changeConfiguration()">@Localizer["SaveKey"]</button>
+                </div>
+            </div>
+        </div>
+        <pre id="cfgResult" class="bg-light p-3" style="min-height: 160px;"></pre>
+    </div>
+</div>
+
+@section scripts {
+    <script>
+        const chargePointId = '@Model.ChargePoint.ChargePointId';
+        const configCatalog = @Html.Raw(JsonConvert.SerializeObject(Model.ConfigOptions ?? new List<OCPP.Core.Management.Models.AlfenConfigOption>()));
+
+        function renderResult(targetId, payload) {
+            const target = document.getElementById(targetId);
+            if (!target) return;
+            try {
+                const parsed = JSON.parse(payload);
+                target.textContent = JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                target.textContent = payload || '@Localizer["NoData"]';
+            }
+        }
+
+        function setActionMessage(message) {
+            const el = document.getElementById('actionResult');
+            if (el) {
+                el.textContent = message;
+            }
+        }
+
+        function populateFromCatalog() {
+            const select = document.getElementById('cfgKeyPicker');
+            if (!select) return;
+            const options = configCatalog || [];
+            const grouped = options.reduce((acc, item) => {
+                acc[item.Category] = acc[item.Category] || [];
+                acc[item.Category].push(item);
+                return acc;
+            }, {});
+            select.innerHTML = '';
+            Object.keys(grouped).sort().forEach(cat => {
+                const og = document.createElement('optgroup');
+                og.label = cat;
+                grouped[cat].sort((a,b)=> a.DisplayName.localeCompare(b.DisplayName)).forEach(o => {
+                    const opt = document.createElement('option');
+                    opt.value = o.Key;
+                    opt.textContent = o.DisplayName + ' (' + o.Key + ')';
+                    og.appendChild(opt);
+                });
+                select.appendChild(og);
+            });
+            if (select.options.length) {
+                select.selectedIndex = 0;
+            }
+        }
+
+        function showValueControls(match) {
+            const txt = document.getElementById('cfgValue');
+            const select = document.getElementById('cfgSelectValue');
+            const boolWrap = document.getElementById('cfgBoolWrap');
+            const boolInput = document.getElementById('cfgBool');
+            txt.classList.add('d-none');
+            select.classList.add('d-none');
+            boolWrap.classList.add('d-none');
+
+            if (!match) {
+                txt.classList.remove('d-none');
+                return;
+            }
+
+            if (match.Type === 'bool') {
+                boolWrap.classList.remove('d-none');
+                boolInput.checked = (match.DefaultValue || '').toLowerCase() === 'true';
+            } else if (match.AllowedValues && match.AllowedValues.length) {
+                select.classList.remove('d-none');
+                select.innerHTML = '';
+                match.AllowedValues.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v;
+                    opt.textContent = v;
+                    if (match.DefaultValue && match.DefaultValue === v) opt.selected = true;
+                    select.appendChild(opt);
+                });
+            } else {
+                txt.classList.remove('d-none');
+            }
+        }
+
+        function updateSelectedDefinition() {
+            const picker = document.getElementById('cfgKeyPicker');
+            const rangeEl = document.getElementById('cfgRange');
+            const cfgVal = document.getElementById('cfgValue');
+            const typeEl = document.getElementById('cfgType');
+            const key = picker.value;
+            const match = (configCatalog || []).find(x => x.Key === key);
+            const keyField = document.getElementById('cfgKey');
+            if (keyField) keyField.value = key;
+            const saveBtn = document.querySelector('button.btn.btn-success');
+
+            if (!match) {
+                rangeEl.textContent = '@Localizer["KeyHelp"]';
+                cfgVal.placeholder = '';
+                typeEl.textContent = '';
+                showValueControls(null);
+                if (saveBtn) saveBtn.disabled = false;
+                return;
+            }
+            let hint = match.DisplayName;
+            if (match.Notes) hint += ' — ' + match.Notes;
+            if (match.Min !== null && match.Max !== null) {
+                hint += ` (min ${match.Min}${match.Unit || ''}, max ${match.Max}${match.Unit || ''})`;
+            }
+            if (match.AllowedValues && match.AllowedValues.length) {
+                hint += ` Allowed: ${match.AllowedValues.join(', ')}`;
+            }
+            if (match.DefaultValue) {
+                hint += ` | Default: ${match.DefaultValue}`;
+            }
+            rangeEl.textContent = hint;
+            typeEl.textContent = match.Type || '';
+            cfgVal.placeholder = match.DefaultValue || '';
+            showValueControls(match);
+            if (saveBtn) saveBtn.disabled = (match.Access && match.Access.toUpperCase() === 'RO');
+
+            // auto fetch current value for convenience
+            getConfiguration(false);
+        }
+
+        function callApi(path, onSuccess) {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', path, true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === XMLHttpRequest.DONE) {
+                    if (xhr.status === 200) {
+                        onSuccess(xhr.responseText);
+                    } else {
+                        setActionMessage('@Localizer["ErrorGeneric"]' + ' (' + xhr.status + ')');
+                    }
+                }
+            };
+            xhr.send();
+        }
+
+        function currentConnector() {
+            const select = document.getElementById('connectorSelect');
+            return select ? select.value : '1';
+        }
+
+        function selectedTag() {
+            const select = document.getElementById('tagSelect');
+            return select ? select.value : '';
+        }
+
+        function resetCp() {
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/Reset/"))' + encodeURIComponent(chargePointId), function (resp) {
+                setActionMessage(resp);
+            });
+        }
+
+        function unlockConnector() {
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/UnlockConnector/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()), function (resp) {
+                setActionMessage(resp);
+            });
+        }
+
+        function startTransaction() {
+            const tag = selectedTag();
+            if (!tag) {
+                setActionMessage('@Localizer["MissingTag"]');
+                return;
+            }
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/StartTransaction/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()) + '/' + encodeURIComponent(tag), function (resp) {
+                setActionMessage(resp);
+            });
+        }
+
+        function stopTransaction() {
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/StopTransaction/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()), function (resp) {
+                setActionMessage(resp);
+            });
+        }
+
+        function setLimit() {
+            const value = document.getElementById('limitValue').value;
+            const unit = document.getElementById('limitUnit').value;
+            if (!value) {
+                setActionMessage('@Localizer["MissingLimit"]');
+                return;
+            }
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/SetChargingLimit/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()) + '/' + encodeURIComponent(value + unit), function (resp) {
+                setActionMessage(resp);
+            });
+        }
+
+        function clearLimit() {
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/ClearChargingLimit/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()), function (resp) {
+                setActionMessage(resp);
+            });
+        }
+
+        function getConfiguration(allKeys) {
+            const key = document.getElementById('cfgKey').value.trim();
+            const path = allKeys || !key
+                ? '@Html.Raw(Url.Content("~/API/GetConfiguration/"))' + encodeURIComponent(chargePointId)
+                : '@Html.Raw(Url.Content("~/API/GetConfiguration/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(key);
+            renderResult('cfgResult', '@Localizer["Working"]');
+            callApi(path, function (resp) {
+                renderResult('cfgResult', resp);
+            });
+        }
+
+        function changeConfiguration() {
+            const key = document.getElementById('cfgKey').value.trim();
+            const txtVal = document.getElementById('cfgValue').value;
+            const selVal = document.getElementById('cfgSelectValue').classList.contains('d-none') ? null : document.getElementById('cfgSelectValue').value;
+            const boolWrap = document.getElementById('cfgBoolWrap');
+            const boolVal = !boolWrap.classList.contains('d-none') ? (document.getElementById('cfgBool').checked ? 'true' : 'false') : null;
+            const value = boolVal ?? selVal ?? txtVal;
+            if (!key) {
+                renderResult('cfgResult', '@Localizer["MissingKey"]');
+                return;
+            }
+            renderResult('cfgResult', '@Localizer["Working"]');
+            const path = '@Html.Raw(Url.Content("~/API/ChangeConfiguration/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(key) + '/' + encodeURIComponent(value);
+            callApi(path, function (resp) {
+                renderResult('cfgResult', resp);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            populateFromCatalog();
+            updateSelectedDefinition();
+            const picker = document.getElementById('cfgKeyPicker');
+            if (picker) {
+                picker.addEventListener('change', updateSelectedDefinition);
+            }
+        });
+    </script>
+}
