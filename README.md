@@ -141,5 +141,30 @@ Click "Connect"
 Now the simulator hopefully  show a success message at the bottom.
 When you start a transaction and refresh the Web-UI you should see the corresponding status in the charge point tiles.
 
+## Container builds
+The repository includes separate Dockerfiles for the WebSocket server and the management UI so you can publish them as independent services in Kubernetes. Both images default to running in `Production` and listen on the ports used in local development, but you can override the port binding and environment with runtime environment variables.
+
+### OCPP.Core.Server
+```
+docker build -f OCPP.Core.Server/Dockerfile -t ocpp-core-server .
+docker run -p 8081:8081 \
+  -e ASPNETCORE_ENVIRONMENT=Production \
+  -e ASPNETCORE_URLS=http://+:8081 \
+  -v $(pwd)/OCPP.Core.Server/appsettings.Production.json:/app/appsettings.Production.json:ro \
+  ocpp-core-server
+```
+
+### OCPP.Core.Management
+```
+docker build -f OCPP.Core.Management/Dockerfile -t ocpp-core-management .
+docker run -p 8082:8082 \
+  -e ASPNETCORE_ENVIRONMENT=Production \
+  -e ASPNETCORE_URLS=http://+:8082 \
+  -v $(pwd)/OCPP.Core.Management/appsettings.Production.json:/app/appsettings.Production.json:ro \
+  ocpp-core-management
+```
+
+Supply your own certificates or secrets at runtime (for example by mounting Kestrel certificate files or injecting Azure credentials as environment variables) so sensitive values do not get baked into the image. The build stage honors the `BUILD_CONFIGURATION` argument if you need to publish a different configuration.
+
 ## Stripe Payments
 OCPP.Core can optionally reserve charging costs via Stripe Checkout before a remote start is sent. Configure the `Stripe` section in `OCPP.Core.Server/appsettings.json` with your API key, webhook secret, currency, and an HTTPS return URL to the management site (for example `http://localhost:8082`). Pricing now lives on each charge point (price per kWh, maximum kWh per session, and optional connector usage fees); the hold amount uses those values, and the server captures the actual energy/usage at stop, releasing the remainder automatically.
