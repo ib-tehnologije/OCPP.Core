@@ -341,3 +341,4 @@ healthchecksdb
 
 # Local dev config
 *.Development.json
+.DS_Store
