@@ -489,16 +489,18 @@ namespace OCPP.Core.Server.Payments
         {
             if (!IsEnabled) return;
             if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
-            if (string.IsNullOrWhiteSpace(_options.WebhookSecret))
-            {
-                _logger.LogWarning("Stripe webhook secret is not configured; webhook ignored.");
-                return;
-            }
-
             Event stripeEvent;
             try
             {
-                stripeEvent = _eventFactory.ConstructEvent(payload, signatureHeader, _options.WebhookSecret);
+                if (string.IsNullOrWhiteSpace(_options.WebhookSecret))
+                {
+                    _logger.LogWarning("Stripe webhook secret is not configured; processing webhook without signature verification.");
+                    stripeEvent = EventUtility.ParseEvent(payload);
+                }
+                else
+                {
+                    stripeEvent = _eventFactory.ConstructEvent(payload, signatureHeader, _options.WebhookSecret);
+                }
             }
             catch (Exception ex)
             {

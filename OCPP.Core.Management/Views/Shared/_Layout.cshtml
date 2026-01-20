@@ -1,4 +1,5 @@
 ﻿@using Microsoft.AspNetCore.Mvc.Localization
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
 @inject IViewLocalizer Localizer
 <!DOCTYPE html>
 <html lang="en">
@@ -68,6 +69,16 @@
 
     </header>
     <div class="container">
+        @if (User?.Identity?.IsAuthenticated == true && User.IsInRole(Constants.AdminRoleName))
+        {
+            var webhookSecret = Config?["Stripe:WebhookSecret"];
+            if (string.IsNullOrWhiteSpace(webhookSecret))
+            {
+                <div class="alert alert-warning mt-3" role="alert">
+                    <strong>Stripe webhook secret is not set.</strong> Webhook requests are processed without signature verification; configure <code>STRIPE_WEBHOOK_SECRET</code> (Stripe signing secret) before going live.
+                </div>
+            }
+        }
         <main role="main" class="pb-3">
             @RenderBody()
         </main>
