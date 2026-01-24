@@ -54,7 +54,7 @@ namespace OCPP.Core.Server.Payments
             }
         }
 
-        private async Task CleanupAsync(CancellationToken token)
+        protected virtual async Task CleanupAsync(CancellationToken token)
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
