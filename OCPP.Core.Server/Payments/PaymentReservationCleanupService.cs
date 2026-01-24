@@ -75,6 +75,17 @@ namespace OCPP.Core.Server.Payments
 
             foreach (var reservation in stale)
             {
+                _logger.LogInformation(
+                    "PaymentReservationCleanup => Cancelling stale reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} status={Status} lastUpdate={LastUpdate:u}",
+                    reservation.ReservationId,
+                    reservation.ChargePointId,
+                    reservation.ConnectorId,
+                    reservation.Status,
+                    reservation.UpdatedAtUtc);
+            }
+
+            foreach (var reservation in stale)
+            {
                 reservation.Status = PaymentReservationStatus.Cancelled;
                 reservation.LastError = "Auto-cancelled: stale reservation (background sweep)";
                 reservation.UpdatedAtUtc = DateTime.UtcNow;

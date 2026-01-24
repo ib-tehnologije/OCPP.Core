@@ -132,6 +132,20 @@ namespace OCPP.Core.Server.Payments
                 UpdatedAtUtc = now
             };
 
+            _logger.LogInformation(
+                "Stripe/CreateCheckout => reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} tag={ChargeTagId} maxTotalCents={MaxTotalCents} currency={Currency} maxEnergyKwh={MaxEnergyKwh} pricePerKwh={PricePerKwh} sessionFee={SessionFee} usageFeePerMin={UsageFeePerMinute} maxUsageMinutes={MaxUsageMinutes}",
+                reservation.ReservationId,
+                reservation.ChargePointId,
+                reservation.ConnectorId,
+                reservation.ChargeTagId,
+                reservation.MaxAmountCents,
+                reservation.Currency,
+                reservation.MaxEnergyKwh,
+                reservation.PricePerKwh,
+                reservation.UserSessionFee,
+                reservation.UsageFeePerMinute,
+                reservation.MaxUsageFeeMinutes);
+
             var baseReturnUrl = string.IsNullOrWhiteSpace(request.ReturnBaseUrl)
                 ? _options.ReturnBaseUrl
                 : request.ReturnBaseUrl;
@@ -209,6 +223,13 @@ namespace OCPP.Core.Server.Payments
                     throw new InvalidOperationException("ConnectorBusy", dbUpdateEx);
                 }
 
+                _logger.LogInformation(
+                    "Stripe/CreateCheckout => created sessionId={SessionId} paymentIntentId={PaymentIntentId} checkoutUrlLength={CheckoutUrlLength} reservation={ReservationId}",
+                    session.Id,
+                    session.PaymentIntentId ?? "(none)",
+                    session.Url?.Length ?? 0,
+                    reservation.ReservationId);
+
                 return new PaymentSessionResult
                 {
                     Reservation = reservation,
@@ -233,6 +254,7 @@ namespace OCPP.Core.Server.Payments
 
             if (!IsEnabled)
             {
+                _logger.LogWarning("Stripe/Confirm => Stripe disabled while confirming reservation={ReservationId}", reservationId);
                 return result;
             }
 
@@ -241,6 +263,7 @@ namespace OCPP.Core.Server.Payments
             var reservation = dbContext.ChargePaymentReservations.Find(reservationId);
             if (reservation == null)
             {
+                _logger.LogWarning("Stripe/Confirm => Reservation not found reservation={ReservationId}", reservationId);
                 result.Error = "Reservation not found.";
                 result.Status = "NotFound";
                 return result;
@@ -250,6 +273,7 @@ namespace OCPP.Core.Server.Payments
 
             if (!string.Equals(reservation.StripeCheckoutSessionId, checkoutSessionId, StringComparison.OrdinalIgnoreCase))
             {
+                _logger.LogWarning("Stripe/Confirm => Checkout session mismatch reservation={ReservationId} expected={Expected} received={Received}", reservationId, reservation.StripeCheckoutSessionId, checkoutSessionId);
                 result.Error = "Checkout session mismatch.";
                 result.Status = "SessionMismatch";
                 return result;
@@ -257,9 +281,11 @@ namespace OCPP.Core.Server.Payments
 
             try
             {
+                _logger.LogInformation("Stripe/Confirm => Fetching session reservation={ReservationId} sessionId={SessionId}", reservationId, checkoutSessionId);
                 var session = _sessionService.Get(checkoutSessionId);
                 if (!string.Equals(session.Status, "complete", StringComparison.OrdinalIgnoreCase))
                 {
+                    _logger.LogWarning("Stripe/Confirm => Session not complete reservation={ReservationId} status={Status}", reservationId, session.Status);
                     result.Error = $"Checkout session not completed (status={session.Status}).";
                     result.Status = session.Status;
                     return result;
@@ -268,6 +294,7 @@ namespace OCPP.Core.Server.Payments
                 var paymentIntentId = session.PaymentIntentId;
                 if (string.IsNullOrWhiteSpace(paymentIntentId))
                 {
+                    _logger.LogWarning("Stripe/Confirm => PaymentIntent missing reservation={ReservationId} sessionId={SessionId}", reservationId, checkoutSessionId);
                     result.Error = "PaymentIntent missing in session.";
                     result.Status = "MissingPaymentIntent";
                     return result;
@@ -278,6 +305,7 @@ namespace OCPP.Core.Server.Payments
                 if (!string.Equals(paymentIntent.Status, "requires_capture", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(paymentIntent.Status, "succeeded", StringComparison.OrdinalIgnoreCase))
                 {
+                    _logger.LogWarning("Stripe/Confirm => Unexpected PaymentIntent status reservation={ReservationId} paymentIntent={PaymentIntentId} status={Status}", reservationId, paymentIntentId, paymentIntent.Status);
                     result.Error = $"Unexpected PaymentIntent status '{paymentIntent.Status}'.";
                     result.Status = paymentIntent.Status;
                     reservation.Status = PaymentReservationStatus.Failed;
@@ -293,6 +321,13 @@ namespace OCPP.Core.Server.Payments
                 reservation.UpdatedAtUtc = reservation.AuthorizedAtUtc.Value;
                 var paymentIntentAmount = (long?)paymentIntent.Amount;
                 reservation.MaxAmountCents = paymentIntentAmount ?? reservation.MaxAmountCents;
+
+                _logger.LogInformation(
+                    "Stripe/Confirm => Authorized reservation={ReservationId} paymentIntent={PaymentIntentId} amount={Amount} status={PaymentStatus}",
+                    reservationId,
+                    paymentIntentId,
+                    paymentIntentAmount,
+                    paymentIntent.Status);
 
                 dbContext.SaveChanges();
 
@@ -326,6 +361,7 @@ namespace OCPP.Core.Server.Payments
             {
                 if (!string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
                 {
+                    _logger.LogInformation("Stripe/Cancel => Cancelling PaymentIntent for reservation={ReservationId} paymentIntent={PaymentIntentId} reason={Reason}", reservationId, reservation.StripePaymentIntentId, reason ?? "(none)");
                     _paymentIntentService.Cancel(
                         reservation.StripePaymentIntentId,
                         BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
@@ -345,6 +381,8 @@ namespace OCPP.Core.Server.Payments
                     reservation.LastError = reason;
                 }
                 dbContext.SaveChanges();
+
+                _logger.LogInformation("Stripe/Cancel => Marked reservation={ReservationId} as Cancelled. LastError={LastError}", reservationId, reservation.LastError ?? "(none)");
             }
         }
 
@@ -370,6 +408,12 @@ namespace OCPP.Core.Server.Payments
             reservation.Status = PaymentReservationStatus.Charging;
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
+
+            _logger.LogInformation("Stripe/MarkTransactionStarted => reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId}",
+                reservation.ReservationId,
+                transactionId,
+                reservation.ChargePointId,
+                reservation.ConnectorId);
         }
 
         public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
@@ -386,6 +430,13 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
+            _logger.LogInformation("Stripe/Complete => Begin capture for reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId} currentStatus={Status}",
+                reservation.ReservationId,
+                transaction.TransactionId,
+                transaction.ChargePointId,
+                transaction.ConnectorId,
+                reservation.Status);
+
             double actualEnergy = 0;
             if (transaction.MeterStop.HasValue)
             {
@@ -397,6 +448,7 @@ namespace OCPP.Core.Server.Payments
 
             if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
             {
+                _logger.LogWarning("Stripe/Complete => Missing payment intent reservation={ReservationId} tx={TransactionId}", reservation.ReservationId, transaction.TransactionId);
                 reservation.Status = PaymentReservationStatus.Failed;
                 reservation.LastError = "Missing Stripe payment intent during capture.";
                 dbContext.SaveChanges();
@@ -411,6 +463,17 @@ namespace OCPP.Core.Server.Payments
                 : 0L;
 
             var amountToCapture = energyCostCents + usageFeeCents + sessionFeeCents;
+
+            _logger.LogInformation(
+                "Stripe/Complete => Calculated amounts reservation={ReservationId} tx={TransactionId} energyKwh={EnergyKwh:0.###} energyCents={EnergyCents} usageMinutes={UsageMinutes} usageCents={UsageCents} sessionFeeCents={SessionFeeCents} amountToCapture={AmountToCapture}",
+                reservation.ReservationId,
+                transaction.TransactionId,
+                actualEnergy,
+                energyCostCents,
+                usageFeeMinutes,
+                usageFeeCents,
+                sessionFeeCents,
+                amountToCapture);
 
             try
             {
@@ -433,6 +496,13 @@ namespace OCPP.Core.Server.Payments
                         reservation.CapturedAmountCents = captureOptions.AmountToCapture;
                         reservation.CapturedAtUtc = _utcNow();
                         reservation.Status = PaymentReservationStatus.Completed;
+
+                        _logger.LogInformation(
+                            "Stripe/Complete => Captured payment reservation={ReservationId} paymentIntent={PaymentIntentId} capturedCents={CapturedCents} status={PaymentIntentStatus}",
+                            reservation.ReservationId,
+                            paymentIntent.Id,
+                            captureOptions.AmountToCapture,
+                            captured.Status);
                     }
                     else
                     {
@@ -440,6 +510,11 @@ namespace OCPP.Core.Server.Payments
                             paymentIntent.Id,
                             BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
                         reservation.Status = PaymentReservationStatus.Cancelled;
+
+                        _logger.LogInformation(
+                            "Stripe/Complete => Cancelled zero-amount capture reservation={ReservationId} paymentIntent={PaymentIntentId}",
+                            reservation.ReservationId,
+                            paymentIntent.Id);
                     }
                 }
                 else if (paymentIntent.Status == "succeeded")
@@ -447,11 +522,23 @@ namespace OCPP.Core.Server.Payments
                     reservation.CapturedAmountCents = paymentIntent.AmountReceived;
                     reservation.CapturedAtUtc = _utcNow();
                     reservation.Status = PaymentReservationStatus.Completed;
+
+                    _logger.LogInformation(
+                        "Stripe/Complete => Payment already succeeded reservation={ReservationId} paymentIntent={PaymentIntentId} amountReceived={AmountReceived}",
+                        reservation.ReservationId,
+                        paymentIntent.Id,
+                        paymentIntent.AmountReceived);
                 }
                 else
                 {
                     reservation.Status = PaymentReservationStatus.Failed;
                     reservation.LastError = $"Unexpected PaymentIntent status '{paymentIntent.Status}' during capture.";
+
+                    _logger.LogWarning(
+                        "Stripe/Complete => Unexpected PaymentIntent status reservation={ReservationId} paymentIntent={PaymentIntentId} status={PaymentIntentStatus}",
+                        reservation.ReservationId,
+                        paymentIntent.Id,
+                        paymentIntent.Status);
                 }
 
                 dbContext.SaveChanges();
@@ -530,9 +617,11 @@ namespace OCPP.Core.Server.Payments
 
             if (HasProcessedWebhookEvent(dbContext, stripeEvent.Id))
             {
-                _logger.LogDebug("Stripe webhook {EventId} already processed; skipping.", stripeEvent.Id);
+                _logger.LogInformation("Stripe/Webhook => Duplicate event ignored eventId={EventId} type={Type}", stripeEvent.Id, stripeEvent.Type);
                 return;
             }
+
+            _logger.LogInformation("Stripe/Webhook => Processing eventId={EventId} type={Type}", stripeEvent.Id, stripeEvent.Type);
 
             switch (stripeEvent.Type)
             {
@@ -572,10 +661,16 @@ namespace OCPP.Core.Server.Payments
             var session = stripeEvent.Data.Object as Session;
             if (session == null) return;
 
+            _logger.LogInformation("Stripe/Webhook => Checkout session completed eventId={EventId} sessionId={SessionId} paymentStatus={PaymentStatus}", stripeEvent.Id, session.Id, session.PaymentStatus);
+
             var reservation = dbContext.ChargePaymentReservations
                 .FirstOrDefault(r => r.StripeCheckoutSessionId == session.Id);
 
-            if (reservation == null) return;
+            if (reservation == null)
+            {
+                _logger.LogWarning("Stripe/Webhook => Checkout completed but reservation not found sessionId={SessionId}", session.Id);
+                return;
+            }
 
             reservation.StripePaymentIntentId = reservation.StripePaymentIntentId ?? session.PaymentIntentId;
             if (reservation.Status == PaymentReservationStatus.Pending &&
@@ -594,10 +689,16 @@ namespace OCPP.Core.Server.Payments
             var session = stripeEvent.Data.Object as Session;
             if (session == null) return;
 
+            _logger.LogInformation("Stripe/Webhook => Checkout session expired eventId={EventId} sessionId={SessionId}", stripeEvent.Id, session.Id);
+
             var reservation = dbContext.ChargePaymentReservations
                 .FirstOrDefault(r => r.StripeCheckoutSessionId == session.Id);
 
-            if (reservation == null) return;
+            if (reservation == null)
+            {
+                _logger.LogWarning("Stripe/Webhook => Checkout expired but reservation not found sessionId={SessionId}", session.Id);
+                return;
+            }
             if (reservation.Status != PaymentReservationStatus.Pending &&
                 reservation.Status != PaymentReservationStatus.Authorized)
             {
@@ -615,10 +716,20 @@ namespace OCPP.Core.Server.Payments
             var paymentIntent = stripeEvent.Data.Object as PaymentIntent;
             if (paymentIntent == null) return;
 
+            _logger.LogInformation("Stripe/Webhook => Payment failed eventId={EventId} paymentIntent={PaymentIntentId} code={ErrorCode} message={ErrorMessage}",
+                stripeEvent.Id,
+                paymentIntent.Id,
+                paymentIntent.LastPaymentError?.Code ?? "(none)",
+                paymentIntent.LastPaymentError?.Message ?? "(none)");
+
             var reservation = dbContext.ChargePaymentReservations
                 .FirstOrDefault(r => r.StripePaymentIntentId == paymentIntent.Id);
 
-            if (reservation == null) return;
+            if (reservation == null)
+            {
+                _logger.LogWarning("Stripe/Webhook => Payment failed but reservation not found paymentIntent={PaymentIntentId}", paymentIntent.Id);
+                return;
+            }
 
             reservation.Status = PaymentReservationStatus.Failed;
             reservation.LastError = paymentIntent.LastPaymentError?.Message ?? "Payment failed.";

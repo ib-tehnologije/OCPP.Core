@@ -66,6 +66,14 @@ namespace OCPP.Core.Server
 
             foreach (var reservation in stale)
             {
+                logger?.LogInformation(
+                    "StartupMaintenance => Cancelling stale reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} status={Status} lastUpdate={LastUpdate:u}",
+                    reservation.ReservationId,
+                    reservation.ChargePointId,
+                    reservation.ConnectorId,
+                    reservation.Status,
+                    reservation.UpdatedAtUtc);
+
                 reservation.Status = PaymentReservationStatus.Cancelled;
                 reservation.LastError = "Auto-cancelled: stale reservation at startup";
                 reservation.UpdatedAtUtc = now;
@@ -119,8 +127,21 @@ namespace OCPP.Core.Server
 
                 if (hasOpenTransaction || hasActiveReservation)
                 {
+                    logger?.LogInformation(
+                        "StartupMaintenance => Skipping release cp={ChargePointId} connector={ConnectorId} hasOpenTx={HasOpenTx} hasActiveRes={HasActiveRes}",
+                        status.ChargePointId,
+                        status.ConnectorId,
+                        hasOpenTransaction,
+                        hasActiveReservation);
                     continue;
                 }
+
+                logger?.LogInformation(
+                    "StartupMaintenance => Releasing stale status cp={ChargePointId} connector={ConnectorId} previousStatus={PreviousStatus} lastStatusTime={LastStatusTime:u}",
+                    status.ChargePointId,
+                    status.ConnectorId,
+                    status.LastStatus,
+                    status.LastStatusTime);
 
                 status.LastStatus = "Available";
                 status.LastStatusTime = now;
