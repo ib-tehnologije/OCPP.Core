@@ -27,7 +27,7 @@ namespace OCPP.Core.Server
 
             try
             {
-                cancelledReservations = CancelStaleReservations(dbContext, now, reservationTimeoutMinutes);
+                cancelledReservations = CancelStaleReservations(dbContext, now, reservationTimeoutMinutes, logger);
             }
             catch (Exception ex)
             {
@@ -36,7 +36,7 @@ namespace OCPP.Core.Server
 
             try
             {
-                releasedStatuses = ReleaseStaleConnectorStatuses(dbContext, now, statusReleaseMinutes);
+                releasedStatuses = ReleaseStaleConnectorStatuses(dbContext, now, statusReleaseMinutes, logger);
             }
             catch (Exception ex)
             {
@@ -51,7 +51,7 @@ namespace OCPP.Core.Server
             }
         }
 
-        private static int CancelStaleReservations(OCPPCoreContext dbContext, DateTime now, int timeoutMinutes)
+        private static int CancelStaleReservations(OCPPCoreContext dbContext, DateTime now, int timeoutMinutes, ILogger logger = null)
         {
             if (timeoutMinutes <= 0) return 0;
 
@@ -87,7 +87,7 @@ namespace OCPP.Core.Server
             return stale.Count;
         }
 
-        private static int ReleaseStaleConnectorStatuses(OCPPCoreContext dbContext, DateTime now, int releaseMinutes)
+        private static int ReleaseStaleConnectorStatuses(OCPPCoreContext dbContext, DateTime now, int releaseMinutes, ILogger logger = null)
         {
             if (releaseMinutes <= 0) return 0;
 
