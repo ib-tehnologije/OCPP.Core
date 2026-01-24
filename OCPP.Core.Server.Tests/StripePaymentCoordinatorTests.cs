@@ -492,12 +492,14 @@ namespace OCPP.Core.Server.Tests
     internal class FakeSessionService : IStripeSessionService
     {
         public SessionCreateOptions? LastCreateOptions { get; private set; }
+        public RequestOptions? LastCreateRequestOptions { get; private set; }
         public Session CreateResponse { get; set; } = new Session();
         public Session GetResponse { get; set; } = new Session();
 
-        public Session Create(SessionCreateOptions options)
+        public Session Create(SessionCreateOptions options, RequestOptions requestOptions = null)
         {
             LastCreateOptions = options;
+            LastCreateRequestOptions = requestOptions;
             return CreateResponse;
         }
 
@@ -508,22 +510,26 @@ namespace OCPP.Core.Server.Tests
     {
         public PaymentIntent GetResponse { get; set; } = new PaymentIntent();
         public PaymentIntentCaptureOptions? LastCaptureOptions { get; private set; }
+        public RequestOptions? LastCaptureRequestOptions { get; private set; }
         public bool CaptureCalled { get; private set; }
         public bool CancelCalled { get; private set; }
+        public RequestOptions? LastCancelRequestOptions { get; private set; }
 
         public PaymentIntent Get(string id) => GetResponse;
 
-        public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options)
+        public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null)
         {
             CaptureCalled = true;
             LastCaptureOptions = options;
+            LastCaptureRequestOptions = requestOptions;
             var capturedAmount = options.AmountToCapture ?? 0;
             return new PaymentIntent { Id = id, Status = "succeeded", AmountReceived = capturedAmount };
         }
 
-        public void Cancel(string id)
+        public void Cancel(string id, RequestOptions requestOptions = null)
         {
             CancelCalled = true;
+            LastCancelRequestOptions = requestOptions;
         }
     }
 

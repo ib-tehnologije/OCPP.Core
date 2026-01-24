@@ -12,5 +12,6 @@ namespace OCPP.Core.Server.Payments
         public string Currency { get; set; } = "eur";
         public string ReturnBaseUrl { get; set; }
         public string ProductName { get; set; } = "EV charging session";
+        public bool AllowInsecureWebhooks { get; set; } = false;
     }
 }

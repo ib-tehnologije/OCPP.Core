@@ -42,6 +42,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<MessageLog> MessageLogs { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
         public virtual DbSet<ChargePaymentReservation> ChargePaymentReservations { get; set; }
+        public virtual DbSet<StripeWebhookEvent> StripeWebhookEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -160,6 +161,23 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.ConnectorName).HasMaxLength(100);
 
                 entity.Property(e => e.LastStatus).HasMaxLength(100);
+            });
+
+            modelBuilder.Entity<StripeWebhookEvent>(entity =>
+            {
+                entity.HasKey(e => e.EventId);
+
+                entity.Property(e => e.EventId)
+                    .HasMaxLength(200)
+                    .IsRequired();
+
+                entity.Property(e => e.Type)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.ProcessedAtUtc)
+                    .IsRequired();
+
+                entity.HasIndex(e => e.ProcessedAtUtc);
             });
 
             modelBuilder.Entity<MessageLog>(entity =>

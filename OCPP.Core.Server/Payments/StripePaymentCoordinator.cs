@@ -23,6 +23,9 @@ namespace OCPP.Core.Server.Payments
         private readonly IStripePaymentIntentService _paymentIntentService;
         private readonly Func<DateTime> _utcNow;
         private readonly IStripeEventFactory _eventFactory;
+        private const string IdempotencyCheckoutCreate = "checkout_create";
+        private const string IdempotencyCapture = "capture";
+        private const string IdempotencyCancel = "cancel";
 
         public bool IsEnabled =>
             _options.Enabled &&
@@ -188,7 +191,9 @@ namespace OCPP.Core.Server.Payments
 
             try
             {
-                var session = _sessionService.Create(sessionOptions);
+                var session = _sessionService.Create(
+                    sessionOptions,
+                    BuildIdempotencyOptions(IdempotencyCheckoutCreate, reservation.ReservationId));
 
                 reservation.StripeCheckoutSessionId = session.Id;
                 reservation.StripePaymentIntentId = session.PaymentIntentId;
@@ -321,7 +326,9 @@ namespace OCPP.Core.Server.Payments
             {
                 if (!string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
                 {
-                    _paymentIntentService.Cancel(reservation.StripePaymentIntentId);
+                    _paymentIntentService.Cancel(
+                        reservation.StripePaymentIntentId,
+                        BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
                 }
             }
             catch (StripeException sex)
@@ -419,14 +426,19 @@ namespace OCPP.Core.Server.Payments
                         {
                             AmountToCapture = Math.Min(amountToCapture, maxCaptureAmount)
                         };
-                        var captured = _paymentIntentService.Capture(paymentIntent.Id, captureOptions);
+                        var captured = _paymentIntentService.Capture(
+                            paymentIntent.Id,
+                            captureOptions,
+                            BuildIdempotencyOptions(IdempotencyCapture, reservation.ReservationId, captureOptions.AmountToCapture));
                         reservation.CapturedAmountCents = captureOptions.AmountToCapture;
                         reservation.CapturedAtUtc = _utcNow();
                         reservation.Status = PaymentReservationStatus.Completed;
                     }
                     else
                     {
-                        _paymentIntentService.Cancel(paymentIntent.Id);
+                        _paymentIntentService.Cancel(
+                            paymentIntent.Id,
+                            BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
                         reservation.Status = PaymentReservationStatus.Cancelled;
                     }
                 }
@@ -494,8 +506,16 @@ namespace OCPP.Core.Server.Payments
             {
                 if (string.IsNullOrWhiteSpace(_options.WebhookSecret))
                 {
-                    _logger.LogWarning("Stripe webhook secret is not configured; processing webhook without signature verification.");
-                    stripeEvent = EventUtility.ParseEvent(payload);
+                    if (_options.AllowInsecureWebhooks)
+                    {
+                        _logger.LogWarning("Stripe webhook secret is not configured; processing webhook WITHOUT signature verification because AllowInsecureWebhooks=true.");
+                        stripeEvent = EventUtility.ParseEvent(payload);
+                    }
+                    else
+                    {
+                        _logger.LogError("Stripe webhook secret is not configured; rejecting webhook because signature verification is required.");
+                        return;
+                    }
                 }
                 else
                 {
@@ -508,10 +528,19 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
+            if (HasProcessedWebhookEvent(dbContext, stripeEvent.Id))
+            {
+                _logger.LogDebug("Stripe webhook {EventId} already processed; skipping.", stripeEvent.Id);
+                return;
+            }
+
             switch (stripeEvent.Type)
             {
                 case Events.CheckoutSessionCompleted:
                     HandleCheckoutCompleted(dbContext, stripeEvent);
+                    break;
+                case Events.CheckoutSessionExpired:
+                    HandleCheckoutExpired(dbContext, stripeEvent);
                     break;
                 case Events.PaymentIntentPaymentFailed:
                     HandlePaymentFailed(dbContext, stripeEvent);
@@ -520,6 +549,8 @@ namespace OCPP.Core.Server.Payments
                     _logger.LogDebug("Unhandled Stripe event type: {Type}", stripeEvent.Type);
                     break;
             }
+
+            MarkWebhookEventProcessed(dbContext, stripeEvent);
         }
 
         private static bool IsActiveReservationConflict(DbUpdateException dbUpdateEx)
@@ -554,6 +585,27 @@ namespace OCPP.Core.Server.Payments
                 reservation.AuthorizedAtUtc = _utcNow();
             }
 
+            reservation.UpdatedAtUtc = _utcNow();
+            dbContext.SaveChanges();
+        }
+
+        private void HandleCheckoutExpired(OCPPCoreContext dbContext, Event stripeEvent)
+        {
+            var session = stripeEvent.Data.Object as Session;
+            if (session == null) return;
+
+            var reservation = dbContext.ChargePaymentReservations
+                .FirstOrDefault(r => r.StripeCheckoutSessionId == session.Id);
+
+            if (reservation == null) return;
+            if (reservation.Status != PaymentReservationStatus.Pending &&
+                reservation.Status != PaymentReservationStatus.Authorized)
+            {
+                return;
+            }
+
+            reservation.Status = PaymentReservationStatus.Cancelled;
+            reservation.LastError = "Checkout session expired";
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
         }
@@ -709,19 +761,66 @@ namespace OCPP.Core.Server.Payments
 
         private static decimal ConvertToDecimal(long cents) =>
             Math.Round(cents / 100m, 4, MidpointRounding.AwayFromZero);
+
+        private RequestOptions BuildIdempotencyOptions(string purpose, Guid reservationId, long? amount = null)
+        {
+            if (string.IsNullOrWhiteSpace(purpose) || reservationId == Guid.Empty) return null;
+            var key = amount.HasValue
+                ? $"{purpose}:{reservationId}:{amount.Value}"
+                : $"{purpose}:{reservationId}";
+            return new RequestOptions { IdempotencyKey = key };
+        }
+
+        private bool HasProcessedWebhookEvent(OCPPCoreContext dbContext, string eventId)
+        {
+            if (string.IsNullOrWhiteSpace(eventId)) return false;
+            try
+            {
+                return dbContext.StripeWebhookEvents.Any(e => e.EventId == eventId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Skipping webhook idempotency check (table may be missing).");
+                return false;
+            }
+        }
+
+        private void MarkWebhookEventProcessed(OCPPCoreContext dbContext, Event stripeEvent, Guid? reservationId = null)
+        {
+            if (stripeEvent == null || string.IsNullOrWhiteSpace(stripeEvent.Id)) return;
+            try
+            {
+                var processed = new StripeWebhookEvent
+                {
+                    EventId = stripeEvent.Id,
+                    Type = stripeEvent.Type,
+                    StripeCreatedAtUtc = stripeEvent.Created == default
+                        ? (DateTime?)null
+                        : stripeEvent.Created.ToUniversalTime(),
+                    ProcessedAtUtc = _utcNow(),
+                    ReservationId = reservationId
+                };
+                dbContext.StripeWebhookEvents.Add(processed);
+                dbContext.SaveChanges();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Unable to persist webhook idempotency record (table may be missing).");
+            }
+        }
     }
 
     internal interface IStripeSessionService
     {
-        Session Create(SessionCreateOptions options);
+        Session Create(SessionCreateOptions options, RequestOptions requestOptions = null);
         Session Get(string id);
     }
 
     internal interface IStripePaymentIntentService
     {
         PaymentIntent Get(string id);
-        PaymentIntent Capture(string id, PaymentIntentCaptureOptions options);
-        void Cancel(string id);
+        PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null);
+        void Cancel(string id, RequestOptions requestOptions = null);
     }
 
     internal interface IStripeEventFactory
@@ -733,7 +832,7 @@ namespace OCPP.Core.Server.Payments
     {
         private readonly SessionService _inner = new SessionService();
 
-        public Session Create(SessionCreateOptions options) => _inner.Create(options);
+        public Session Create(SessionCreateOptions options, RequestOptions requestOptions = null) => _inner.Create(options, requestOptions);
 
         public Session Get(string id) => _inner.Get(id);
     }
@@ -744,9 +843,10 @@ namespace OCPP.Core.Server.Payments
 
         public PaymentIntent Get(string id) => _inner.Get(id);
 
-        public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options) => _inner.Capture(id, options);
+        public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null) => _inner.Capture(id, options, requestOptions);
 
-        public void Cancel(string id) => _inner.Cancel(id);
+        public void Cancel(string id, RequestOptions requestOptions = null) =>
+            _inner.Cancel(id, options: null, requestOptions: requestOptions);
     }
 
     internal class StripeEventFactoryWrapper : IStripeEventFactory

@@ -69,6 +69,7 @@ namespace OCPP.Core.Server
             services.AddControllers();
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             services.AddSingleton<IPaymentCoordinator, StripePaymentCoordinator>();
+            services.AddHostedService<Payments.PaymentReservationCleanupService>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
