@@ -81,7 +81,24 @@ namespace OCPP.Core.Server
                         #region Start Transaction
                         bool denyConcurrentTx = Configuration.GetValue<bool>("DenyConcurrentTx", false);
 
-                        transactionEventResponse.IdTokenInfo = InternalAuthorize(idTag, ocppMiddleware, connectorId, AuthAction.StartTransaction, transactionEventRequest.TransactionInfo.TransactionId, string.Empty, denyConcurrentTx);
+                        // Prefer reservation-aware authorization
+                        var reservation = DbContext.ChargePaymentReservations
+                            .Where(r => r.ChargePointId == ChargePointStatus.Id &&
+                                        r.ConnectorId == connectorId &&
+                                        (r.OcppIdTag == idTag || r.ChargeTagId == idTag) &&
+                                        (r.Status == Payments.PaymentReservationStatus.Authorized || r.Status == Payments.PaymentReservationStatus.StartRequested) &&
+                                        (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > DateTime.UtcNow))
+                            .OrderByDescending(r => r.CreatedAtUtc)
+                            .FirstOrDefault();
+
+                        if (reservation != null)
+                        {
+                            transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
+                        }
+                        else
+                        {
+                            transactionEventResponse.IdTokenInfo = InternalAuthorize(idTag, ocppMiddleware, connectorId, AuthAction.StartTransaction, transactionEventRequest.TransactionInfo.TransactionId, string.Empty, denyConcurrentTx);
+                        }
 
                         Logger.LogInformation("StartTransaction => Charge tag='{0}' => Status: {1}", idTag, transactionEventResponse.IdTokenInfo.Status);
 
@@ -93,19 +110,21 @@ namespace OCPP.Core.Server
                             {
                                 Logger.LogInformation("StartTransaction => Meter='{0}' (kWh)", meterKWH);
 
-                                Transaction transaction = new Transaction();
-                                transaction.Uid = transactionEventRequest.TransactionInfo.TransactionId;
-                                transaction.ChargePointId = ChargePointStatus?.Id;
-                                transaction.ConnectorId = connectorId;
-                                transaction.StartTagId = idTag;
-                                transaction.StartTime = transactionEventRequest.Timestamp.UtcDateTime;
-                                transaction.MeterStart = meterKWH;
-                                transaction.StartResult = transactionEventRequest.TriggerReason.ToString();
-                                DbContext.Add<Transaction>(transaction);
-
+                                var transaction = new Transaction
+                                {
+                                    Uid = transactionEventRequest.TransactionInfo.TransactionId,
+                                    ChargePointId = ChargePointStatus?.Id,
+                                    ConnectorId = connectorId,
+                                    StartTagId = idTag,
+                                    StartTime = transactionEventRequest.Timestamp.UtcDateTime,
+                                    MeterStart = meterKWH,
+                                    StartResult = transactionEventRequest.TriggerReason.ToString()
+                                };
+                                DbContext.Add(transaction);
                                 DbContext.SaveChanges();
 
                                 ocppMiddleware?.NotifyTransactionStarted(DbContext, ChargePointStatus, transaction.ConnectorId, idTag, transaction.TransactionId);
+                                ocppMiddleware?.LinkReservationToTransaction(DbContext, ChargePointStatus.Id, connectorId, idTag, transaction.TransactionId, transaction.StartTime);
                             }
                             catch (Exception exp)
                             {

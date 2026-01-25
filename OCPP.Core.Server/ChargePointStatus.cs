@@ -128,6 +128,9 @@ namespace OCPP.Core.Server
         [System.Runtime.Serialization.EnumMember(Value = @"Occupied")]
         Occupied = 2,
 
+        [System.Runtime.Serialization.EnumMember(Value = @"Preparing")]
+        Preparing = 5,
+
         [System.Runtime.Serialization.EnumMember(Value = @"Unavailable")]
         Unavailable = 3,
 

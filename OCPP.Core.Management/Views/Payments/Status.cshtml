@@ -1,0 +1,75 @@
+@model OCPP.Core.Management.Models.PaymentStatusViewModel
+@{
+    ViewData["Title"] = "Payment status";
+    var apiUrl = Model.ServerApiUrl?.TrimEnd('/') + "/Payments/Status?reservationId=" + Model.ReservationId;
+}
+
+<div class="container mt-4">
+    <h2>Payment status</h2>
+    <p class="text-muted">Reservation @Model.ReservationId</p>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <dl class="row">
+                <dt class="col-sm-3">Status</dt>
+                <dd class="col-sm-9" id="payment-status">Loading…</dd>
+                <dt class="col-sm-3">Charger</dt>
+                <dd class="col-sm-9" id="connector">-</dd>
+                <dt class="col-sm-3">Charger status</dt>
+                <dd class="col-sm-9" id="charger-status">-</dd>
+                <dt class="col-sm-3">Last update (UTC)</dt>
+                <dd class="col-sm-9" id="updated-at">-</dd>
+                <dt class="col-sm-3">Transaction</dt>
+                <dd class="col-sm-9" id="transaction-id">-</dd>
+                <dt class="col-sm-3">Authorized amount</dt>
+                <dd class="col-sm-9" id="amount">-</dd>
+                <dt class="col-sm-3">Startable?</dt>
+                <dd class="col-sm-9" id="startable">-</dd>
+                <dt class="col-sm-3">Reasons</dt>
+                <dd class="col-sm-9" id="startable-reason">-</dd>
+            </dl>
+            <button class="btn btn-primary" id="refresh-btn">Refresh</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const apiUrl = "@apiUrl";
+    const paymentStatus = document.getElementById('payment-status');
+    const connector = document.getElementById('connector');
+    const chargerStatus = document.getElementById('charger-status');
+    const updatedAt = document.getElementById('updated-at');
+    const transactionId = document.getElementById('transaction-id');
+    const amount = document.getElementById('amount');
+    const startable = document.getElementById('startable');
+    const startableReason = document.getElementById('startable-reason');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    const fmtMoney = (cents, currency) => cents != null ? `${(cents/100).toFixed(2)} ${currency?.toUpperCase()||''}` : '-';
+    const fmtReasons = (reasons, fallback) => {
+        if (!reasons || !Array.isArray(reasons) || reasons.length === 0) return fallback;
+        return reasons.join(', ');
+    };
+
+    async function loadStatus() {
+        try {
+            const res = await fetch(apiUrl, { cache: 'no-store' });
+            if (!res.ok) throw new Error(res.status);
+            const data = await res.json();
+            paymentStatus.textContent = data.status || '-';
+            connector.textContent = `${data.chargePointId || '-'} / ${data.connectorId || '-'}`;
+            chargerStatus.textContent = data.liveStatus || data.persistedStatus || '-';
+            updatedAt.textContent = data.updatedAtUtc || '-';
+            transactionId.textContent = data.transactionId || '-';
+            amount.textContent = fmtMoney(data.maxAmountCents, data.currency);
+            startable.textContent = data.startable ? 'Yes' : 'No';
+            startableReason.textContent = fmtReasons(data.startableReasons, data.startableReason || '-');
+        } catch (err) {
+            paymentStatus.textContent = 'Error loading status';
+        }
+    }
+
+    refreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadStatus(); });
+    loadStatus();
+    setInterval(loadStatus, 5000);
+</script>

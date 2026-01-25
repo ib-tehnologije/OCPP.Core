@@ -36,8 +36,10 @@ namespace OCPP.Core.Server.Tests
             FakeEventFactory? eventFactory = null)
         {
             var options = Options.Create(stripeOptions ?? new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" });
+            var flowOptions = Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 });
             return new StripePaymentCoordinator(
                 options,
+                flowOptions,
                 NullLogger<StripePaymentCoordinator>.Instance,
                 sessionService,
                 intentService,
@@ -791,7 +793,7 @@ namespace OCPP.Core.Server.Tests
         private readonly OCPPCoreContext _ctx;
 
         public TestCleanupService(IServiceScopeFactory scopeFactory, ILogger<PaymentReservationCleanupService> logger, IConfiguration configuration, OCPPCoreContext ctx)
-            : base(scopeFactory, logger, configuration)
+            : base(scopeFactory, logger, configuration, Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 }))
         {
             _ctx = ctx;
         }

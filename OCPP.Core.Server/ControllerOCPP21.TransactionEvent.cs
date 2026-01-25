@@ -93,44 +93,55 @@ namespace OCPP.Core.Server
 
                         if (externalAuthResult.HasValue)
                         {
-                            if (externalAuthResult.Value)
+                            transactionEventResponse.IdTokenInfo.Status = externalAuthResult.Value
+                                ? AuthorizationStatusEnumType.Accepted
+                                : AuthorizationStatusEnumType.Invalid;
+                            Logger.LogInformation("StartTransaction => Extension auth. : Charge tag='{0}' => Status: {1}", idTag, transactionEventResponse.IdTokenInfo.Status);
+                        }
+                        else
+                        {
+                            // Prefer matching an active paid reservation by OcppIdTag/ChargeTag
+                            var reservation = DbContext.ChargePaymentReservations
+                                .Where(r => r.ChargePointId == ChargePointStatus.Id &&
+                                            r.ConnectorId == connectorId &&
+                                            (r.OcppIdTag == idTag || r.ChargeTagId == idTag) &&
+                                            (r.Status == Payments.PaymentReservationStatus.Authorized || r.Status == Payments.PaymentReservationStatus.StartRequested) &&
+                                            (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > DateTime.UtcNow))
+                                .OrderByDescending(r => r.CreatedAtUtc)
+                                .FirstOrDefault();
+
+                            if (reservation != null)
                             {
                                 transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
                             }
                             else
                             {
-                                transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Invalid;
-                            }
-                            Logger.LogInformation("StartTransaction => Extension auth. : Charge tag='{0}' => Status: {1}", idTag, transactionEventResponse.IdTokenInfo.Status);
-                        }
-                        else
-                        {
-                            ChargeTag ct = DbContext.Find<ChargeTag>(idTag);
-                            if (ct != null)
-                            {
-                                if (ct.Blocked.HasValue && ct.Blocked.Value)
+                                ChargeTag ct = DbContext.Find<ChargeTag>(idTag);
+                                if (ct != null)
                                 {
-                                    transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Blocked;
-                                }
-                                else if (ct.ExpiryDate.HasValue && ct.ExpiryDate.Value < DateTime.Now)
-                                {
-                                    transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Expired;
+                                    if (ct.Blocked.HasValue && ct.Blocked.Value)
+                                    {
+                                        transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Blocked;
+                                    }
+                                    else if (ct.ExpiryDate.HasValue && ct.ExpiryDate.Value < DateTime.Now)
+                                    {
+                                        transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Expired;
+                                    }
+                                    else
+                                    {
+                                        transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
+                                    }
                                 }
                                 else
                                 {
-                                    transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
+                                    transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Unknown;
                                 }
-                            }
-                            else
-                            {
-                                transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Unknown;
                             }
                         }
 
                         if (transactionEventResponse.IdTokenInfo.Status == AuthorizationStatusEnumType.Accepted &&
                             denyConcurrentTx)
                         {
-                            // Check that no open transaction with this idTag exists
                             Transaction tx = DbContext.Transactions
                                 .Where(t => !t.StopTime.HasValue && t.StartTagId == idTag)
                                 .OrderByDescending(t => t.TransactionId)

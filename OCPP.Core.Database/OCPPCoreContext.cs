@@ -283,11 +283,35 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.LastError)
                     .HasMaxLength(500);
 
+                entity.Property(e => e.FailureCode)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.FailureMessage)
+                    .HasMaxLength(500);
+
+                entity.Property(e => e.OcppIdTag)
+                    .HasMaxLength(20);
+
+                entity.Property(e => e.RemoteStartResult)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.StartTransactionId);
+                entity.Property(e => e.AwaitingPlug);
+                entity.Property(e => e.StartDeadlineAtUtc);
+                entity.Property(e => e.RemoteStartSentAtUtc);
+                entity.Property(e => e.RemoteStartAcceptedAtUtc);
+                entity.Property(e => e.StartTransactionAtUtc);
+                entity.Property(e => e.StopTransactionAtUtc);
+                entity.Property(e => e.LastOcppEventAtUtc);
+
                 entity.HasIndex(e => e.StripeCheckoutSessionId)
                     .HasDatabaseName("IX_PaymentReservations_StripeSession");
 
                 entity.HasIndex(e => e.StripePaymentIntentId)
                     .HasDatabaseName("IX_PaymentReservations_PaymentIntent");
+
+                entity.HasIndex(e => new { e.ChargePointId, e.ConnectorId, e.OcppIdTag })
+                    .HasDatabaseName("IX_PaymentReservations_CpConnTag");
 
                 // Prevent more than one active (non-completed) reservation per connector without relying on filtered indexes
                 var activeKey = entity.Property<string>("ActiveConnectorKey")

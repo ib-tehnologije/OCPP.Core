@@ -12,17 +12,21 @@ using Newtonsoft.Json;
 using OCPP.Core.Database;
 using Stripe;
 using Stripe.Checkout;
+using System.Threading.Tasks;
 
 namespace OCPP.Core.Server.Payments
 {
     public partial class StripePaymentCoordinator : IPaymentCoordinator
     {
         private readonly StripeOptions _options;
+        private readonly PaymentFlowOptions _flowOptions;
         private readonly ILogger<StripePaymentCoordinator> _logger;
         private readonly IStripeSessionService _sessionService;
         private readonly IStripePaymentIntentService _paymentIntentService;
         private readonly Func<DateTime> _utcNow;
         private readonly IStripeEventFactory _eventFactory;
+        private readonly IEmailNotificationService _emailNotificationService;
+        private readonly StartChargingMediator _startMediator;
         private const string IdempotencyCheckoutCreate = "checkout_create";
         private const string IdempotencyCapture = "capture";
         private const string IdempotencyCancel = "cancel";
@@ -32,25 +36,34 @@ namespace OCPP.Core.Server.Payments
             !string.IsNullOrWhiteSpace(_options.ApiKey) &&
             !string.IsNullOrWhiteSpace(_options.ReturnBaseUrl);
 
-        public StripePaymentCoordinator(IOptions<StripeOptions> options, ILogger<StripePaymentCoordinator> logger)
-            : this(options, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow)
+        public StripePaymentCoordinator(
+            IOptions<StripeOptions> options,
+            IOptions<PaymentFlowOptions> flowOptions,
+            ILogger<StripePaymentCoordinator> logger)
+            : this(options, flowOptions, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow, null, null)
         {
         }
 
         internal StripePaymentCoordinator(
             IOptions<StripeOptions> options,
+            IOptions<PaymentFlowOptions> flowOptions,
             ILogger<StripePaymentCoordinator> logger,
             IStripeSessionService sessionService,
             IStripePaymentIntentService paymentIntentService,
             IStripeEventFactory eventFactory,
-            Func<DateTime> utcNow)
+            Func<DateTime> utcNow,
+            IEmailNotificationService emailNotificationService = null,
+            StartChargingMediator startMediator = null)
         {
             _options = options?.Value ?? new StripeOptions();
+            _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
             _logger = logger;
             _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
             _paymentIntentService = paymentIntentService ?? throw new ArgumentNullException(nameof(paymentIntentService));
             _eventFactory = eventFactory ?? throw new ArgumentNullException(nameof(eventFactory));
             _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
+            _emailNotificationService = emailNotificationService;
+            _startMediator = startMediator;
 
             if (!string.IsNullOrWhiteSpace(_options.ApiKey))
             {
@@ -315,12 +328,18 @@ namespace OCPP.Core.Server.Payments
                     return result;
                 }
 
-                reservation.StripePaymentIntentId = paymentIntentId;
-                reservation.Status = PaymentReservationStatus.Authorized;
-                reservation.AuthorizedAtUtc = _utcNow();
-                reservation.UpdatedAtUtc = reservation.AuthorizedAtUtc.Value;
-                var paymentIntentAmount = (long?)paymentIntent.Amount;
-                reservation.MaxAmountCents = paymentIntentAmount ?? reservation.MaxAmountCents;
+            reservation.StripePaymentIntentId = paymentIntentId;
+            reservation.Status = PaymentReservationStatus.Authorized;
+            reservation.AuthorizedAtUtc = _utcNow();
+            reservation.UpdatedAtUtc = reservation.AuthorizedAtUtc.Value;
+            var paymentIntentAmount = (long?)paymentIntent.Amount;
+            reservation.MaxAmountCents = paymentIntentAmount ?? reservation.MaxAmountCents;
+            reservation.StartDeadlineAtUtc = reservation.AuthorizedAtUtc.Value.AddMinutes(Math.Max(1, _flowOptions.StartWindowMinutes));
+            if (string.IsNullOrWhiteSpace(reservation.OcppIdTag))
+            {
+                reservation.OcppIdTag = GenerateOcppIdTag();
+            }
+            EnsureChargeTagExists(dbContext, reservation.OcppIdTag);
 
                 _logger.LogInformation(
                     "Stripe/Confirm => Authorized reservation={ReservationId} paymentIntent={PaymentIntentId} amount={Amount} status={PaymentStatus}",
@@ -329,11 +348,20 @@ namespace OCPP.Core.Server.Payments
                     paymentIntentAmount,
                     paymentIntent.Status);
 
-                dbContext.SaveChanges();
+                try
+                {
+                    var recipientEmail = session?.CustomerDetails?.Email;
+                    _emailNotificationService?.SendPaymentAuthorized(recipientEmail, reservation, session);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Stripe/Confirm => Failed to send payment authorization email for reservation={ReservationId}", reservationId);
+                }
 
                 result.Success = true;
                 result.Status = PaymentReservationStatus.Authorized;
                 result.Error = null;
+
                 return result;
             }
             catch (StripeException sex)
@@ -357,32 +385,54 @@ namespace OCPP.Core.Server.Payments
             var reservation = dbContext.ChargePaymentReservations.Find(reservationId);
             if (reservation == null) return;
 
+            CancelPaymentIntentIfCancelable(dbContext, reservation, reason);
+
+            reservation.Status = PaymentReservationStatus.Cancelled;
+            reservation.UpdatedAtUtc = _utcNow();
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                reservation.LastError = reason;
+            }
+            dbContext.SaveChanges();
+
+            _logger.LogInformation("Stripe/Cancel => Marked reservation={ReservationId} as Cancelled. LastError={LastError}", reservationId, reservation.LastError ?? "(none)");
+        }
+
+        public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason)
+        {
+            if (!IsEnabled) return;
+            if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
+            if (reservation == null) return;
+            if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId)) return;
+
             try
             {
-                if (!string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
+                var pi = _paymentIntentService.Get(reservation.StripePaymentIntentId);
+                if (pi == null) return;
+
+                if (string.Equals(pi.Status, "requires_capture", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pi.Status, "requires_payment_method", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pi.Status, "requires_confirmation", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogInformation("Stripe/Cancel => Cancelling PaymentIntent for reservation={ReservationId} paymentIntent={PaymentIntentId} reason={Reason}", reservationId, reservation.StripePaymentIntentId, reason ?? "(none)");
+                    _logger.LogInformation("Stripe/CancelPI => Cancelling uncaptured PaymentIntent reservation={ReservationId} paymentIntent={PaymentIntentId} status={Status} reason={Reason}",
+                        reservation.ReservationId,
+                        pi.Id,
+                        pi.Status,
+                        reason ?? "(none)");
+
                     _paymentIntentService.Cancel(
-                        reservation.StripePaymentIntentId,
+                        pi.Id,
                         BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
+                }
+                else
+                {
+                    _logger.LogInformation("Stripe/CancelPI => PaymentIntent not cancelable status={Status} reservation={ReservationId}", pi.Status, reservation.ReservationId);
                 }
             }
             catch (StripeException sex)
             {
-                _logger.LogWarning(sex, "Unable to cancel payment intent {PaymentIntent}", reservation.StripePaymentIntentId);
+                _logger.LogWarning(sex, "Stripe/CancelPI => Unable to cancel payment intent {PaymentIntentId}", reservation.StripePaymentIntentId);
                 reservation.LastError = sex.Message;
-            }
-            finally
-            {
-                reservation.Status = PaymentReservationStatus.Cancelled;
-                reservation.UpdatedAtUtc = _utcNow();
-                if (!string.IsNullOrWhiteSpace(reason))
-                {
-                    reservation.LastError = reason;
-                }
-                dbContext.SaveChanges();
-
-                _logger.LogInformation("Stripe/Cancel => Marked reservation={ReservationId} as Cancelled. LastError={LastError}", reservationId, reservation.LastError ?? "(none)");
             }
         }
 
@@ -397,7 +447,7 @@ namespace OCPP.Core.Server.Payments
                 .Where(r =>
                     r.ChargePointId == chargePointId &&
                     r.ConnectorId == connectorId &&
-                    r.ChargeTagId == normalizedTag &&
+                    (r.OcppIdTag == normalizedTag || r.ChargeTagId == normalizedTag) &&
                     (r.Status == PaymentReservationStatus.Authorized || r.Status == PaymentReservationStatus.StartRequested))
                 .OrderByDescending(r => r.CreatedAtUtc)
                 .FirstOrDefault();
@@ -405,6 +455,8 @@ namespace OCPP.Core.Server.Payments
             if (reservation == null) return;
 
             reservation.TransactionId = transactionId;
+            reservation.StartTransactionId = transactionId;
+            reservation.StartTransactionAtUtc = _utcNow();
             reservation.Status = PaymentReservationStatus.Charging;
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
@@ -678,6 +730,12 @@ namespace OCPP.Core.Server.Payments
             {
                 reservation.Status = PaymentReservationStatus.Authorized;
                 reservation.AuthorizedAtUtc = _utcNow();
+                reservation.StartDeadlineAtUtc = reservation.AuthorizedAtUtc.Value.AddMinutes(Math.Max(1, _flowOptions.StartWindowMinutes));
+                if (string.IsNullOrWhiteSpace(reservation.OcppIdTag))
+                {
+                    reservation.OcppIdTag = GenerateOcppIdTag();
+                }
+                EnsureChargeTagExists(dbContext, reservation.OcppIdTag);
             }
 
             reservation.UpdatedAtUtc = _utcNow();
@@ -753,7 +811,7 @@ namespace OCPP.Core.Server.Payments
                     r.TransactionId == null &&
                     r.ChargePointId == transaction.ChargePointId &&
                     r.ConnectorId == transaction.ConnectorId &&
-                    r.ChargeTagId == transaction.StartTagId)
+                    (r.OcppIdTag == transaction.StartTagId || r.ChargeTagId == transaction.StartTagId))
                 .OrderByDescending(r => r.CreatedAtUtc)
                 .FirstOrDefault();
 
@@ -881,6 +939,32 @@ namespace OCPP.Core.Server.Payments
                 : $"{purpose}:{reservationId}";
             return new RequestOptions { IdempotencyKey = key };
         }
+
+        private static string GenerateOcppIdTag()
+        {
+            const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+            var bytes = Guid.NewGuid().ToByteArray();
+            int bits = 0, value = 0;
+            var chars = new System.Text.StringBuilder();
+            foreach (var b in bytes)
+            {
+                value = (value << 8) | b;
+                bits += 8;
+                while (bits >= 5)
+                {
+                    chars.Append(alphabet[(value >> (bits - 5)) & 31]);
+                    bits -= 5;
+                }
+            }
+            if (bits > 0)
+            {
+                chars.Append(alphabet[(value << (5 - bits)) & 31]);
+            }
+            var tag = "R" + chars.ToString();
+            return tag.Length > 20 ? tag.Substring(0, 20) : tag;
+        }
+
+        // EnsureChargeTagExists defined earlier in file; keep single definition.
 
         private bool HasProcessedWebhookEvent(OCPPCoreContext dbContext, string eventId)
         {

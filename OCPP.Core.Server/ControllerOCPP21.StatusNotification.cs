@@ -58,6 +58,9 @@ namespace OCPP.Core.Server
                     case ConnectorStatusEnumType.Available:
                         newStatus = ConnectorStatusEnum.Available;
                         break;
+                    case ConnectorStatusEnumType.Preparing:
+                        newStatus = ConnectorStatusEnum.Preparing;
+                        break;
                     case ConnectorStatusEnumType.Occupied:
                     case ConnectorStatusEnumType.Reserved:
                         newStatus = ConnectorStatusEnum.Occupied;

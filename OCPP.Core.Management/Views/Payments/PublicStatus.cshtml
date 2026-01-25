@@ -1,0 +1,205 @@
+@model OCPP.Core.Management.Models.PaymentStatusViewModel
+@{
+    Layout = null;
+    var apiUrl = Model.ServerApiUrl?.TrimEnd('/') + "/Payments/Status?reservationId=" + Model.ReservationId;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Charging status</title>
+    <style>
+        :root {
+            --bg: #0b1021;
+            --panel: rgba(17,24,39,0.9);
+            --accent: #6ddcff;
+            --accent-2: #7f5af0;
+            --text: #e5e7eb;
+            --muted: #9ca3af;
+            --border: rgba(255,255,255,0.08);
+            --ok: #52ffa8;
+            --warn: #ffbe3d;
+            --error: #ff4b6d;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: radial-gradient(circle at 15% 20%, rgba(127,90,240,0.22), transparent 35%),
+                        radial-gradient(circle at 80% 10%, rgba(109,220,255,0.25), transparent 30%),
+                        radial-gradient(circle at 60% 80%, rgba(109,220,255,0.12), transparent 35%),
+                        var(--bg);
+            font-family: 'Inter', 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 16px;
+        }
+        .card {
+            width: min(820px, 100%);
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 32px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.35);
+        }
+        h1 { margin: 0 0 8px; letter-spacing: -0.01em; }
+        p { margin: 0; color: var(--muted); }
+        .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; margin-top: 18px; }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.04);
+            font-weight: 600;
+        }
+        .dot { width: 10px; height: 10px; border-radius: 50%; }
+        .cta {
+            margin-top: 24px;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 18px;
+            border-radius: 12px;
+            border: none;
+            background: linear-gradient(120deg, var(--accent), var(--accent-2));
+            color: #0b1021;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            box-shadow: 0 10px 30px rgba(109,220,255,0.35);
+            transition: transform 0.1s ease, box-shadow 0.2s ease;
+        }
+        .cta:hover { transform: translateY(-1px); box-shadow: 0 14px 34px rgba(109,220,255,0.45); }
+        .muted { color: var(--muted); font-size: 0.95rem; }
+        .mono { font-family: "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="pill" id="pill-status">
+            <span class="dot" id="pill-dot" style="background: var(--warn); box-shadow: 0 0 12px rgba(255,190,61,0.8);"></span>
+            <span id="pill-text">Fetching status…</span>
+        </div>
+        <h1>Charging status</h1>
+        <p class="muted">Reservation <span class="mono">@Model.ReservationId</span></p>
+
+        <div class="row" style="margin-top:20px;">
+            <div>
+                <div class="muted">Payment</div>
+                <div class="mono" id="payment-status">-</div>
+            </div>
+            <div>
+                <div class="muted">Connector</div>
+                <div class="mono" id="connector">-</div>
+            </div>
+            <div>
+                <div class="muted">Charger status</div>
+                <div class="mono" id="charger-status">-</div>
+            </div>
+            <div>
+                <div class="muted">Last update (UTC)</div>
+                <div class="mono" id="updated-at">-</div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div>
+                <div class="muted">Transaction</div>
+                <div class="mono" id="transaction-id">-</div>
+            </div>
+            <div>
+                <div class="muted">Authorized amount</div>
+                <div class="mono" id="amount">-</div>
+            </div>
+            <div>
+                <div class="muted">Active reservation?</div>
+                <div class="mono" id="active-res">-</div>
+            </div>
+            <div>
+                <div class="muted">Active transaction?</div>
+                <div class="mono" id="active-tx">-</div>
+            </div>
+            <div>
+                <div class="muted">Startable?</div>
+                <div class="mono" id="startable">-</div>
+            </div>
+            <div>
+                <div class="muted">Reasons</div>
+                <div class="mono" id="startable-reason">-</div>
+            </div>
+        </div>
+
+        <a class="cta" id="refresh-btn" href="#">Refresh now</a>
+    </div>
+
+    <script>
+        const apiUrl = "@apiUrl";
+        const pillText = document.getElementById('pill-text');
+        const pillDot = document.getElementById('pill-dot');
+        const paymentStatus = document.getElementById('payment-status');
+        const connector = document.getElementById('connector');
+        const chargerStatus = document.getElementById('charger-status');
+        const updatedAt = document.getElementById('updated-at');
+        const transactionId = document.getElementById('transaction-id');
+        const amount = document.getElementById('amount');
+        const activeRes = document.getElementById('active-res');
+        const activeTx = document.getElementById('active-tx');
+        const startable = document.getElementById('startable');
+        const startableReason = document.getElementById('startable-reason');
+        const busyChip = document.getElementById('pill-status');
+        const refreshBtn = document.getElementById('refresh-btn');
+
+        const fmtMoney = (cents, currency) => cents != null ? `${(cents/100).toFixed(2)} ${currency?.toUpperCase()||''}` : '-';
+        const fmtReasons = (reasons, fallback) => {
+            if (!reasons || !Array.isArray(reasons) || reasons.length === 0) return fallback;
+            return reasons.join(', ');
+        };
+
+        async function loadStatus() {
+            try {
+                const res = await fetch(apiUrl, { cache: 'no-store' });
+                if (!res.ok) throw new Error(res.status);
+                const data = await res.json();
+                paymentStatus.textContent = data.status || '-';
+                connector.textContent = `${data.chargePointId || '-'} / ${data.connectorId || '-'}`;
+                chargerStatus.textContent = data.liveStatus || data.persistedStatus || '-';
+                updatedAt.textContent = data.updatedAtUtc || '-';
+                transactionId.textContent = data.transactionId || '-';
+                amount.textContent = fmtMoney(data.maxAmountCents, data.currency);
+                activeRes.textContent = data.activeReservation ? 'Yes' : 'No';
+                activeTx.textContent = data.activeTransaction ? 'Yes' : 'No';
+                startable.textContent = data.startable ? 'Yes' : 'No';
+                startableReason.textContent = fmtReasons(data.startableReasons, data.startableReason || '-');
+
+                const status = (data.status || '').toLowerCase();
+                if (status === 'completed' || status === 'charging' || status === 'authorized' || status === 'startrequested') {
+                    pillText.textContent = 'Payment confirmed';
+                    pillDot.style.background = 'var(--ok)';
+                    pillDot.style.boxShadow = '0 0 12px rgba(82,255,168,0.9)';
+                } else if (status === 'failed' || status === 'cancelled') {
+                    pillText.textContent = 'Payment failed/cancelled';
+                    pillDot.style.background = 'var(--error)';
+                    pillDot.style.boxShadow = '0 0 12px rgba(255,75,109,0.8)';
+                } else {
+                    pillText.textContent = 'Waiting for charger…';
+                    pillDot.style.background = 'var(--warn)';
+                    pillDot.style.boxShadow = '0 0 12px rgba(255,190,61,0.8)';
+                }
+            } catch (err) {
+                pillText.textContent = 'Unable to load status';
+                pillDot.style.background = 'var(--error)';
+                pillDot.style.boxShadow = '0 0 12px rgba(255,75,109,0.8)';
+            }
+        }
+
+        refreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadStatus(); });
+        loadStatus();
+        setInterval(loadStatus, 5000);
+    </script>
+</body>
+</html>

@@ -22,7 +22,9 @@ using Newtonsoft.Json;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Extensions.Interfaces;
 using OCPP.Core.Server.Messages_OCPP20;
+using OCPP.Core.Server.Payments;
 using System;
+using System.Linq;
 
 namespace OCPP.Core.Server
 {
@@ -89,45 +91,66 @@ namespace OCPP.Core.Server
             }
             else
             {
-                try
-                {
-                    ChargeTag ct = DbContext.Find<ChargeTag>(idTag);
-                    if (ct != null)
-                    {
-                        if (!string.IsNullOrEmpty(ct.ParentTagId))
-                        {
-                            idTagInfo.GroupIdToken = new IdTokenType();
-                            idTagInfo.GroupIdToken.IdToken = ct.ParentTagId;
-                        }
-
-                        if (ct.Blocked.HasValue && ct.Blocked.Value)
-                        {
-                            idTagInfo.Status = AuthorizationStatusEnumType.Blocked;
-                        }
-                        else if (ct.ExpiryDate.HasValue && ct.ExpiryDate.Value < DateTime.Now)
-                        {
-                            idTagInfo.Status = AuthorizationStatusEnumType.Expired;
-                        }
-                        else
-                        {
-                            idTagInfo.Status = AuthorizationStatusEnumType.Accepted;
-                        }
-                    }
-                    else
-                    {
-                        idTagInfo.Status = AuthorizationStatusEnumType.Invalid;
-                    }
-
-                    Logger.LogInformation("Authorize => Status: {0}", idTagInfo.Status);
-                }
-                catch (Exception exp)
-                {
-                    Logger.LogError(exp, "Authorize => Exception reading charge tag ({0}): {1}", idTag, exp.Message);
-                    idTagInfo.Status = AuthorizationStatusEnumType.Invalid;
-                }
+                ApplyDbAuthorizeRules(idTag, idTagInfo);
             }
 
             return idTagInfo;
+        }
+
+        private void ApplyDbAuthorizeRules(string idTag, IdTokenInfoType idTokenInfo)
+        {
+            try
+            {
+                var reservation = DbContext.ChargePaymentReservations
+                    .Where(r =>
+                        (r.OcppIdTag == idTag || r.ChargeTagId == idTag) &&
+                        (r.Status == PaymentReservationStatus.Authorized || r.Status == PaymentReservationStatus.StartRequested) &&
+                        (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > DateTime.UtcNow))
+                    .OrderByDescending(r => r.CreatedAtUtc)
+                    .FirstOrDefault();
+
+                if (reservation != null)
+                {
+                    idTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
+                    idTokenInfo.CacheExpiryDateTime = reservation.StartDeadlineAtUtc;
+                    Logger.LogInformation("Authorize => Matched active reservation {ReservationId} for idTag={IdTag}", reservation.ReservationId, idTag);
+                    return;
+                }
+
+                ChargeTag ct = DbContext.Find<ChargeTag>(idTag);
+                if (ct != null)
+                {
+                    if (!string.IsNullOrEmpty(ct.ParentTagId))
+                    {
+                        idTokenInfo.GroupIdToken = new IdTokenType();
+                        idTokenInfo.GroupIdToken.IdToken = ct.ParentTagId;
+                    }
+
+                    if (ct.Blocked.HasValue && ct.Blocked.Value)
+                    {
+                        idTokenInfo.Status = AuthorizationStatusEnumType.Blocked;
+                    }
+                    else if (ct.ExpiryDate.HasValue && ct.ExpiryDate.Value < DateTime.Now)
+                    {
+                        idTokenInfo.Status = AuthorizationStatusEnumType.Expired;
+                    }
+                    else
+                    {
+                        idTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
+                    }
+                }
+                else
+                {
+                    idTokenInfo.Status = AuthorizationStatusEnumType.Invalid;
+                }
+
+                Logger.LogInformation("Authorize => Status: {0}", idTokenInfo.Status);
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp, "Authorize => Exception reading charge tag ({0}): {1}", idTag, exp.Message);
+                idTokenInfo.Status = AuthorizationStatusEnumType.Invalid;
+            }
         }
     }
 }

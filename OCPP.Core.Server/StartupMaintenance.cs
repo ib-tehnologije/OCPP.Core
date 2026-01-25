@@ -116,9 +116,7 @@ namespace OCPP.Core.Server
                     hasActiveReservation = dbContext.ChargePaymentReservations.Any(r =>
                         r.ChargePointId == status.ChargePointId &&
                         r.ConnectorId == status.ConnectorId &&
-                        r.Status != PaymentReservationStatus.Completed &&
-                        r.Status != PaymentReservationStatus.Cancelled &&
-                        r.Status != PaymentReservationStatus.Failed);
+                        PaymentReservationStatus.IsActive(r.Status));
                 }
                 catch
                 {

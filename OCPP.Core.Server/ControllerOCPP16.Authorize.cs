@@ -22,6 +22,7 @@ using Newtonsoft.Json;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Extensions.Interfaces;
 using OCPP.Core.Server.Messages_OCPP16;
+using OCPP.Core.Server.Payments;
 using System;
 using System.Linq;
 
@@ -90,57 +91,77 @@ namespace OCPP.Core.Server
             }
             else
             {
-                try
-                {
-                    ChargeTag ct = DbContext.Find<ChargeTag>(idTag);
-                    if (ct != null)
-                    {
-                        if (ct.ExpiryDate.HasValue)
-                        {
-                            idTagInfo.ExpiryDate = ct.ExpiryDate.Value;
-                        }
-                        idTagInfo.ParentIdTag = ct.ParentTagId;
-                        if (ct.Blocked.HasValue && ct.Blocked.Value)
-                        {
-                            idTagInfo.Status = IdTagInfoStatus.Blocked;
-                        }
-                        else if (ct.ExpiryDate.HasValue && ct.ExpiryDate.Value < DateTime.Now)
-                        {
-                            idTagInfo.Status = IdTagInfoStatus.Expired;
-                        }
-                        else
-                        {
-                            idTagInfo.Status = IdTagInfoStatus.Accepted;
-
-                            if (denyConcurrentTx)
-                            {
-                                // Check that no open transaction with this idTag exists
-                                Transaction tx = DbContext.Transactions
-                                    .Where(t => !t.StopTime.HasValue && t.StartTagId == ct.TagId)
-                                    .OrderByDescending(t => t.TransactionId)
-                                    .FirstOrDefault();
-
-                                if (tx != null)
-                                {
-                                    idTagInfo.Status = IdTagInfoStatus.ConcurrentTx;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        idTagInfo.Status = IdTagInfoStatus.Invalid;
-                    }
-                    Logger.LogInformation("InternalAuthorize => DB-Auth : Action={0}, Tag='{1}' => Status: {2}", authAction, idTag, idTagInfo.Status);
-                }
-                catch (Exception exp)
-                {
-                    Logger.LogError(exp, "InternalAuthorize => Exception reading charge tag (action={0}, tag={1}): {2}", authAction, idTag, exp.Message);
-                    idTagInfo.Status = IdTagInfoStatus.Invalid;
-                }
+                ApplyDbAuthorizeRules(idTag, authAction, denyConcurrentTx, idTagInfo);
             }
 
             return idTagInfo;
+        }
+
+        private void ApplyDbAuthorizeRules(string idTag, AuthAction authAction, bool denyConcurrentTx, IdTagInfo idTagInfo)
+        {
+            try
+            {
+                var reservation = DbContext.ChargePaymentReservations
+                    .Where(r =>
+                        (r.OcppIdTag == idTag || r.ChargeTagId == idTag) &&
+                        (r.Status == PaymentReservationStatus.Authorized || r.Status == PaymentReservationStatus.StartRequested) &&
+                        (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > DateTime.UtcNow))
+                    .OrderByDescending(r => r.CreatedAtUtc)
+                    .FirstOrDefault();
+
+                if (reservation != null)
+                {
+                    idTagInfo.Status = IdTagInfoStatus.Accepted;
+                    idTagInfo.ExpiryDate = reservation.StartDeadlineAtUtc ?? MaxExpiryDate;
+                    Logger.LogInformation("InternalAuthorize => Matched active reservation {ReservationId} for idTag={IdTag}", reservation.ReservationId, idTag);
+                    return;
+                }
+
+                ChargeTag ct = DbContext.Find<ChargeTag>(idTag);
+                if (ct != null)
+                {
+                    if (ct.ExpiryDate.HasValue)
+                    {
+                        idTagInfo.ExpiryDate = ct.ExpiryDate.Value;
+                    }
+                    idTagInfo.ParentIdTag = ct.ParentTagId;
+                    if (ct.Blocked.HasValue && ct.Blocked.Value)
+                    {
+                        idTagInfo.Status = IdTagInfoStatus.Blocked;
+                    }
+                    else if (ct.ExpiryDate.HasValue && ct.ExpiryDate.Value < DateTime.Now)
+                    {
+                        idTagInfo.Status = IdTagInfoStatus.Expired;
+                    }
+                    else
+                    {
+                        idTagInfo.Status = IdTagInfoStatus.Accepted;
+
+                        if (denyConcurrentTx)
+                        {
+                            Transaction tx = DbContext.Transactions
+                                .Where(t => !t.StopTime.HasValue && t.StartTagId == ct.TagId)
+                                .OrderByDescending(t => t.TransactionId)
+                                .FirstOrDefault();
+
+                            if (tx != null)
+                            {
+                                idTagInfo.Status = IdTagInfoStatus.ConcurrentTx;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    idTagInfo.Status = IdTagInfoStatus.Invalid;
+                }
+                Logger.LogInformation("InternalAuthorize => DB-Auth : Action={0}, Tag='{1}' => Status: {2}", authAction, idTag, idTagInfo.Status);
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp, "InternalAuthorize => Exception reading charge tag (action={0}, tag={1}): {2}", authAction, idTag, exp.Message);
+                idTagInfo.Status = IdTagInfoStatus.Invalid;
+            }
         }
     }
 }

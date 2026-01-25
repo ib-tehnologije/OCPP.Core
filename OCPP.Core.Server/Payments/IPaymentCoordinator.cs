@@ -3,6 +3,8 @@
  */
 
 using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using OCPP.Core.Database;
 
 namespace OCPP.Core.Server.Payments
@@ -13,6 +15,7 @@ namespace OCPP.Core.Server.Payments
         PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request);
         PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId);
         void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason);
+        void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason);
         void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId);
         void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction);
         void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader);
@@ -58,9 +61,25 @@ namespace OCPP.Core.Server.Payments
         public const string Pending = "PendingPayment";
         public const string Authorized = "Authorized";
         public const string StartRequested = "StartRequested";
+        public const string StartRejected = "StartRejected";
+        public const string StartTimeout = "StartTimeout";
+        public const string Abandoned = "Abandoned";
         public const string Charging = "Charging";
         public const string Completed = "Completed";
         public const string Cancelled = "Cancelled";
         public const string Failed = "Failed";
+
+        private static readonly HashSet<string> ActiveStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Pending,
+            Authorized,
+            StartRequested,
+            Charging
+        };
+
+        public static bool IsActive(string status)
+        {
+            return !string.IsNullOrWhiteSpace(status) && ActiveStatuses.Contains(status);
+        }
     }
 }

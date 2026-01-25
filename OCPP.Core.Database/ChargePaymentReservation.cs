@@ -52,5 +52,17 @@ namespace OCPP.Core.Database
         public long? CapturedAmountCents { get; set; }
         public double? ActualEnergyKwh { get; set; }
         public string LastError { get; set; }
+        public string FailureCode { get; set; }
+        public string FailureMessage { get; set; }
+        public string OcppIdTag { get; set; }
+        public DateTime? StartDeadlineAtUtc { get; set; }
+        public DateTime? RemoteStartSentAtUtc { get; set; }
+        public string RemoteStartResult { get; set; }
+        public DateTime? RemoteStartAcceptedAtUtc { get; set; }
+        public DateTime? StartTransactionAtUtc { get; set; }
+        public DateTime? StopTransactionAtUtc { get; set; }
+        public DateTime? LastOcppEventAtUtc { get; set; }
+        public bool? AwaitingPlug { get; set; }
+        public int? StartTransactionId { get; set; }
     }
 }

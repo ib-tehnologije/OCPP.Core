@@ -40,6 +40,9 @@ namespace OCPP.Core.Server.Messages_OCPP20
         [System.Runtime.Serialization.EnumMember(Value = @"Reserved")]
         Reserved = 2,
 
+        [System.Runtime.Serialization.EnumMember(Value = @"Preparing")]
+        Preparing = 5,
+
         [System.Runtime.Serialization.EnumMember(Value = @"Unavailable")]
         Unavailable = 3,
 

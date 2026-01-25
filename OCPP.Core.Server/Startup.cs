@@ -68,7 +68,21 @@ namespace OCPP.Core.Server
             services.AddOCPPDbContext(Configuration);
             services.AddControllers();
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
-            services.AddSingleton<IPaymentCoordinator, StripePaymentCoordinator>();
+            services.Configure<Payments.PaymentFlowOptions>(Configuration.GetSection("Payments"));
+            services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
+            services.AddSingleton<Payments.StartChargingMediator>();
+            services.AddSingleton<Payments.ReservationLinkService>();
+            services.AddSingleton<Payments.IEmailNotificationService, Payments.EmailNotificationService>();
+            services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
+                sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
+                sp.GetRequiredService<IOptions<Payments.PaymentFlowOptions>>(),
+                sp.GetRequiredService<ILogger<StripePaymentCoordinator>>(),
+                new Payments.StripeSessionServiceWrapper(),
+                new Payments.StripePaymentIntentServiceWrapper(),
+                new Payments.StripeEventFactoryWrapper(),
+                () => DateTime.UtcNow,
+                sp.GetService<Payments.IEmailNotificationService>(),
+                sp.GetRequiredService<Payments.StartChargingMediator>()));
             services.AddHostedService<Payments.PaymentReservationCleanupService>();
         }
 

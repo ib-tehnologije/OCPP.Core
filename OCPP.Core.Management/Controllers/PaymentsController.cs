@@ -73,6 +73,12 @@ namespace OCPP.Core.Management.Controllers
             model.Origin = origin;
             model.ReturnUrl = GetReturnUrl(origin);
 
+            // After payment, show live status page so the driver can track start/charging.
+            if (!string.IsNullOrWhiteSpace(origin) && string.Equals(origin, "public", StringComparison.OrdinalIgnoreCase) && apiResult.Success)
+            {
+                return RedirectToAction(nameof(Status), new { reservationId, origin });
+            }
+
             return View(GetViewName(origin), model);
         }
 
@@ -99,8 +105,32 @@ namespace OCPP.Core.Management.Controllers
             {
                 Status = status,
                 Message = message,
-                Success = string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase)
+                Success = string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(status, "Authorized", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(status, "StartRequested", StringComparison.OrdinalIgnoreCase)
             };
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> Status(Guid reservationId, string origin)
+        {
+            if (reservationId == Guid.Empty)
+            {
+                return View(GetViewName(origin), BuildResult("Error", "Missing reservation id."));
+            }
+
+            var statusResult = await GetAsync($"Payments/Status?reservationId={reservationId}");
+            var model = new PaymentStatusViewModel
+            {
+                ReservationId = reservationId,
+                Origin = origin,
+                ApiPayload = statusResult.Payload,
+                ApiSuccess = statusResult.Success,
+                ApiError = statusResult.ErrorMessage,
+                ServerApiUrl = Config.GetValue<string>("ServerApiUrl")
+            };
+
+            return View(string.Equals(origin, "public", StringComparison.OrdinalIgnoreCase) ? "PublicStatus" : "Status", model);
         }
 
         private string GetReturnUrl(string origin)
@@ -171,6 +201,51 @@ namespace OCPP.Core.Management.Controllers
             catch (Exception exp)
             {
                 Logger.LogError(exp, "PaymentsController => POST {Path} failed: {Message}", relativePath, exp.Message);
+                return (false, null, exp.Message);
+            }
+        }
+
+        private async Task<(bool Success, string Payload, string ErrorMessage)> GetAsync(string relativePath)
+        {
+            string serverApiUrl = Config.GetValue<string>("ServerApiUrl");
+            string apiKeyConfig = Config.GetValue<string>("ApiKey");
+
+            if (string.IsNullOrWhiteSpace(serverApiUrl))
+            {
+                return (false, null, L("ServerNotConfigured", "Server API URL is not configured."));
+            }
+
+            if (!serverApiUrl.EndsWith('/'))
+            {
+                serverApiUrl += "/";
+            }
+
+            var targetUri = new Uri(new Uri(serverApiUrl), relativePath);
+
+            try
+            {
+                using var httpClient = new HttpClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+                if (!string.IsNullOrWhiteSpace(apiKeyConfig))
+                {
+                    httpClient.DefaultRequestHeaders.Add("X-API-Key", apiKeyConfig);
+                }
+
+                HttpResponseMessage response = await httpClient.GetAsync(targetUri);
+                string responsePayload = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return (true, responsePayload, null);
+                }
+
+                Logger.LogWarning("PaymentsController => GET {Path} failed: {StatusCode} / {Payload}", relativePath, response.StatusCode, responsePayload);
+                return (false, responsePayload, response.StatusCode.ToString());
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp, "PaymentsController => GET {Path} failed: {Message}", relativePath, exp.Message);
                 return (false, null, exp.Message);
             }
         }

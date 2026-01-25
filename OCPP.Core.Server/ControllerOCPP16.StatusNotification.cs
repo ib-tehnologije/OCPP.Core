@@ -56,6 +56,8 @@ namespace OCPP.Core.Server
                         newStatus = ConnectorStatusEnum.Available;
                         break;
                     case StatusNotificationRequestStatus.Preparing:
+                        newStatus = ConnectorStatusEnum.Preparing;
+                        break;
                     case StatusNotificationRequestStatus.Charging:
                     case StatusNotificationRequestStatus.SuspendedEVSE:
                     case StatusNotificationRequestStatus.SuspendedEV:
