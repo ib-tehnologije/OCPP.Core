@@ -136,6 +136,12 @@ namespace OCPP.Core.Server
                 case "ChangeConfiguration":
                     HandleChangeConfiguration(msgIn, msgOut);
                     break;
+                case "ReserveNow":
+                    HandleReserveNow(msgIn, msgOut);
+                    break;
+                case "CancelReservation":
+                    HandleCancelReservation(msgIn, msgOut);
+                    break;
                 default:
                     WriteMessageLog(ChargePointStatus.Id, null, msgIn.Action, msgIn.JsonPayload, "Unknown answer");
                     break;

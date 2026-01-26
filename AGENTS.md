@@ -27,5 +27,5 @@ Do not commit real certificates or secrets; `localhost.pfx` and `appsettings.Dev
 - The models can be changed, but tell the user to run the actual migrations for you instead.
 
 ## Other
-- Never run dotnet commands, they do not work in LLM context
+- Never run dotnet commands, they do not work in LLM context, EXCEPT for "dotnet test" that one I managed to give permissions for you to run
 - Never touch node_modules, or any build output folders directly

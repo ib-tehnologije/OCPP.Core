@@ -328,7 +328,7 @@ namespace OCPP.Core.Database
                 {
                     activeKey
                         .IsRequired()
-                        .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
+                        .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed','StartRejected','StartTimeout','Abandoned') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
                 }
 
                 entity.HasIndex("ChargePointId", "ConnectorId", "ActiveConnectorKey")

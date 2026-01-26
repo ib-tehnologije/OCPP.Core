@@ -540,6 +540,68 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CancelPaymentIntentIfCancelable_CancelsWhenRequiresCapture()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripePaymentIntentId = "pi_cancelable",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_cancelable", Status = "requires_capture" }
+            };
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), intentService);
+
+            coordinator.CancelPaymentIntentIfCancelable(context, reservation, "test");
+
+            Assert.True(intentService.CancelCalled);
+            Assert.NotNull(intentService.LastCancelRequestOptions);
+            Assert.Contains(reservation.ReservationId.ToString(), intentService.LastCancelRequestOptions.IdempotencyKey);
+        }
+
+        [Fact]
+        public void CancelPaymentIntentIfCancelable_SkipsWhenAlreadySucceeded()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripePaymentIntentId = "pi_done",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_done", Status = "succeeded" }
+            };
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), intentService);
+
+            coordinator.CancelPaymentIntentIfCancelable(context, reservation, "test");
+
+            Assert.False(intentService.CancelCalled);
+        }
+
+        [Fact]
         public void HandleWebhookEvent_RejectsWhenSecretMissingAndNotAllowed()
         {
             using var context = CreateContext();

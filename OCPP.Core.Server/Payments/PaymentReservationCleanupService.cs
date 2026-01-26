@@ -140,7 +140,7 @@ namespace OCPP.Core.Server.Payments
                     _logger.LogWarning(ex, "PaymentReservationCleanup => CancelPaymentIntent failed reservation={ReservationId}", reservation.ReservationId);
                 }
 
-                reservation.Status = PaymentReservationStatus.Cancelled;
+                reservation.Status = PaymentReservationStatus.StartTimeout;
                 reservation.LastError = "Start window expired without transaction.";
                 reservation.FailureCode = "StartTimeout";
                 reservation.FailureMessage = reservation.LastError;

@@ -99,6 +99,12 @@ namespace OCPP.Core.Server
                     case "NotifyEVChargingSchedule":
                         errorCode = HandleNotifyEVChargingSchedule(msgIn, msgOut);
                         break;
+                    case "ReserveNow":
+                        errorCode = HandleReserveNow(msgIn, msgOut);
+                        break;
+                    case "CancelReservation":
+                        errorCode = HandleCancelReservation(msgIn, msgOut);
+                        break;
                     default:
                         errorCode = ErrorCodes.NotSupported;
                         WriteMessageLog(ChargePointStatus.Id, null, msgIn.Action, msgIn.JsonPayload, errorCode);
@@ -147,6 +153,12 @@ namespace OCPP.Core.Server
                     break;
                 case "RequestStopTransaction":
                     HandleRequestStopTransaction(msgIn, msgOut);
+                    break;
+                case "ReserveNow":
+                    HandleReserveNow(msgIn, msgOut);
+                    break;
+                case "CancelReservation":
+                    HandleCancelReservation(msgIn, msgOut);
                     break;
 
                 default:

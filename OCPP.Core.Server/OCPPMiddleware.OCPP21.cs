@@ -504,6 +504,83 @@ namespace OCPP.Core.Server
             await apiCallerContext.Response.WriteAsync(apiResult);
         }
 
+        private async Task<string> ExecuteReserveNow21(ChargePointStatus chargePointStatus, OCPPCoreContext dbContext, int connectorId, string idTag, int reservationId, DateTime expiryUtc)
+        {
+            ILogger logger = _logFactory.CreateLogger("OCPPMiddleware.OCPP21");
+            ControllerOCPP21 controller21 = new ControllerOCPP21(_configuration, _logFactory, chargePointStatus, dbContext);
+
+            var request = new Messages_OCPP21.ReserveNowRequest
+            {
+                Evse = new Messages_OCPP21.EVSEType { Id = connectorId },
+                IdToken = new Messages_OCPP21.IdTokenType { IdToken = idTag, Type = "ISO14443" },
+                ExpiryDateTime = expiryUtc,
+                Id = reservationId
+            };
+
+            string jsonRequest = JsonConvert.SerializeObject(request);
+
+            OCPPMessage msgOut = new OCPPMessage
+            {
+                MessageType = "2",
+                Action = "ReserveNow",
+                UniqueId = Guid.NewGuid().ToString("N"),
+                JsonPayload = jsonRequest,
+                TaskCompletionSource = new TaskCompletionSource<string>()
+            };
+
+            _requestQueue.Add(msgOut.UniqueId, msgOut);
+            await SendOcpp21Message(msgOut, logger, chargePointStatus);
+
+            string apiResult = "{\"status\": \"Timeout\"}";
+            if (msgOut.TaskCompletionSource.Task.Wait(TimoutWaitForCharger))
+            {
+                apiResult = msgOut.TaskCompletionSource.Task.Result;
+            }
+            else
+            {
+                logger.LogInformation("OCPPMiddleware.OCPP21 => ReserveNow timeout cp={ChargePoint} connector={Connector} idTag={IdTag}", chargePointStatus.Id, connectorId, idTag);
+            }
+
+            return apiResult;
+        }
+
+        private async Task<string> ExecuteCancelReservation21(ChargePointStatus chargePointStatus, OCPPCoreContext dbContext, int reservationId)
+        {
+            ILogger logger = _logFactory.CreateLogger("OCPPMiddleware.OCPP21");
+            ControllerOCPP21 controller21 = new ControllerOCPP21(_configuration, _logFactory, chargePointStatus, dbContext);
+
+            var request = new Messages_OCPP21.CancelReservationRequest
+            {
+                ReservationId = reservationId
+            };
+
+            string jsonRequest = JsonConvert.SerializeObject(request);
+
+            OCPPMessage msgOut = new OCPPMessage
+            {
+                MessageType = "2",
+                Action = "CancelReservation",
+                UniqueId = Guid.NewGuid().ToString("N"),
+                JsonPayload = jsonRequest,
+                TaskCompletionSource = new TaskCompletionSource<string>()
+            };
+
+            _requestQueue.Add(msgOut.UniqueId, msgOut);
+            await SendOcpp21Message(msgOut, logger, chargePointStatus);
+
+            string apiResult = "{\"status\": \"Timeout\"}";
+            if (msgOut.TaskCompletionSource.Task.Wait(TimoutWaitForCharger))
+            {
+                apiResult = msgOut.TaskCompletionSource.Task.Result;
+            }
+            else
+            {
+                logger.LogInformation("OCPPMiddleware.OCPP21 => CancelReservation timeout cp={ChargePoint} reservationId={ReservationId}", chargePointStatus.Id, reservationId);
+            }
+
+            return apiResult;
+        }
+
         private async Task SendOcpp21Message(OCPPMessage msg, ILogger logger, ChargePointStatus chargePointStatus)
         {
             // Send raw outgoing messages to extensions
