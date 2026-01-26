@@ -61,6 +61,12 @@ namespace OCPP.Core.Server
         public string Protocol { get; set; }
 
         /// <summary>
+        /// Optional capability hint: whether the charger supports the Reservation profile.
+        /// Populated from SupportedFeatureProfiles when available.
+        /// </summary>
+        public bool? SupportsReservationProfile { get; set; }
+
+        /// <summary>
         /// Dictionary with online connectors
         /// </summary>
         public Dictionary<int, OnlineConnectorStatus> OnlineConnectors

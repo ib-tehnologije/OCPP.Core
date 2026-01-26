@@ -1595,10 +1595,29 @@ namespace OCPP.Core.Server
             return Math.Abs(value == int.MinValue ? int.MaxValue : value);
         }
 
+        private bool SupportsReservationProfile(ChargePointStatus status)
+        {
+            if (status == null) return false;
+
+            if (status.SupportsReservationProfile.HasValue)
+            {
+                return status.SupportsReservationProfile.Value;
+            }
+
+            var proto = status.Protocol?.ToLowerInvariant();
+            if (proto == "ocpp1.6" || proto == "ocpp201" || proto == "ocpp2.1")
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private async Task BestEffortReserveNowAsync(ChargePaymentReservation reservation, ChargePointStatus chargePointStatus, OCPPCoreContext dbContext)
         {
             if (!ReservationProfileEnabled || reservation == null || chargePointStatus == null) return;
             if (chargePointStatus.WebSocket == null || chargePointStatus.WebSocket.State != WebSocketState.Open) return;
+            if (!SupportsReservationProfile(chargePointStatus)) return;
 
             var expiry = reservation.StartDeadlineAtUtc ?? _utcNow().AddMinutes(Math.Max(1, _configuration.GetValue<int?>("Payments:StartWindowMinutes") ?? 7));
             var idTag = reservation.OcppIdTag ?? reservation.ChargeTagId;
@@ -1632,6 +1651,7 @@ namespace OCPP.Core.Server
         {
             if (!ReservationProfileEnabled || reservation == null || chargePointStatus == null) return;
             if (chargePointStatus.WebSocket == null || chargePointStatus.WebSocket.State != WebSocketState.Open) return;
+            if (!SupportsReservationProfile(chargePointStatus)) return;
 
             int reservationId = GetChargerReservationId(reservation);
             try
