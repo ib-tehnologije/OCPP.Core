@@ -312,33 +312,43 @@ namespace OCPP.Core.Server
             }
             else if (context.Request.Path.StartsWithSegments("/API"))
             {
+                // format: /API/<command>[/chargepointId[/connectorId[/parameter]]]
+                string[] urlParts = context.Request.Path.Value.Split('/');
+                bool isStripeWebhook = urlParts.Length >= 4 &&
+                                       string.Equals(urlParts[2], "Payments", StringComparison.OrdinalIgnoreCase) &&
+                                       string.Equals(urlParts[3], "Webhook", StringComparison.OrdinalIgnoreCase);
+
                 // Check authentication (X-API-Key)
-                string apiKeyConfig = _configuration.GetValue<string>("ApiKey");
-                if (!string.IsNullOrWhiteSpace(apiKeyConfig))
+                if (!isStripeWebhook)
                 {
-                    // ApiKey specified => check request
-                    string apiKeyCaller = context.Request.Headers["X-API-Key"].FirstOrDefault();
-                    if (apiKeyConfig == apiKeyCaller)
+                    string apiKeyConfig = _configuration.GetValue<string>("ApiKey");
+                    if (!string.IsNullOrWhiteSpace(apiKeyConfig))
                     {
-                        // API-Key matches
-                        _logger.LogInformation("OCPPMiddleware => Success: X-API-Key matches");
+                        // ApiKey specified => check request
+                        string apiKeyCaller = context.Request.Headers["X-API-Key"].FirstOrDefault();
+                        if (apiKeyConfig == apiKeyCaller)
+                        {
+                            // API-Key matches
+                            _logger.LogInformation("OCPPMiddleware => Success: X-API-Key matches");
+                        }
+                        else
+                        {
+                            // API-Key does NOT matches => authentication failure!!!
+                            _logger.LogWarning("OCPPMiddleware => Failure: Wrong X-API-Key! Caller='{0}'", apiKeyCaller);
+                            context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                            return;
+                        }
                     }
                     else
                     {
-                        // API-Key does NOT matches => authentication failure!!!
-                        _logger.LogWarning("OCPPMiddleware => Failure: Wrong X-API-Key! Caller='{0}'", apiKeyCaller);
-                        context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                        return;
+                        // No API-Key configured => no authentication
+                        _logger.LogWarning("OCPPMiddleware => No X-API-Key configured!");
                     }
                 }
                 else
                 {
-                    // No API-Key configured => no authenticatiuon
-                    _logger.LogWarning("OCPPMiddleware => No X-API-Key configured!");
+                    _logger.LogDebug("OCPPMiddleware => Skipping API key check for Stripe webhook");
                 }
-
-                // format: /API/<command>[/chargepointId[/connectorId[/parameter]]]
-                string[] urlParts = context.Request.Path.Value.Split('/');
 
                 if (urlParts.Length >= 3)
                 {
