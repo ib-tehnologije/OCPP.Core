@@ -692,13 +692,13 @@ namespace OCPP.Core.Server.Payments
 
             switch (stripeEvent.Type)
             {
-                case Events.CheckoutSessionCompleted:
+                case EventTypes.CheckoutSessionCompleted:
                     HandleCheckoutCompleted(dbContext, stripeEvent);
                     break;
-                case Events.CheckoutSessionExpired:
+                case EventTypes.CheckoutSessionExpired:
                     HandleCheckoutExpired(dbContext, stripeEvent);
                     break;
-                case Events.PaymentIntentPaymentFailed:
+                case EventTypes.PaymentIntentPaymentFailed:
                     HandlePaymentFailed(dbContext, stripeEvent);
                     break;
                 default:

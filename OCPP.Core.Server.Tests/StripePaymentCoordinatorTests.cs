@@ -426,7 +426,7 @@ namespace OCPP.Core.Server.Tests
 
             var evt = new Event
             {
-                Type = Events.CheckoutSessionCompleted,
+                Type = EventTypes.CheckoutSessionCompleted,
                 Data = new EventData
                 {
                     Object = new Session
@@ -471,7 +471,7 @@ namespace OCPP.Core.Server.Tests
 
             var evt = new Event
             {
-                Type = Events.PaymentIntentPaymentFailed,
+                Type = EventTypes.PaymentIntentPaymentFailed,
                 Data = new EventData
                 {
                     Object = new PaymentIntent
@@ -514,7 +514,7 @@ namespace OCPP.Core.Server.Tests
 
             var evt = new Event
             {
-                Type = Events.CheckoutSessionExpired,
+                Type = EventTypes.CheckoutSessionExpired,
                 Data = new EventData
                 {
                     Object = new Session
@@ -619,7 +619,7 @@ namespace OCPP.Core.Server.Tests
 
             var evt = new Event
             {
-                Type = Events.CheckoutSessionCompleted,
+                Type = EventTypes.CheckoutSessionCompleted,
                 Data = new EventData
                 {
                     Object = new Session { Id = "sess_noverify", PaymentStatus = "paid", PaymentIntentId = "pi_x" }
@@ -661,7 +661,7 @@ namespace OCPP.Core.Server.Tests
             var evt = new Event
             {
                 Id = "evt_1",
-                Type = Events.CheckoutSessionCompleted,
+                Type = EventTypes.CheckoutSessionCompleted,
                 Created = DateTime.UtcNow,
                 Data = new EventData
                 {
