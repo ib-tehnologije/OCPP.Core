@@ -847,7 +847,7 @@ namespace OCPP.Core.Server.Tests
     {
         public Event EventToReturn { get; set; } = new Event();
 
-        public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret) => EventToReturn;
+        public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret, bool throwOnApiVersionMismatch = true) => EventToReturn;
     }
 
     internal class TestCleanupService : PaymentReservationCleanupService

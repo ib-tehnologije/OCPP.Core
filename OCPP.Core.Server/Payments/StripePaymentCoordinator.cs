@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using OCPP.Core.Database;
 using Stripe;
 using Stripe.Checkout;
@@ -658,7 +659,21 @@ namespace OCPP.Core.Server.Payments
                 }
                 else
                 {
-                    stripeEvent = _eventFactory.ConstructEvent(payload, signatureHeader, _options.WebhookSecret);
+                    stripeEvent = _eventFactory.ConstructEvent(payload, signatureHeader, _options.WebhookSecret, throwOnApiVersionMismatch: true);
+                }
+            }
+            catch (StripeException sex) when (IsApiVersionMismatch(sex))
+            {
+                var apiVersion = TryGetApiVersionFromPayload(payload);
+                _logger.LogWarning(sex, "Stripe webhook API version mismatch (payload api_version={ApiVersion}); retrying without strict version check.", apiVersion ?? "(unknown)");
+                try
+                {
+                    stripeEvent = _eventFactory.ConstructEvent(payload, signatureHeader, _options.WebhookSecret, throwOnApiVersionMismatch: false);
+                }
+                catch (Exception ex2)
+                {
+                    _logger.LogWarning(ex2, "Stripe webhook validation failed after relaxing API version check: {Message}", ex2.Message);
+                    return;
                 }
             }
             catch (Exception ex)
@@ -692,6 +707,23 @@ namespace OCPP.Core.Server.Payments
             }
 
             MarkWebhookEventProcessed(dbContext, stripeEvent);
+        }
+
+        private static bool IsApiVersionMismatch(StripeException ex) =>
+            ex?.Message?.IndexOf("API version", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private static string TryGetApiVersionFromPayload(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload)) return null;
+            try
+            {
+                var jobj = JsonConvert.DeserializeObject<JObject>(payload);
+                return jobj?["api_version"]?.ToString();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static bool IsActiveReservationConflict(DbUpdateException dbUpdateEx)
@@ -1020,7 +1052,7 @@ namespace OCPP.Core.Server.Payments
 
     internal interface IStripeEventFactory
     {
-        Event ConstructEvent(string payload, string signatureHeader, string webhookSecret);
+        Event ConstructEvent(string payload, string signatureHeader, string webhookSecret, bool throwOnApiVersionMismatch = true);
     }
 
     internal class StripeSessionServiceWrapper : IStripeSessionService
@@ -1046,7 +1078,7 @@ namespace OCPP.Core.Server.Payments
 
     internal class StripeEventFactoryWrapper : IStripeEventFactory
     {
-        public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret) =>
-            EventUtility.ConstructEvent(payload, signatureHeader, webhookSecret);
+        public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret, bool throwOnApiVersionMismatch = true) =>
+            EventUtility.ConstructEvent(payload, signatureHeader, webhookSecret, throwOnApiVersionMismatch: throwOnApiVersionMismatch);
     }
 }

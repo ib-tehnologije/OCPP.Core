@@ -1371,7 +1371,10 @@ namespace OCPP.Core.Server
                 r.ChargePointId == chargePointId &&
                 r.ConnectorId == connectorId &&
                 (!reservationToIgnore.HasValue || r.ReservationId != reservationToIgnore.Value) &&
-                PaymentReservationStatus.IsActive(r.Status));
+                (r.Status == PaymentReservationStatus.Pending ||
+                 r.Status == PaymentReservationStatus.Authorized ||
+                 r.Status == PaymentReservationStatus.StartRequested ||
+                 r.Status == PaymentReservationStatus.Charging));
             if (result.ActiveReservation)
             {
                 result.Reason = "ActiveReservation";
