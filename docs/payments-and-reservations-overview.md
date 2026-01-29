@@ -18,7 +18,7 @@ This repo uses Stripe Checkout (manual capture) to reserve funds before remoteâ€
 4) **Stop / Capture**  
    - On `StopTransaction`, server computes actual cost and either captures (PI `requires_capture`) or marks completed (`succeeded`).  
    - If zero capture, cancels PI and marks reservation `Cancelled`.
-5) **Webhook assists** (`/Payments/Webhook`)  
+5) **Webhook assists** (`/API/Payments/Webhook`)  
    - `checkout.session.completed`: backfills PI id and marks `Authorized` if still `Pending`.  
    - `checkout.session.expired`: sets `Cancelled`.  
    - `payment_intent.payment_failed`: sets `Failed`.

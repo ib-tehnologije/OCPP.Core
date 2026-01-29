@@ -785,7 +785,7 @@ namespace OCPP.Core.Server
                             context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                         }
                     }
-                    else if (cmd == "Payments")
+                    else if (string.Equals(cmd, "Payments", StringComparison.OrdinalIgnoreCase))
                     {
                         await HandlePaymentsAsync(context, dbContext, urlParts);
                     }
