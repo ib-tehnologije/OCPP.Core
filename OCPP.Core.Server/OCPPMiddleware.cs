@@ -64,7 +64,8 @@ namespace OCPP.Core.Server
         private readonly ReservationLinkService _reservationLinkService;
         private readonly Func<DateTime> _utcNow;
         private const string ConnectorBusyStatus = "ConnectorBusy";
-        private bool ReservationProfileEnabled => _configuration.GetValue<bool>("Payments:EnableReservationProfile", false);
+        // Reservation profile disabled: Remove charger-side ReserveNow/CancelReservation to avoid flaky stations.
+        private bool ReservationProfileEnabled => false;
 
         // Dictionary with status objects for each charge point
         private static Dictionary<string, ChargePointStatus> _chargePointStatusDict = new Dictionary<string, ChargePointStatus>();
@@ -83,6 +84,13 @@ namespace OCPP.Core.Server
             _utcNow = () => DateTime.UtcNow;
 
             _logger = logFactory.CreateLogger("OCPPMiddleware");
+
+            var chargerTimeoutMs = _configuration.GetValue<int?>("Payments:ChargerResponseTimeoutMs");
+            if (chargerTimeoutMs.HasValue && chargerTimeoutMs.Value > 0)
+            {
+                // Clamp to a reasonable minimum so we don't hammer the charger.
+                TimoutWaitForCharger = Math.Max(5_000, chargerTimeoutMs.Value);
+            }
 
             LoadExtensions();
             if (_startMediator != null)
@@ -1061,7 +1069,7 @@ namespace OCPP.Core.Server
                 var reservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
                 if (reservation != null && _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var cpStatus))
                 {
-                    await BestEffortCancelReservationAsync(reservation, cpStatus, dbContext);
+                    // Reservation profile disabled (was CancelReservation)
                 }
             }
             catch (Exception ex)
@@ -1460,8 +1468,7 @@ namespace OCPP.Core.Server
                 return ("ConnectorBusy", startability.Reason);
             }
 
-            // Optional charger-side reservation to lock connector
-            await BestEffortReserveNowAsync(reservation, status, dbContext);
+            // Reservation profile disabled (was ReserveNow)
 
             // Idempotency: if already StartRequested, consider success
             if (reservation.Status == PaymentReservationStatus.StartRequested || reservation.Status == PaymentReservationStatus.Charging)
@@ -1498,7 +1505,7 @@ namespace OCPP.Core.Server
             reservation.FailureMessage = reservation.LastError;
             dbContext.SaveChanges();
             _paymentCoordinator.CancelPaymentIntentIfCancelable(dbContext, reservation, reservation.LastError);
-            await BestEffortCancelReservationAsync(reservation, status, dbContext);
+            // Reservation profile disabled (was CancelReservation)
             _logger.LogWarning("TryStartCharging => Remote start rejected reservation={ReservationId} status={RemoteStatus}", reservation.ReservationId, remoteStatus);
             return ("StartRejected", remoteStatus ?? "RemoteStartFailed");
         }
@@ -1626,71 +1633,7 @@ namespace OCPP.Core.Server
             return false;
         }
 
-        private async Task BestEffortReserveNowAsync(ChargePaymentReservation reservation, ChargePointStatus chargePointStatus, OCPPCoreContext dbContext)
-        {
-            if (!ReservationProfileEnabled || reservation == null || chargePointStatus == null) return;
-            if (chargePointStatus.WebSocket == null || chargePointStatus.WebSocket.State != WebSocketState.Open) return;
-            if (!SupportsReservationProfile(chargePointStatus)) return;
-
-            var expiry = reservation.StartDeadlineAtUtc ?? _utcNow().AddMinutes(Math.Max(1, _configuration.GetValue<int?>("Payments:StartWindowMinutes") ?? 7));
-            var idTag = reservation.OcppIdTag ?? reservation.ChargeTagId;
-            int reservationId = GetChargerReservationId(reservation);
-            try
-            {
-                if (string.Equals(chargePointStatus.Protocol, Protocol_OCPP16, StringComparison.OrdinalIgnoreCase))
-                {
-                    await ExecuteReserveNow16(chargePointStatus, dbContext, reservation.ConnectorId, idTag, reservationId, expiry);
-                }
-                else if (string.Equals(chargePointStatus.Protocol, Protocol_OCPP201, StringComparison.OrdinalIgnoreCase))
-                {
-                    await ExecuteReserveNow20(chargePointStatus, dbContext, reservation.ConnectorId, idTag, reservationId, expiry);
-                }
-                else if (string.Equals(chargePointStatus.Protocol, Protocol_OCPP21, StringComparison.OrdinalIgnoreCase))
-                {
-                    await ExecuteReserveNow21(chargePointStatus, dbContext, reservation.ConnectorId, idTag, reservationId, expiry);
-                }
-                else
-                {
-                    _logger.LogDebug("ReserveNow skipped: protocol {Protocol} not supported", chargePointStatus.Protocol);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "ReserveNow best-effort failed for reservation {ReservationId}", reservation.ReservationId);
-            }
-        }
-
-        private async Task BestEffortCancelReservationAsync(ChargePaymentReservation reservation, ChargePointStatus chargePointStatus, OCPPCoreContext dbContext)
-        {
-            if (!ReservationProfileEnabled || reservation == null || chargePointStatus == null) return;
-            if (chargePointStatus.WebSocket == null || chargePointStatus.WebSocket.State != WebSocketState.Open) return;
-            if (!SupportsReservationProfile(chargePointStatus)) return;
-
-            int reservationId = GetChargerReservationId(reservation);
-            try
-            {
-                if (string.Equals(chargePointStatus.Protocol, Protocol_OCPP16, StringComparison.OrdinalIgnoreCase))
-                {
-                    await ExecuteCancelReservation16(chargePointStatus, dbContext, reservationId);
-                }
-                else if (string.Equals(chargePointStatus.Protocol, Protocol_OCPP201, StringComparison.OrdinalIgnoreCase))
-                {
-                    await ExecuteCancelReservation20(chargePointStatus, dbContext, reservationId);
-                }
-                else if (string.Equals(chargePointStatus.Protocol, Protocol_OCPP21, StringComparison.OrdinalIgnoreCase))
-                {
-                    await ExecuteCancelReservation21(chargePointStatus, dbContext, reservationId);
-                }
-                else
-                {
-                    _logger.LogDebug("CancelReservation skipped: protocol {Protocol} not supported", chargePointStatus.Protocol);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "CancelReservation best-effort failed for reservation {ReservationId}", reservation.ReservationId);
-            }
-        }
+        // Reservation profile fully disabled; ReserveNow/CancelReservation helpers removed intentionally.
 
         private static void EnsureChargeTagExists(OCPPCoreContext dbContext, string tagId)
         {

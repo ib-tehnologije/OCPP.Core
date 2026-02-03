@@ -175,7 +175,8 @@ namespace OCPP.Core.Management.Controllers
             try
             {
                 using var httpClient = new HttpClient();
-                httpClient.Timeout = TimeSpan.FromSeconds(30);
+                int timeoutSeconds = Config.GetValue<int?>("ServerApiTimeoutSeconds") ?? 65;
+                httpClient.Timeout = TimeSpan.FromSeconds(Math.Max(30, timeoutSeconds));
 
                 if (!string.IsNullOrWhiteSpace(apiKeyConfig))
                 {
@@ -225,7 +226,8 @@ namespace OCPP.Core.Management.Controllers
             try
             {
                 using var httpClient = new HttpClient();
-                httpClient.Timeout = TimeSpan.FromSeconds(30);
+                int timeoutSeconds = Config.GetValue<int?>("ServerApiTimeoutSeconds") ?? 65;
+                httpClient.Timeout = TimeSpan.FromSeconds(Math.Max(30, timeoutSeconds));
 
                 if (!string.IsNullOrWhiteSpace(apiKeyConfig))
                 {
