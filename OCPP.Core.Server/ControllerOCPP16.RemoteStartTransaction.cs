@@ -37,6 +37,21 @@ namespace OCPP.Core.Server
 
             try
             {
+                if (msgIn.MessageType == "4")
+                {
+                    var errorCode = msgIn.ErrorCode ?? "CallError";
+                    Logger.LogWarning("HandleRemoteStartTransaction => CallError received: {ErrorCode} {ErrorDescription}", errorCode, msgIn.ErrorDescription ?? "(none)");
+                    WriteMessageLog(ChargePointStatus?.Id, null, msgOut.Action, msgIn.ErrorDescription, errorCode);
+
+                    if (msgOut.TaskCompletionSource != null)
+                    {
+                        string apiResult = "{\"status\": \"Rejected\", \"error\": " + JsonConvert.ToString(errorCode) + "}";
+                        Logger.LogTrace("HandleRemoteStartTransaction => API response: {0}", apiResult);
+                        msgOut.TaskCompletionSource.SetResult(apiResult);
+                    }
+                    return;
+                }
+
                 RemoteStartTransactionResponse remoteStartTransactionResponse = DeserializeMessage<RemoteStartTransactionResponse>(msgIn);
                 Logger.LogInformation("HandleRemoteStartTransaction => Answer status: {0}", remoteStartTransactionResponse?.Status);
                 WriteMessageLog(ChargePointStatus?.Id, null, msgOut.Action, remoteStartTransactionResponse?.Status.ToString(), msgIn.ErrorCode);

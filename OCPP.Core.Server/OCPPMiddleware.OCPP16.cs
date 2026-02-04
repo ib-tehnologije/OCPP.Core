@@ -31,6 +31,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using OCPP.Core.Server.Messages_OCPP16;
 using OCPP.Core.Database;
+using Newtonsoft.Json.Linq;
 
 namespace OCPP.Core.Server
 {
@@ -78,6 +79,8 @@ namespace OCPP.Core.Server
                                 });
 
                                 Match match = Regex.Match(ocppMessage, MessageRegExp);
+                                OCPPMessage msgIn = null;
+
                                 if (match != null && match.Groups != null && match.Groups.Count >= 3)
                                 {
                                     string messageTypeId = match.Groups[1].Value;
@@ -86,8 +89,51 @@ namespace OCPP.Core.Server
                                     string jsonPaylod = match.Groups[4].Value;
                                     logger.LogInformation("OCPPMiddleware.Receive16 => OCPP-Message: Type={0} / ID={1} / Action={2})", messageTypeId, uniqueId, action);
 
-                                    OCPPMessage msgIn = new OCPPMessage(messageTypeId, uniqueId, action, jsonPaylod);
+                                    msgIn = new OCPPMessage(messageTypeId, uniqueId, action, jsonPaylod);
+                                }
+                                else
+                                {
+                                    try
+                                    {
+                                        var messageArray = JArray.Parse(ocppMessage);
+                                        string messageTypeId = messageArray.Count > 0 ? messageArray[0]?.ToString() : null;
+                                        string uniqueId = messageArray.Count > 1 ? messageArray[1]?.ToString() : null;
+                                        string action = string.Empty;
+                                        string jsonPayload = "{}";
 
+                                        if (string.Equals(messageTypeId, "2", StringComparison.Ordinal))
+                                        {
+                                            action = messageArray.Count > 2 ? messageArray[2]?.ToString() : null;
+                                            jsonPayload = messageArray.Count > 3 ? messageArray[3]?.ToString(Formatting.None) : "{}";
+                                        }
+                                        else if (string.Equals(messageTypeId, "3", StringComparison.Ordinal))
+                                        {
+                                            jsonPayload = messageArray.Count > 2 ? messageArray[2]?.ToString(Formatting.None) : "{}";
+                                        }
+                                        else if (string.Equals(messageTypeId, "4", StringComparison.Ordinal))
+                                        {
+                                            jsonPayload = messageArray.Count > 4 ? messageArray[4]?.ToString(Formatting.None) : "{}";
+                                        }
+
+                                        if (!string.IsNullOrWhiteSpace(messageTypeId) && !string.IsNullOrWhiteSpace(uniqueId))
+                                        {
+                                            logger.LogInformation("OCPPMiddleware.Receive16 => OCPP-Message: Type={0} / ID={1} / Action={2})", messageTypeId, uniqueId, action);
+                                            msgIn = new OCPPMessage(messageTypeId, uniqueId, action, jsonPayload);
+                                            if (string.Equals(messageTypeId, "4", StringComparison.Ordinal))
+                                            {
+                                                msgIn.ErrorCode = messageArray.Count > 2 ? messageArray[2]?.ToString() : null;
+                                                msgIn.ErrorDescription = messageArray.Count > 3 ? messageArray[3]?.ToString() : null;
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        logger.LogWarning(ex, "OCPPMiddleware.Receive16 => Error in RegEx-Matching: Msg={0})", ocppMessage);
+                                    }
+                                }
+
+                                if (msgIn != null)
+                                {
                                     // Send raw incoming messages to extensions
                                     _ = Task.Run(() =>
                                     {
@@ -120,10 +166,6 @@ namespace OCPP.Core.Server
                                         // Unknown message type
                                         logger.LogError("OCPPMiddleware.Receive16 => Unknown message type: {0} / Msg: {1}", msgIn.MessageType, ocppMessage);
                                     }
-                                }
-                                else
-                                {
-                                    logger.LogWarning("OCPPMiddleware.Receive16 => Error in RegEx-Matching: Msg={0})", ocppMessage);
                                 }
                             }
                         }
