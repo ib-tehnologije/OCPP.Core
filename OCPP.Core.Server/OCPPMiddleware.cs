@@ -1476,6 +1476,33 @@ namespace OCPP.Core.Server
                 return ("StartRequested", "AlreadyRequested");
             }
 
+            string idTag = ResolveRemoteStartIdTag(reservation, status?.Protocol);
+            if (string.IsNullOrWhiteSpace(idTag))
+            {
+                reservation.Status = PaymentReservationStatus.StartRejected;
+                reservation.LastError = "Missing idTag for remote start.";
+                reservation.FailureCode = "RemoteStartRejected";
+                reservation.FailureMessage = reservation.LastError;
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+                _paymentCoordinator.CancelPaymentIntentIfCancelable(dbContext, reservation, reservation.LastError);
+                _logger.LogWarning("TryStartCharging => Missing idTag reservation={ReservationId} caller={Caller}", reservation.ReservationId, caller);
+                return ("StartRejected", "MissingIdTag");
+            }
+
+            if (string.Equals(status?.Protocol, Protocol_OCPP16, StringComparison.OrdinalIgnoreCase) && idTag.Length > 20)
+            {
+                reservation.Status = PaymentReservationStatus.StartRejected;
+                reservation.LastError = $"idTag too long for OCPP 1.6 (len={idTag.Length})";
+                reservation.FailureCode = "RemoteStartRejected";
+                reservation.FailureMessage = reservation.LastError;
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+                _paymentCoordinator.CancelPaymentIntentIfCancelable(dbContext, reservation, reservation.LastError);
+                _logger.LogWarning("TryStartCharging => idTag too long for OCPP 1.6 reservation={ReservationId} len={Length}", reservation.ReservationId, idTag.Length);
+                return ("StartRejected", "IdTagTooLong");
+            }
+
             // Ensure idTag exists for authorization flow
             if (!string.IsNullOrWhiteSpace(reservation.OcppIdTag))
             {
@@ -1483,7 +1510,7 @@ namespace OCPP.Core.Server
             }
 
             string connectorId = reservation.ConnectorId.ToString();
-            string apiResult = await ExecuteRemoteStartAsync(status, dbContext, connectorId, reservation.OcppIdTag ?? reservation.ChargeTagId);
+            string apiResult = await ExecuteRemoteStartAsync(status, dbContext, connectorId, idTag);
             string remoteStatus = ExtractStatusFromApiResult(apiResult);
 
             reservation.RemoteStartSentAtUtc = _utcNow();
@@ -1497,6 +1524,16 @@ namespace OCPP.Core.Server
                 dbContext.SaveChanges();
                 _logger.LogInformation("TryStartCharging => Remote start accepted reservation={ReservationId} caller={Caller}", reservation.ReservationId, caller);
                 return ("StartRequested", "Accepted");
+            }
+
+            if (string.Equals(remoteStatus, "Timeout", StringComparison.OrdinalIgnoreCase))
+            {
+                reservation.Status = PaymentReservationStatus.Authorized;
+                reservation.LastError = "Remote start result: Timeout";
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+                _logger.LogWarning("TryStartCharging => Remote start timeout reservation={ReservationId}", reservation.ReservationId);
+                return ("Timeout", "Timeout");
             }
 
             reservation.Status = PaymentReservationStatus.StartRejected;
@@ -1535,7 +1572,9 @@ namespace OCPP.Core.Server
                 string type = jobj?["type"]?.ToString();
                 if (string.Equals(type, "checkout.session.completed", StringComparison.OrdinalIgnoreCase))
                 {
-                    var metadataToken = jobj?["data"]?["object"]?["metadata"];
+                    var dataObject = jobj?["data"]?["object"];
+                    var metadataToken = dataObject?["metadata"];
+                    string paymentStatus = dataObject?["payment_status"]?.ToString();
                     string resIdString = null;
                     if (metadataToken is Newtonsoft.Json.Linq.JObject metaObj && metaObj.TryGetValue("reservation_id", out var resToken))
                     {
@@ -1547,7 +1586,18 @@ namespace OCPP.Core.Server
                         var reservation = dbContext.ChargePaymentReservations.Find(resId);
                         if (reservation != null)
                         {
-                            await TryStartChargingAsync(dbContext, reservation, "StripeWebhook");
+                            if (reservation.Status == PaymentReservationStatus.Authorized ||
+                                string.Equals(paymentStatus, "paid", StringComparison.OrdinalIgnoreCase))
+                            {
+                                await TryStartChargingAsync(dbContext, reservation, "StripeWebhook");
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Payments/Webhook => Skipping auto-start reservation={ReservationId} status={Status} paymentStatus={PaymentStatus}",
+                                    reservation.ReservationId,
+                                    reservation.Status,
+                                    paymentStatus ?? "(none)");
+                            }
                         }
                     }
                 }
@@ -1592,6 +1642,16 @@ namespace OCPP.Core.Server
                 // ignore parse errors
             }
             return null;
+        }
+
+        private static string ResolveRemoteStartIdTag(ChargePaymentReservation reservation, string protocol)
+        {
+            if (reservation == null) return null;
+            if (string.Equals(protocol, Protocol_OCPP16, StringComparison.OrdinalIgnoreCase))
+            {
+                return reservation.OcppIdTag;
+            }
+            return reservation.OcppIdTag ?? reservation.ChargeTagId;
         }
 
         private static async Task<string> ReadRequestBodyAsync(HttpContext context)
