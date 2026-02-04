@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -28,6 +29,7 @@ namespace OCPP.Core.Server.Payments
         private readonly IStripeEventFactory _eventFactory;
         private readonly IEmailNotificationService _emailNotificationService;
         private readonly StartChargingMediator _startMediator;
+        private readonly IBackgroundJobClient _backgroundJobClient;
         private const string IdempotencyCheckoutCreate = "checkout_create";
         private const string IdempotencyCapture = "capture";
         private const string IdempotencyCancel = "cancel";
@@ -41,7 +43,7 @@ namespace OCPP.Core.Server.Payments
             IOptions<StripeOptions> options,
             IOptions<PaymentFlowOptions> flowOptions,
             ILogger<StripePaymentCoordinator> logger)
-            : this(options, flowOptions, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow, null, null)
+            : this(options, flowOptions, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow, null, null, null)
         {
         }
 
@@ -54,7 +56,8 @@ namespace OCPP.Core.Server.Payments
             IStripeEventFactory eventFactory,
             Func<DateTime> utcNow,
             IEmailNotificationService emailNotificationService = null,
-            StartChargingMediator startMediator = null)
+            StartChargingMediator startMediator = null,
+            IBackgroundJobClient backgroundJobClient = null)
         {
             _options = options?.Value ?? new StripeOptions();
             _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
@@ -65,6 +68,7 @@ namespace OCPP.Core.Server.Payments
             _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
             _emailNotificationService = emailNotificationService;
             _startMediator = startMediator;
+            _backgroundJobClient = backgroundJobClient;
 
             if (!string.IsNullOrWhiteSpace(_options.ApiKey))
             {
@@ -352,11 +356,20 @@ namespace OCPP.Core.Server.Payments
                 try
                 {
                     var recipientEmail = session?.CustomerDetails?.Email;
-                    _emailNotificationService?.SendPaymentAuthorized(recipientEmail, reservation, session);
+                    if (_backgroundJobClient != null)
+                    {
+                        _backgroundJobClient.Enqueue<PaymentAuthorizationEmailJob>(job =>
+                            job.SendPaymentAuthorized(reservationId, recipientEmail, session?.Id));
+                        _logger.LogInformation("Stripe/Confirm => Queued payment authorization email reservation={ReservationId}", reservationId);
+                    }
+                    else
+                    {
+                        _emailNotificationService?.SendPaymentAuthorized(recipientEmail, reservation, session);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Stripe/Confirm => Failed to send payment authorization email for reservation={ReservationId}", reservationId);
+                    _logger.LogWarning(ex, "Stripe/Confirm => Failed to enqueue payment authorization email for reservation={ReservationId}", reservationId);
                 }
 
                 result.Success = true;

@@ -26,6 +26,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Hangfire;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -70,9 +71,22 @@ namespace OCPP.Core.Server
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             services.Configure<Payments.PaymentFlowOptions>(Configuration.GetSection("Payments"));
             services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
+            services.AddHangfire((serviceProvider, config) =>
+            {
+                var cs = Configuration.GetConnectionString("SqlServer");
+                config.UseSimpleAssemblyNameTypeSerializer()
+                      .UseRecommendedSerializerSettings()
+                      .UseSqlServerStorage(cs);
+            });
+            var hangfireQueue = Configuration.GetValue<string>("Hangfire:Queue") ?? "payments";
+            services.AddHangfireServer(options =>
+            {
+                options.Queues = new[] { hangfireQueue };
+            });
             services.AddSingleton<Payments.StartChargingMediator>();
             services.AddSingleton<Payments.ReservationLinkService>();
             services.AddSingleton<Payments.IEmailNotificationService, Payments.EmailNotificationService>();
+            services.AddTransient<Payments.PaymentAuthorizationEmailJob>();
             services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
                 sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
                 sp.GetRequiredService<IOptions<Payments.PaymentFlowOptions>>(),
@@ -82,7 +96,8 @@ namespace OCPP.Core.Server
                 new Payments.StripeEventFactoryWrapper(),
                 () => DateTime.UtcNow,
                 sp.GetService<Payments.IEmailNotificationService>(),
-                sp.GetRequiredService<Payments.StartChargingMediator>()));
+                sp.GetRequiredService<Payments.StartChargingMediator>(),
+                sp.GetService<IBackgroundJobClient>()));
             services.AddHostedService<Payments.PaymentReservationCleanupService>();
         }
 
