@@ -356,10 +356,11 @@ namespace OCPP.Core.Server.Payments
                 try
                 {
                     var recipientEmail = session?.CustomerDetails?.Email;
+                    var sessionId = session?.Id;
                     if (_backgroundJobClient != null)
                     {
                         _backgroundJobClient.Enqueue<PaymentAuthorizationEmailJob>(job =>
-                            job.SendPaymentAuthorized(reservationId, recipientEmail, session?.Id));
+                            job.SendPaymentAuthorized(reservationId, recipientEmail, sessionId));
                         _logger.LogInformation("Stripe/Confirm => Queued payment authorization email reservation={ReservationId}", reservationId);
                     }
                     else
