@@ -133,6 +133,33 @@ namespace OCPP.Core.Management.Controllers
             return View(string.Equals(origin, "public", StringComparison.OrdinalIgnoreCase) ? "PublicStatus" : "Status", model);
         }
 
+        [HttpGet]
+        public async Task<IActionResult> StatusData(Guid reservationId)
+        {
+            if (reservationId == Guid.Empty)
+            {
+                Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
+                return Content("{\"status\":\"Error\",\"message\":\"reservationId required\"}", "application/json");
+            }
+
+            var statusResult = await GetAsync($"Payments/Status?reservationId={reservationId}");
+            if (statusResult.Success)
+            {
+                return Content(statusResult.Payload ?? "{}", "application/json");
+            }
+
+            Response.StatusCode = (int)System.Net.HttpStatusCode.BadGateway;
+            if (!string.IsNullOrWhiteSpace(statusResult.Payload))
+            {
+                return Content(statusResult.Payload, "application/json");
+            }
+
+            var safeMessage = string.IsNullOrWhiteSpace(statusResult.ErrorMessage)
+                ? "Upstream status unavailable."
+                : statusResult.ErrorMessage;
+            return Content($"{{\"status\":\"Error\",\"message\":\"{safeMessage}\"}}", "application/json");
+        }
+
         private string GetReturnUrl(string origin)
         {
             if (!string.IsNullOrWhiteSpace(origin) &&

@@ -1,7 +1,7 @@
 @model OCPP.Core.Management.Models.PaymentStatusViewModel
 @{
     Layout = null;
-    var apiUrl = Model.ServerApiUrl?.TrimEnd('/') + "/Payments/Status?reservationId=" + Model.ReservationId;
+    var apiUrl = Url.Action("StatusData", "Payments", new { reservationId = Model.ReservationId });
 }
 <!DOCTYPE html>
 <html lang="en">
