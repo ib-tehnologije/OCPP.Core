@@ -1134,7 +1134,7 @@ namespace OCPP.Core.Server
             activeReservation = dbContext.ChargePaymentReservations.Any(r =>
                 r.ChargePointId == reservation.ChargePointId &&
                 r.ConnectorId == reservation.ConnectorId &&
-                PaymentReservationStatus.IsActive(r.Status));
+                EF.Property<string>(r, "ActiveConnectorKey") == "ACTIVE");
 
             startability = GetConnectorStartability(dbContext, reservation.ChargePointId, reservation.ConnectorId, cpStatus, reservation.ReservationId);
 
@@ -1229,7 +1229,7 @@ namespace OCPP.Core.Server
                     r.ChargePointId == chargePointId &&
                     r.ConnectorId == connectorId &&
                     (!reservationToIgnore.HasValue || r.ReservationId != reservationToIgnore.Value) &&
-                    PaymentReservationStatus.IsActive(r.Status));
+                    EF.Property<string>(r, "ActiveConnectorKey") == "ACTIVE");
             }
             catch (Exception ex)
             {

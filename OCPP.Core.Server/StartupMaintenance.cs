@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using OCPP.Core.Database;
@@ -116,7 +117,7 @@ namespace OCPP.Core.Server
                     hasActiveReservation = dbContext.ChargePaymentReservations.Any(r =>
                         r.ChargePointId == status.ChargePointId &&
                         r.ConnectorId == status.ConnectorId &&
-                        PaymentReservationStatus.IsActive(r.Status));
+                        EF.Property<string>(r, "ActiveConnectorKey") == "ACTIVE");
                 }
                 catch
                 {
