@@ -138,6 +138,16 @@ namespace OCPP.Core.Server
             // Accept WebSocket
             app.UseWebSockets(webSocketOptions);
 
+            var enableDashboard = Configuration.GetValue<bool>("Hangfire:EnableDashboard");
+            if (enableDashboard)
+            {
+                var dashboardPath = Configuration.GetValue<string>("Hangfire:DashboardPath") ?? "/hangfire";
+                app.UseHangfireDashboard(dashboardPath, new DashboardOptions
+                {
+                    Authorization = new[] { new HangfireDashboardAuthorization() }
+                });
+            }
+
             // Integrate custom OCPP middleware for message processing
             app.UseOCPPMiddleware();
         }
