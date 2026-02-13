@@ -81,7 +81,7 @@ namespace OCPP.Core.Server
                     errorCode = HandleMeterValues(msgIn, msgOut);
                     break;
                 case "StatusNotification":
-                    errorCode = HandleStatusNotification(msgIn, msgOut);
+                    errorCode = HandleStatusNotification(msgIn, msgOut, ocppMiddleware);
                     break;
                 case "DataTransfer":
                     errorCode = HandleDataTransfer(msgIn, msgOut);

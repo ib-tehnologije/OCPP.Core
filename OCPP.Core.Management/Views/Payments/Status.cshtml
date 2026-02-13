@@ -17,7 +17,7 @@
                 <dd class="col-sm-9" id="connector">-</dd>
                 <dt class="col-sm-3">Charger status</dt>
                 <dd class="col-sm-9" id="charger-status">-</dd>
-                <dt class="col-sm-3">Last update (UTC)</dt>
+                <dt class="col-sm-3">Last update</dt>
                 <dd class="col-sm-9" id="updated-at">-</dd>
                 <dt class="col-sm-3">Transaction</dt>
                 <dd class="col-sm-9" id="transaction-id">-</dd>
@@ -51,6 +51,19 @@
         return reasons.join(', ');
     };
 
+    const parseUtc = (value) => {
+        if (!value) return null;
+        const raw = String(value).trim();
+        if (!raw) return null;
+        const hasTz = /([zZ]|[+-]\d\d:\d\d)$/.test(raw);
+        const dt = new Date(hasTz ? raw : `${raw}Z`);
+        return Number.isFinite(dt.getTime()) ? dt : null;
+    };
+
+    const fmtLocal = (dt) => dt
+        ? dt.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(",", " ·")
+        : "-";
+
     async function loadStatus() {
         try {
             const res = await fetch(apiUrl, { cache: 'no-store' });
@@ -59,7 +72,8 @@
             paymentStatus.textContent = data.status || '-';
             connector.textContent = `${data.chargePointId || '-'} / ${data.connectorId || '-'}`;
             chargerStatus.textContent = data.liveStatus || data.persistedStatus || '-';
-            updatedAt.textContent = data.updatedAtUtc || '-';
+            const updatedLocal = fmtLocal(parseUtc(data.updatedAtUtc));
+            updatedAt.textContent = data.updatedAtUtc ? `${updatedLocal} (local)` : '-';
             transactionId.textContent = data.transactionId || '-';
             amount.textContent = fmtMoney(data.maxAmountCents, data.currency);
             startable.textContent = data.startable ? 'Yes' : 'No';

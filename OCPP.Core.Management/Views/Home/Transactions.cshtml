@@ -143,12 +143,14 @@
             {
                 foreach (TransactionExtended t in Model.Transactions)
                 {
+                    var startUtc = DateTime.SpecifyKind(t.StartTime, DateTimeKind.Utc);
+                    var stopUtc = t.StopTime.HasValue ? DateTime.SpecifyKind(t.StopTime.Value, DateTimeKind.Utc) : (DateTime?)null;
                     <tr>
                         <td>@currentConnectorName</td>
-                        <td>@string.Format("{0} {1}", t.StartTime.ToLocalTime().ToShortDateString(), t.StartTime.ToLocalTime().ToShortTimeString())</td>
+                        <td class="js-utc" data-utc="@startUtc.ToString("o")">@string.Format("{0} {1}", t.StartTime.ToLocalTime().ToShortDateString(), t.StartTime.ToLocalTime().ToShortTimeString())</td>
                         <td>@(string.IsNullOrEmpty(t.StartTagName) ? t.StartTagId : t.StartTagName)</td>
                         <td>@string.Format("{0:0.0##}", t.MeterStart)</td>
-                        <td>@((t.StopTime != null) ? string.Format("{0} {1}", t.StopTime.Value.ToLocalTime().ToShortDateString(), t.StopTime.Value.ToLocalTime().ToShortTimeString()) : string.Empty)</td>
+                        <td class="js-utc" data-utc="@(stopUtc.HasValue ? stopUtc.Value.ToString("o") : string.Empty)">@((t.StopTime != null) ? string.Format("{0} {1}", t.StopTime.Value.ToLocalTime().ToShortDateString(), t.StopTime.Value.ToLocalTime().ToShortTimeString()) : string.Empty)</td>
                         <td>@(string.IsNullOrEmpty(t.StopTagName) ? t.StopTagId : t.StopTagName)</td>
                         <td>@((t.MeterStop != null) ? string.Format("{0:0.0##}", t.MeterStop) : string.Empty)</td>
                         <td>@((t.MeterStop != null) ? string.Format("{0:0.0##}", (t.MeterStop - t.MeterStart)) : string.Empty)</td>
@@ -158,3 +160,17 @@
         </tbody>
     </table>
 }
+
+<script>
+    (function () {
+        const nodes = document.querySelectorAll(".js-utc[data-utc]");
+        nodes.forEach(el => {
+            const raw = (el.dataset.utc || "").trim();
+            if (!raw) return;
+            const dt = new Date(raw);
+            if (!Number.isFinite(dt.getTime())) return;
+            el.textContent = dt.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(",", " ·");
+            el.setAttribute("data-order", String(dt.getTime()));
+        });
+    })();
+</script>

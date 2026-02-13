@@ -20,7 +20,10 @@ namespace OCPP.Core.Server
             utcNow ??= () => DateTime.UtcNow;
             var now = utcNow();
 
-            int reservationTimeoutMinutes = configuration.GetValue<int?>("Maintenance:ReservationTimeoutMinutes") ?? 60;
+            int reservationTimeoutMinutes =
+                configuration.GetValue<int?>("Maintenance:PendingPaymentTimeoutMinutes") ??
+                configuration.GetValue<int?>("Maintenance:ReservationTimeoutMinutes") ??
+                15;
             int statusReleaseMinutes = configuration.GetValue<int?>("Maintenance:StatusReleaseMinutes") ?? 240;
 
             int cancelledReservations = 0;
@@ -28,7 +31,7 @@ namespace OCPP.Core.Server
 
             try
             {
-                cancelledReservations = CancelStaleReservations(dbContext, now, reservationTimeoutMinutes, logger);
+            cancelledReservations = CancelStalePendingReservations(dbContext, now, reservationTimeoutMinutes, logger);
             }
             catch (Exception ex)
             {
@@ -52,7 +55,7 @@ namespace OCPP.Core.Server
             }
         }
 
-        private static int CancelStaleReservations(OCPPCoreContext dbContext, DateTime now, int timeoutMinutes, ILogger logger = null)
+        private static int CancelStalePendingReservations(OCPPCoreContext dbContext, DateTime now, int timeoutMinutes, ILogger logger = null)
         {
             if (timeoutMinutes <= 0) return 0;
 
@@ -60,9 +63,7 @@ namespace OCPP.Core.Server
             var stale = dbContext.ChargePaymentReservations
                 .Where(r =>
                     r.UpdatedAtUtc < cutoff &&
-                    (r.Status == PaymentReservationStatus.Pending ||
-                     r.Status == PaymentReservationStatus.Authorized ||
-                     r.Status == PaymentReservationStatus.StartRequested))
+                    r.Status == PaymentReservationStatus.Pending)
                 .ToList();
 
             foreach (var reservation in stale)
@@ -75,8 +76,8 @@ namespace OCPP.Core.Server
                     reservation.Status,
                     reservation.UpdatedAtUtc);
 
-                reservation.Status = PaymentReservationStatus.Cancelled;
-                reservation.LastError = "Auto-cancelled: stale reservation at startup";
+                reservation.Status = PaymentReservationStatus.Abandoned;
+                reservation.LastError = "Auto-cancelled: stale pending reservation at startup";
                 reservation.UpdatedAtUtc = now;
             }
 

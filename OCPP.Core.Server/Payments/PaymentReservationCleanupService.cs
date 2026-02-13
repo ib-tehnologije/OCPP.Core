@@ -64,7 +64,10 @@ namespace OCPP.Core.Server.Payments
             var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
             var coordinator = scope.ServiceProvider.GetService<IPaymentCoordinator>();
 
-            int pendingTimeoutMinutes = _configuration.GetValue<int?>("Maintenance:ReservationTimeoutMinutes") ?? 60;
+            int pendingTimeoutMinutes =
+                _configuration.GetValue<int?>("Maintenance:PendingPaymentTimeoutMinutes") ??
+                _configuration.GetValue<int?>("Maintenance:ReservationTimeoutMinutes") ??
+                15;
 
             var now = DateTime.UtcNow;
             var stale = Enumerable.Empty<ChargePaymentReservation>();
@@ -74,9 +77,7 @@ namespace OCPP.Core.Server.Payments
                 stale = await db.ChargePaymentReservations
                     .Where(r =>
                         r.UpdatedAtUtc < cutoff &&
-                        (r.Status == PaymentReservationStatus.Pending ||
-                         r.Status == PaymentReservationStatus.Authorized ||
-                         r.Status == PaymentReservationStatus.StartRequested))
+                        r.Status == PaymentReservationStatus.Pending)
                     .ToListAsync(token);
             }
 
@@ -114,7 +115,7 @@ namespace OCPP.Core.Server.Payments
 
             foreach (var reservation in stale)
             {
-                reservation.Status = PaymentReservationStatus.Cancelled;
+                reservation.Status = PaymentReservationStatus.Abandoned;
                 reservation.LastError = "Auto-cancelled: stale reservation (background sweep)";
                 reservation.FailureCode = "CleanupTimeout";
                 reservation.FailureMessage = reservation.LastError;
@@ -150,7 +151,7 @@ namespace OCPP.Core.Server.Payments
             await db.SaveChangesAsync(token);
             if (stale.Any())
             {
-                _logger.LogInformation("PaymentReservationCleanupService => cancelled {Count} stale reservations (>{Timeout} min)", stale.Count(), pendingTimeoutMinutes);
+                _logger.LogInformation("PaymentReservationCleanupService => abandoned {Count} stale pending reservations (>{Timeout} min)", stale.Count(), pendingTimeoutMinutes);
             }
             if (timedOutStarts.Any())
             {

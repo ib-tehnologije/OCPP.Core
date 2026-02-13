@@ -622,7 +622,7 @@ namespace OCPP.Core.Server.Payments
             }
         }
 
-        private static int CalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, DateTime? nowUtc = null)
+        private int CalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, DateTime? nowUtc = null)
         {
             if (reservation == null) throw new ArgumentNullException(nameof(reservation));
             if (transaction == null) throw new ArgumentNullException(nameof(transaction));
@@ -632,23 +632,140 @@ namespace OCPP.Core.Server.Payments
             }
 
             bool usageAfterChargingEnds = reservation.UsageFeeAnchorMinutes == 1;
-            var stopTime = transaction.StopTime ?? nowUtc ?? DateTime.UtcNow;
-            DateTime? anchorStart = transaction.StartTime;
+            var stopTimeUtc = transaction.StopTime ?? nowUtc ?? DateTime.UtcNow;
+            DateTime? anchorStartUtc = transaction.StartTime;
 
             if (usageAfterChargingEnds)
             {
-                anchorStart = transaction.ChargingEndedAtUtc;
+                anchorStartUtc = transaction.ChargingEndedAtUtc;
             }
 
-            if (!anchorStart.HasValue || stopTime <= anchorStart.Value)
+            if (!anchorStartUtc.HasValue || stopTimeUtc <= anchorStartUtc.Value)
             {
                 return 0;
             }
 
-            var totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTime - anchorStart.Value).TotalMinutes));
+            int totalMinutes = 0;
+            if (usageAfterChargingEnds &&
+                TryParseDailyWindow(_flowOptions?.IdleFeeExcludedWindow, out var excludedStart, out var excludedEnd) &&
+                TryResolveTimeZone(_flowOptions?.IdleFeeExcludedTimeZoneId, out var tz))
+            {
+                totalMinutes = CalculateChargeableMinutesExcludingWindow(anchorStartUtc.Value, stopTimeUtc, tz, excludedStart, excludedEnd);
+            }
+            else
+            {
+                totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTimeUtc - anchorStartUtc.Value).TotalMinutes));
+            }
+
             return Math.Min(
                 Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
                 reservation.MaxUsageFeeMinutes);
+        }
+
+        private static bool TryParseDailyWindow(string window, out TimeSpan start, out TimeSpan end)
+        {
+            start = default;
+            end = default;
+            if (string.IsNullOrWhiteSpace(window)) return false;
+
+            var parts = window.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length != 2) return false;
+            return TimeSpan.TryParse(parts[0], out start) && TimeSpan.TryParse(parts[1], out end);
+        }
+
+        private static bool TryResolveTimeZone(string timeZoneId, out TimeZoneInfo tz)
+        {
+            tz = null;
+            if (string.IsNullOrWhiteSpace(timeZoneId))
+            {
+                tz = TimeZoneInfo.Local;
+                return tz != null;
+            }
+
+            // Cross-platform convenience: allow either IANA or Windows ids for Europe/Zagreb.
+            var candidates = new List<string> { timeZoneId };
+            if (string.Equals(timeZoneId, "Europe/Zagreb", StringComparison.OrdinalIgnoreCase))
+            {
+                candidates.Add("Central European Standard Time");
+            }
+            else if (string.Equals(timeZoneId, "Central European Standard Time", StringComparison.OrdinalIgnoreCase))
+            {
+                candidates.Add("Europe/Zagreb");
+            }
+
+            foreach (var id in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    tz = TimeZoneInfo.FindSystemTimeZoneById(id);
+                    if (tz != null) return true;
+                }
+                catch
+                {
+                    // try next
+                }
+            }
+
+            tz = TimeZoneInfo.Local;
+            return tz != null;
+        }
+
+        private int CalculateChargeableMinutesExcludingWindow(DateTime anchorStartUtc, DateTime stopUtc, TimeZoneInfo tz, TimeSpan excludedStartLocal, TimeSpan excludedEndLocal)
+        {
+            if (stopUtc <= anchorStartUtc) return 0;
+
+            var startUtc = DateTime.SpecifyKind(anchorStartUtc, DateTimeKind.Utc);
+            var endUtc = DateTime.SpecifyKind(stopUtc, DateTimeKind.Utc);
+
+            DateTime startLocal = TimeZoneInfo.ConvertTimeFromUtc(startUtc, tz);
+            DateTime endLocal = TimeZoneInfo.ConvertTimeFromUtc(endUtc, tz);
+
+            // Iterate days (include the previous day to catch windows crossing midnight).
+            DateTime day = startLocal.Date.AddDays(-1);
+            DateTime lastDay = endLocal.Date;
+
+            double excludedSeconds = 0;
+            while (day <= lastDay)
+            {
+                DateTime exStartLocal;
+                DateTime exEndLocal;
+                if (excludedStartLocal <= excludedEndLocal)
+                {
+                    // Same-day window.
+                    exStartLocal = day.Add(excludedStartLocal);
+                    exEndLocal = day.Add(excludedEndLocal);
+                }
+                else
+                {
+                    // Cross-midnight window: [day+start, day+1+end)
+                    exStartLocal = day.Add(excludedStartLocal);
+                    exEndLocal = day.AddDays(1).Add(excludedEndLocal);
+                }
+
+                // Compute overlap in UTC to respect DST shifts.
+                try
+                {
+                    var exStartUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(exStartLocal, DateTimeKind.Unspecified), tz);
+                    var exEndUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(exEndLocal, DateTimeKind.Unspecified), tz);
+
+                    var overlapStart = exStartUtc > startUtc ? exStartUtc : startUtc;
+                    var overlapEnd = exEndUtc < endUtc ? exEndUtc : endUtc;
+                    if (overlapEnd > overlapStart)
+                    {
+                        excludedSeconds += (overlapEnd - overlapStart).TotalSeconds;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Idle fee exclusion window UTC conversion failed tz={TimeZoneId} day={Day:yyyy-MM-dd}", tz.Id, day);
+                }
+
+                day = day.AddDays(1);
+            }
+
+            var totalSeconds = Math.Max(0, (endUtc - startUtc).TotalSeconds);
+            var chargeableSeconds = Math.Max(0, totalSeconds - excludedSeconds);
+            return (int)Math.Ceiling(chargeableSeconds / 60.0);
         }
 
         public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader)

@@ -28,6 +28,12 @@ namespace OCPP.Core.Management.Controllers
         }
 
         [HttpGet]
+        public IActionResult Index()
+        {
+            return RedirectToAction(nameof(Map));
+        }
+
+        [HttpGet]
         public IActionResult Start(string cp, int conn = 1)
         {
             var model = BuildViewModel(cp, conn);

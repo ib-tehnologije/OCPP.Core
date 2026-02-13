@@ -105,10 +105,9 @@ namespace OCPP.Core.Server
                                     else if (msgIn.MessageType == "3" || msgIn.MessageType == "4")
                                     {
                                         // Process answer from chargepoint
-                                        if (_requestQueue.ContainsKey(msgIn.UniqueId))
+                                        if (_requestQueue.TryRemove(msgIn.UniqueId, out var originalRequest))
                                         {
-                                            controller21.ProcessAnswer(msgIn, _requestQueue[msgIn.UniqueId]);
-                                            _requestQueue.Remove(msgIn.UniqueId);
+                                            controller21.ProcessAnswer(msgIn, originalRequest);
                                         }
                                         else
                                         {
@@ -171,7 +170,7 @@ namespace OCPP.Core.Server
             msgOut.TaskCompletionSource = new TaskCompletionSource<string>();
 
             // store HttpContext with MsgId for later answer processing (=> send anwer to API caller)
-            _requestQueue.Add(msgOut.UniqueId, msgOut);
+            _requestQueue.TryAdd(msgOut.UniqueId, msgOut);
 
             // Send OCPP message with optional logging/dump
             await SendOcpp21Message(msgOut, logger, chargePointStatus);
@@ -225,7 +224,7 @@ namespace OCPP.Core.Server
             msgOut.TaskCompletionSource = new TaskCompletionSource<string>();
 
             // store HttpContext with MsgId for later answer processing (=> send anwer to API caller)
-            _requestQueue.Add(msgOut.UniqueId, msgOut);
+            _requestQueue.TryAdd(msgOut.UniqueId, msgOut);
 
             // Send OCPP message with optional logging/dump
             await SendOcpp21Message(msgOut, logger, chargePointStatus);
@@ -300,7 +299,7 @@ namespace OCPP.Core.Server
             msgOut.TaskCompletionSource = new TaskCompletionSource<string>();
 
             // store HttpContext with MsgId for later answer processing (=> send anwer to API caller)
-            _requestQueue.Add(msgOut.UniqueId, msgOut);
+            _requestQueue.TryAdd(msgOut.UniqueId, msgOut);
 
             // Send OCPP message with optional logging/dump
             await SendOcpp21Message(msgOut, logger, chargePointStatus);
@@ -357,7 +356,7 @@ namespace OCPP.Core.Server
             msgOut.TaskCompletionSource = new TaskCompletionSource<string>();
 
             // store HttpContext with MsgId for later answer processing (=> send anwer to API caller)
-            _requestQueue.Add(msgOut.UniqueId, msgOut);
+            _requestQueue.TryAdd(msgOut.UniqueId, msgOut);
 
             // Send OCPP message with optional logging/dump
             await SendOcpp21Message(msgOut, logger, chargePointStatus);
@@ -428,7 +427,7 @@ namespace OCPP.Core.Server
                 msgOut.TaskCompletionSource = new TaskCompletionSource<string>();
 
                 // store HttpContext with MsgId for later answer processing (=> send anwer to API caller)
-                _requestQueue.Add(msgOut.UniqueId, msgOut);
+                _requestQueue.TryAdd(msgOut.UniqueId, msgOut);
 
                 // Send OCPP message with optional logging/dump
                 await SendOcpp21Message(msgOut, logger, chargePointStatus);
@@ -483,7 +482,7 @@ namespace OCPP.Core.Server
             msgOut.TaskCompletionSource = new TaskCompletionSource<string>();
 
             // store HttpContext with MsgId for later answer processing (=> send anwer to API caller)
-            _requestQueue.Add(msgOut.UniqueId, msgOut);
+            _requestQueue.TryAdd(msgOut.UniqueId, msgOut);
 
             // Send OCPP message with optional logging/dump
             await SendOcpp21Message(msgOut, logger, chargePointStatus);

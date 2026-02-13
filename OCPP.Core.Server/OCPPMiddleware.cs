@@ -20,11 +20,13 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -59,6 +61,7 @@ namespace OCPP.Core.Server
         private readonly ILoggerFactory _logFactory;
         private readonly ILogger _logger;
         private readonly IConfiguration _configuration;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly IPaymentCoordinator _paymentCoordinator;
         private readonly StartChargingMediator _startMediator;
         private readonly ReservationLinkService _reservationLinkService;
@@ -71,13 +74,14 @@ namespace OCPP.Core.Server
         private static Dictionary<string, ChargePointStatus> _chargePointStatusDict = new Dictionary<string, ChargePointStatus>();
 
         // Dictionary for processing asynchronous API calls
-        private Dictionary<string, OCPPMessage> _requestQueue = new Dictionary<string, OCPPMessage>();
+        private readonly ConcurrentDictionary<string, OCPPMessage> _requestQueue = new ConcurrentDictionary<string, OCPPMessage>();
 
-        public OCPPMiddleware(RequestDelegate next, ILoggerFactory logFactory, IConfiguration configuration, IPaymentCoordinator paymentCoordinator, StartChargingMediator startMediator, ReservationLinkService reservationLinkService)
+        public OCPPMiddleware(RequestDelegate next, ILoggerFactory logFactory, IConfiguration configuration, IServiceScopeFactory scopeFactory, IPaymentCoordinator paymentCoordinator, StartChargingMediator startMediator, ReservationLinkService reservationLinkService)
         {
             _next = next;
             _logFactory = logFactory;
             _configuration = configuration;
+            _scopeFactory = scopeFactory;
             _paymentCoordinator = paymentCoordinator;
             _startMediator = startMediator;
             _reservationLinkService = reservationLinkService;
@@ -97,6 +101,158 @@ namespace OCPP.Core.Server
             {
                 _startMediator.TryStartAsync = TryStartChargingAsync;
             }
+        }
+
+        private bool RequirePreparingBeforeRemoteStart()
+        {
+            // Default to "true" because several stations (e.g., Huawei) may ACK RemoteStart
+            // without starting if the cable is not connected yet.
+            return _configuration.GetValue<bool?>("Payments:RequirePreparingBeforeRemoteStart") ?? true;
+        }
+
+        private static bool IsStatus(string value, string expected) =>
+            !string.IsNullOrWhiteSpace(value) &&
+            string.Equals(value.Trim(), expected, StringComparison.OrdinalIgnoreCase);
+
+        private bool IsConnectorPreparing(OCPPCoreContext dbContext, ChargePaymentReservation reservation, ChargePointStatus cpStatus)
+        {
+            if (reservation == null) return false;
+
+            try
+            {
+                if (cpStatus?.OnlineConnectors != null &&
+                    cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
+                {
+                    return online.Status == ConnectorStatusEnum.Preparing;
+                }
+            }
+            catch
+            {
+                // best-effort only
+            }
+
+            try
+            {
+                var persisted = dbContext?.ConnectorStatuses?.Find(reservation.ChargePointId, reservation.ConnectorId);
+                return IsStatus(persisted?.LastStatus, "Preparing");
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task<(string Status, string Reason)> TryStartChargingOrAwaitPlugAsync(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string caller)
+        {
+            if (reservation == null) return ("Error", "NoReservation");
+
+            _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var cpStatus);
+
+            if (RequirePreparingBeforeRemoteStart())
+            {
+                bool preparing = IsConnectorPreparing(dbContext, reservation, cpStatus);
+                if (!preparing)
+                {
+                    // Only show "plug cable" when the connector is otherwise available.
+                    // If it's occupied/faulted/unavailable, we keep AwaitingPlug=false and let UI show the real reason.
+                    bool available = false;
+                    try
+                    {
+                        if (cpStatus?.OnlineConnectors != null &&
+                            cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
+                        {
+                            available = online.Status == ConnectorStatusEnum.Available;
+                        }
+                        else
+                        {
+                            var persisted = dbContext?.ConnectorStatuses?.Find(reservation.ChargePointId, reservation.ConnectorId);
+                            available = IsStatus(persisted?.LastStatus, "Available");
+                        }
+                    }
+                    catch
+                    {
+                        // If we can't determine availability, prefer prompting for cable.
+                        available = true;
+                    }
+
+                    reservation.AwaitingPlug = available ? true : (bool?)false;
+                    reservation.UpdatedAtUtc = _utcNow();
+                    dbContext.SaveChanges();
+
+                    _logger.LogInformation("TryStartChargingOrAwaitPlug => Awaiting plug reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} available={Available} caller={Caller}",
+                        reservation.ReservationId,
+                        reservation.ChargePointId,
+                        reservation.ConnectorId,
+                        available,
+                        caller);
+
+                    return (reservation.Status ?? PaymentReservationStatus.Authorized, available ? "AwaitingPlug" : "NotReady");
+                }
+            }
+
+            // Cable is detected (Preparing) OR we don't require it.
+            reservation.AwaitingPlug = false;
+            reservation.UpdatedAtUtc = _utcNow();
+            dbContext.SaveChanges();
+            return await TryStartChargingAsync(dbContext, reservation, caller);
+        }
+
+        public void NotifyConnectorPreparing(string chargePointId, int connectorId)
+        {
+            if (string.IsNullOrWhiteSpace(chargePointId) || connectorId <= 0) return;
+            if (!RequirePreparingBeforeRemoteStart()) return;
+            if (_scopeFactory == null) return;
+
+            // Fire-and-forget: MUST NOT block the WebSocket receive loop.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+
+                    var now = _utcNow();
+                    var reservation = await db.ChargePaymentReservations
+                        .Where(r =>
+                            r.ChargePointId == chargePointId &&
+                            r.ConnectorId == connectorId &&
+                            r.Status == PaymentReservationStatus.Authorized &&
+                            r.TransactionId == null &&
+                            r.AwaitingPlug == true &&
+                            (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > now))
+                        .OrderByDescending(r => r.CreatedAtUtc)
+                        .FirstOrDefaultAsync();
+
+                    if (reservation == null) return;
+
+                    // Idempotency: claim the "AwaitingPlug" flag so only one task attempts remote start.
+                    int updated = await db.ChargePaymentReservations
+                        .Where(r =>
+                            r.ReservationId == reservation.ReservationId &&
+                            r.Status == PaymentReservationStatus.Authorized &&
+                            r.AwaitingPlug == true)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(r => r.AwaitingPlug, (bool?)false)
+                            .SetProperty(r => r.UpdatedAtUtc, now));
+
+                    if (updated == 0) return;
+
+                    // Keep the tracked entity in sync so subsequent SaveChanges in TryStart won't flip it back.
+                    reservation.AwaitingPlug = false;
+                    reservation.UpdatedAtUtc = now;
+
+                    _logger.LogInformation("NotifyConnectorPreparing => Triggering remote start reservation={ReservationId} cp={ChargePointId} connector={ConnectorId}",
+                        reservation.ReservationId,
+                        reservation.ChargePointId,
+                        reservation.ConnectorId);
+
+                    await TryStartChargingAsync(db, reservation, "StatusNotification");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "NotifyConnectorPreparing => Failed to auto-start for cp={ChargePointId} connector={ConnectorId}", chargePointId, connectorId);
+                }
+            });
         }
 
         public async Task Invoke(HttpContext context, OCPPCoreContext dbContext)
@@ -1027,7 +1183,7 @@ namespace OCPP.Core.Server
             }
 
             var reservation = confirmation.Reservation;
-            var tryStart = await TryStartChargingAsync(dbContext, reservation, "Confirm");
+            var tryStart = await TryStartChargingOrAwaitPlugAsync(dbContext, reservation, "Confirm");
 
             context.Response.StatusCode = (int)HttpStatusCode.OK;
             context.Response.ContentType = "application/json";
@@ -1108,15 +1264,27 @@ namespace OCPP.Core.Server
             string liveStatus = null;
             string persistedStatus = null;
             DateTime? persistedStatusTime = null;
+            double? liveChargeRateKw = null;
+            double? liveMeterKwh = null;
+            double? liveSoC = null;
+            DateTime? liveMeterValueAtUtc = null;
             bool activeTx = false;
             bool activeReservation = false;
             StartabilityResult startability = null;
+            Transaction transaction = null;
 
             _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var cpStatus);
             if (cpStatus?.OnlineConnectors != null &&
                 cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
             {
                 liveStatus = online.Status.ToString();
+                liveChargeRateKw = online.ChargeRateKW;
+                liveMeterKwh = online.MeterKWH;
+                liveSoC = online.SoC;
+                if (online.MeterValueDate != default)
+                {
+                    liveMeterValueAtUtc = online.MeterValueDate.UtcDateTime;
+                }
             }
 
             var persisted = dbContext.ConnectorStatuses.Find(reservation.ChargePointId, reservation.ConnectorId);
@@ -1138,6 +1306,18 @@ namespace OCPP.Core.Server
 
             startability = GetConnectorStartability(dbContext, reservation.ChargePointId, reservation.ConnectorId, cpStatus, reservation.ReservationId);
 
+            if (reservation.TransactionId.HasValue)
+            {
+                try
+                {
+                    transaction = await dbContext.Transactions.FindAsync(reservation.TransactionId.Value);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Payments/Status => Unable to load transaction {TransactionId}", reservation.TransactionId.Value);
+                }
+            }
+
             var payload = new
             {
                 status = reservation.Status,
@@ -1155,19 +1335,42 @@ namespace OCPP.Core.Server
                 authorizedAtUtc = reservation.AuthorizedAtUtc,
                 capturedAtUtc = reservation.CapturedAtUtc,
                 startDeadlineAtUtc = reservation.StartDeadlineAtUtc,
+                awaitingPlug = reservation.AwaitingPlug,
                 remoteStartSentAtUtc = reservation.RemoteStartSentAtUtc,
+                remoteStartResult = reservation.RemoteStartResult,
                 remoteStartAcceptedAtUtc = reservation.RemoteStartAcceptedAtUtc,
                 startTransactionAtUtc = reservation.StartTransactionAtUtc,
                 stopTransactionAtUtc = reservation.StopTransactionAtUtc,
                 lastOcppEventAtUtc = reservation.LastOcppEventAtUtc,
+                maxEnergyKwh = reservation.MaxEnergyKwh,
+                pricePerKwh = reservation.PricePerKwh,
+                userSessionFee = reservation.UserSessionFee,
+                usageFeePerMinute = reservation.UsageFeePerMinute,
+                startUsageFeeAfterMinutes = reservation.StartUsageFeeAfterMinutes,
+                maxUsageFeeMinutes = reservation.MaxUsageFeeMinutes,
+                usageFeeAnchorMinutes = reservation.UsageFeeAnchorMinutes,
                 maxAmountCents = reservation.MaxAmountCents,
                 capturedAmountCents = reservation.CapturedAmountCents,
+                actualEnergyKwh = reservation.ActualEnergyKwh,
                 liveStatus,
+                liveChargeRateKw,
+                liveMeterKwh,
+                liveSoC,
+                liveMeterValueAtUtc,
                 persistedStatus,
                 persistedStatusTime,
                 activeTransaction = activeTx,
                 activeReservation = activeReservation,
                 currency = reservation.Currency,
+                transactionMeterStart = transaction?.MeterStart,
+                transactionMeterStop = transaction?.MeterStop,
+                transactionEnergyKwh = transaction?.EnergyKwh,
+                transactionEnergyCost = transaction?.EnergyCost,
+                transactionUsageFeeMinutes = transaction?.UsageFeeMinutes,
+                transactionUsageFeeAmount = transaction?.UsageFeeAmount,
+                transactionIdleFeeMinutes = transaction?.IdleUsageFeeMinutes,
+                transactionIdleFeeAmount = transaction?.IdleUsageFeeAmount,
+                transactionSessionFeeAmount = transaction?.UserSessionFeeAmount,
                 startable = startability?.Startable ?? false,
                 startableReason = startability?.Reason,
                 startableReasons = startability?.Reasons,
@@ -1589,7 +1792,7 @@ namespace OCPP.Core.Server
                             if (reservation.Status == PaymentReservationStatus.Authorized ||
                                 string.Equals(paymentStatus, "paid", StringComparison.OrdinalIgnoreCase))
                             {
-                                await TryStartChargingAsync(dbContext, reservation, "StripeWebhook");
+                                await TryStartChargingOrAwaitPlugAsync(dbContext, reservation, "StripeWebhook");
                             }
                             else
                             {

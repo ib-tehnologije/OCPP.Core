@@ -30,7 +30,7 @@ namespace OCPP.Core.Server
 {
     public partial class ControllerOCPP21
     {
-        public string HandleStatusNotification(OCPPMessage msgIn, OCPPMessage msgOut)
+        public string HandleStatusNotification(OCPPMessage msgIn, OCPPMessage msgOut, OCPPMiddleware ocppMiddleware)
         {
             string errorCode = null;
             StatusNotificationResponse statusNotificationResponse = new StatusNotificationResponse();
@@ -98,6 +98,11 @@ namespace OCPP.Core.Server
                         {
                             Logger.LogError("StatusNotification => Error adding new OnlineConnectorStatus for ChargePoint={0} / Connector={1}", ChargePointStatus?.Id, connectorId);
                         }
+                    }
+
+                    if (newStatus == ConnectorStatusEnum.Preparing)
+                    {
+                        ocppMiddleware?.NotifyConnectorPreparing(ChargePointStatus.Id, connectorId);
                     }
                 }
                 else

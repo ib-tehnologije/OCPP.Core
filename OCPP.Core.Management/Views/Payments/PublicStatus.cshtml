@@ -1,7 +1,13 @@
 @model OCPP.Core.Management.Models.PaymentStatusViewModel
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
 @{
     Layout = null;
     var apiUrl = Url.Action("StatusData", "Payments", new { reservationId = Model.ReservationId });
+    var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
+    var brandTagline = Config["PublicPortal:Tagline"] ?? "Fast charging locations for your EV.";
+    var cancelUrl = Url.Action("Cancel", "Payments", new { reservationId = Model.ReservationId, origin = "public" });
+    var mapUrl = Url.Action("Index", "Public");
+    var startUrlBase = Url.Action("Start", "Public");
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -9,195 +15,532 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Charging status</title>
-    <style>
-        :root {
-            --bg: #0b1021;
-            --panel: rgba(17,24,39,0.9);
-            --accent: #6ddcff;
-            --accent-2: #7f5af0;
-            --text: #e5e7eb;
-            --muted: #9ca3af;
-            --border: rgba(255,255,255,0.08);
-            --ok: #52ffa8;
-            --warn: #ffbe3d;
-            --error: #ff4b6d;
-        }
-        body {
-            margin: 0;
-            min-height: 100vh;
-            background: radial-gradient(circle at 15% 20%, rgba(127,90,240,0.22), transparent 35%),
-                        radial-gradient(circle at 80% 10%, rgba(109,220,255,0.25), transparent 30%),
-                        radial-gradient(circle at 60% 80%, rgba(109,220,255,0.12), transparent 35%),
-                        var(--bg);
-            font-family: 'Inter', 'Space Grotesk', system-ui, -apple-system, sans-serif;
-            color: var(--text);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 32px 16px;
-        }
-        .card {
-            width: min(820px, 100%);
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 18px;
-            padding: 32px;
-            box-shadow: 0 25px 60px rgba(0,0,0,0.35);
-        }
-        h1 { margin: 0 0 8px; letter-spacing: -0.01em; }
-        p { margin: 0; color: var(--muted); }
-        .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; margin-top: 18px; }
-        .pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            border: 1px solid var(--border);
-            background: rgba(255,255,255,0.04);
-            font-weight: 600;
-        }
-        .dot { width: 10px; height: 10px; border-radius: 50%; }
-        .cta {
-            margin-top: 24px;
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            padding: 12px 18px;
-            border-radius: 12px;
-            border: none;
-            background: linear-gradient(120deg, var(--accent), var(--accent-2));
-            color: #0b1021;
-            font-weight: 700;
-            cursor: pointer;
-            text-decoration: none;
-            box-shadow: 0 10px 30px rgba(109,220,255,0.35);
-            transition: transform 0.1s ease, box-shadow 0.2s ease;
-        }
-        .cta:hover { transform: translateY(-1px); box-shadow: 0 14px 34px rgba(109,220,255,0.45); }
-        .muted { color: var(--muted); font-size: 0.95rem; }
-        .mono { font-family: "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace; }
-    </style>
+    <link rel="stylesheet" href="~/css/public-portal.css" />
 </head>
-<body>
-    <div class="card">
-        <div class="pill" id="pill-status">
-            <span class="dot" id="pill-dot" style="background: var(--warn); box-shadow: 0 0 12px rgba(255,190,61,0.8);"></span>
-            <span id="pill-text">Fetching status…</span>
-        </div>
-        <h1>Charging status</h1>
-        <p class="muted">Reservation <span class="mono">@Model.ReservationId</span></p>
+<body class="public-portal">
+    <nav class="public-session-nav" aria-label="Charging session states">
+        <button type="button" data-step="start" class="active" disabled>① Start</button>
+        <button type="button" data-step="waiting" disabled>② Wait</button>
+        <button type="button" data-step="charging" disabled>③ Charge</button>
+        <button type="button" data-step="done" disabled>④ Done</button>
+        <button type="button" data-step="error" disabled>⑤ Error</button>
+    </nav>
+    <div class="lang-bar">
+        <span class="lbl">🌐</span>
+        <button type="button" class="lang-btn active">EN</button>
+        <button type="button" class="lang-btn">HR</button>
+        <button type="button" class="lang-btn">DE</button>
+        <button type="button" class="lang-btn">IT</button>
+    </div>
 
-        <div class="row" style="margin-top:20px;">
-            <div>
-                <div class="muted">Payment</div>
-                <div class="mono" id="payment-status">-</div>
+    <div class="page-wrap">
+        <div class="card">
+            <div class="brand-bar">
+                <div class="brand-logo">⚡</div>
+                <div class="brand-name">@brandName</div>
             </div>
-            <div>
-                <div class="muted">Connector</div>
-                <div class="mono" id="connector">-</div>
+
+            <div class="status-header">
+                <div class="status-badge waiting" id="status-badge">
+                    <span class="dot"></span>
+                    <span id="status-badge-text">Waiting for charger...</span>
+                </div>
+                <h1 class="charger-title" id="charger-title">-</h1>
+                <p class="charger-sub" id="charger-sub">Reservation <span class="mono">@Model.ReservationId</span></p>
             </div>
-            <div>
-                <div class="muted">Charger status</div>
-                <div class="mono" id="charger-status">-</div>
+
+            <div class="divider"></div>
+
+            <div id="view-waiting" class="session-view active">
+                <div class="info-section" style="padding-bottom:12px;">
+                    <div class="info-section-title">Reservation</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label">Status</div>
+                            <div class="value" style="color: var(--warning);" id="wait-status">Starting...</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label">Authorized</div>
+                            <div class="value" id="wait-authorized">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="alert-box warning">
+                    <span class="alert-icon">⏳</span>
+                    <span id="wait-hint">Make sure the cable is plugged into your vehicle. The charger should start the session shortly.</span>
+                </div>
+                <div class="footer-note">
+                    Page refreshes automatically · <a href="@cancelUrl">Cancel session</a> · <a href="@mapUrl">Back to map</a>
+                </div>
             </div>
-            <div>
-                <div class="muted">Last update (UTC)</div>
-                <div class="mono" id="updated-at">-</div>
+
+            <div id="view-charging" class="session-view">
+                <div class="charging-anim" aria-hidden="true">
+                    <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                </div>
+                <div class="timer-display" id="charge-timer">--:--:--</div>
+                <div class="timer-label">Session duration</div>
+
+                <div class="live-stats">
+                    <div class="live-stat">
+                        <div class="stat-value" id="stat-energy">-</div>
+                        <div class="stat-label">kWh</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="stat-cost">-</div>
+                        <div class="stat-label">AUTHORIZED</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="stat-power">-</div>
+                        <div class="stat-label">kW</div>
+                    </div>
+                </div>
+
+                <div class="info-section" style="padding-bottom: 8px;">
+                    <div class="info-section-title">Progress</div>
+                    <div>
+                        <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%;"></div></div>
+                        <div class="progress-labels"><span id="progress-left">-</span><span id="progress-right">-</span></div>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="info-section">
+                    <div class="info-section-title">Cost breakdown</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label">Energy</div>
+                            <div class="value" id="bd-energy">-</div>
+                            <div class="sub" id="bd-energy-sub">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label">Session fee</div>
+                            <div class="value" id="bd-session-fee">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label">Idle fee</div>
+                            <div class="value" id="bd-idle-fee">-</div>
+                            <div class="sub" id="bd-idle-sub">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label">Authorized</div>
+                            <div class="value" id="bd-authorized">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label">Charging started</div>
+                            <div class="value mono" id="bd-start-time">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section" style="padding-top: 0;">
+                    <button type="button" class="btn-secondary" disabled style="border-color: var(--danger-border); color: var(--danger); opacity: 0.65;">
+                        ⏹ Stop charging
+                    </button>
+                </div>
+
+                <div class="footer-note">Data refreshes automatically every 5 seconds · <a href="@mapUrl">Back to map</a></div>
+            </div>
+
+            <div id="view-done" class="session-view">
+                <div style="text-align:center; padding: 24px 24px 8px;">
+                    <div style="font-size: 2.8rem;">✅</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; margin-top: 8px;">Thank you!</div>
+                    <div style="color: var(--text-3); margin-top: 4px;">Session completed successfully</div>
+                </div>
+
+                <div class="live-stats">
+                    <div class="live-stat">
+                        <div class="stat-value" id="done-energy">-</div>
+                        <div class="stat-label">kWh</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="done-total">-</div>
+                        <div class="stat-label">TOTAL</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="done-time">-</div>
+                        <div class="stat-label">TOTAL TIME</div>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <div class="info-section-title">Cost summary</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label">Authorized</div>
+                            <div class="value" id="done-authorized">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label">Total charged</div>
+                            <div class="value" id="done-captured">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label">Charging started</div>
+                            <div class="value mono" id="done-start">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label">Disconnected</div>
+                            <div class="value mono" id="done-stop">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile featured full">
+                            <div class="label">Refund to card</div>
+                            <div class="value"><span class="highlight" id="done-refund">-</span></div>
+                            <div class="sub" id="done-refund-calc">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section" style="padding-top: 0;">
+                    <a class="btn-primary" href="@mapUrl">
+                        <span>Back to map</span>
+                        <span class="arrow">→</span>
+                    </a>
+                </div>
+
+                <div class="footer-note">Powered by <a href="@mapUrl">@brandName</a></div>
+            </div>
+
+            <div id="view-error" class="session-view">
+                <div class="alert-box danger" style="margin-top: 20px;">
+                    <span class="alert-icon">⚠️</span>
+                    <div>
+                        <strong id="error-title">Charger failed to start the session</strong><br>
+                        <span style="color: var(--text-3); font-size: 0.82rem;" id="error-desc">The charger is offline or occupied. Check the cable and try again.</span>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label">Payment status</div>
+                            <div class="value" style="color: var(--danger);" id="error-payment-status">-</div>
+                            <div class="sub" id="error-no-charge">No funds were charged</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label">Last status</div>
+                            <div class="value" id="error-last-status">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section" style="padding-top: 0;">
+                    <a class="btn-primary" id="try-again" href="@startUrlBase">
+                        <span>Try again</span>
+                        <span class="arrow">→</span>
+                    </a>
+                    <a class="btn-secondary" id="contact-support" href="mailto:ev@tehnoline.hr">Contact support</a>
+                </div>
+
+                <div class="footer-note">
+                    Need help? <a href="mailto:ev@tehnoline.hr">ev@tehnoline.hr</a> · <a href="@mapUrl">Back to map</a>
+                </div>
             </div>
         </div>
-
-        <div class="row">
-            <div>
-                <div class="muted">Transaction</div>
-                <div class="mono" id="transaction-id">-</div>
-            </div>
-            <div>
-                <div class="muted">Authorized amount</div>
-                <div class="mono" id="amount">-</div>
-            </div>
-            <div>
-                <div class="muted">Active reservation?</div>
-                <div class="mono" id="active-res">-</div>
-            </div>
-            <div>
-                <div class="muted">Active transaction?</div>
-                <div class="mono" id="active-tx">-</div>
-            </div>
-            <div>
-                <div class="muted">Startable?</div>
-                <div class="mono" id="startable">-</div>
-            </div>
-            <div>
-                <div class="muted">Reasons</div>
-                <div class="mono" id="startable-reason">-</div>
-            </div>
-        </div>
-
-        <a class="cta" id="refresh-btn" href="#">Refresh now</a>
     </div>
 
     <script>
         const apiUrl = "@apiUrl";
-        const pillText = document.getElementById('pill-text');
-        const pillDot = document.getElementById('pill-dot');
-        const paymentStatus = document.getElementById('payment-status');
-        const connector = document.getElementById('connector');
-        const chargerStatus = document.getElementById('charger-status');
-        const updatedAt = document.getElementById('updated-at');
-        const transactionId = document.getElementById('transaction-id');
-        const amount = document.getElementById('amount');
-        const activeRes = document.getElementById('active-res');
-        const activeTx = document.getElementById('active-tx');
-        const startable = document.getElementById('startable');
-        const startableReason = document.getElementById('startable-reason');
-        const busyChip = document.getElementById('pill-status');
-        const refreshBtn = document.getElementById('refresh-btn');
+        const cancelUrl = "@cancelUrl";
+        const startUrlBase = "@startUrlBase";
 
-        const fmtMoney = (cents, currency) => cents != null ? `${(cents/100).toFixed(2)} ${currency?.toUpperCase()||''}` : '-';
-        const fmtReasons = (reasons, fallback) => {
-            if (!reasons || !Array.isArray(reasons) || reasons.length === 0) return fallback;
-            return reasons.join(', ');
+        const navButtons = Array.from(document.querySelectorAll(".public-session-nav [data-step]"));
+        const badge = document.getElementById("status-badge");
+        const badgeText = document.getElementById("status-badge-text");
+        const title = document.getElementById("charger-title");
+        const sub = document.getElementById("charger-sub");
+
+        const viewWaiting = document.getElementById("view-waiting");
+        const viewCharging = document.getElementById("view-charging");
+        const viewDone = document.getElementById("view-done");
+        const viewError = document.getElementById("view-error");
+
+        const waitStatus = document.getElementById("wait-status");
+        const waitAuthorized = document.getElementById("wait-authorized");
+        const waitHint = document.getElementById("wait-hint");
+
+        const chargeTimer = document.getElementById("charge-timer");
+        const statEnergy = document.getElementById("stat-energy");
+        const statCost = document.getElementById("stat-cost");
+        const statPower = document.getElementById("stat-power");
+        const progressFill = document.getElementById("progress-fill");
+        const progressLeft = document.getElementById("progress-left");
+        const progressRight = document.getElementById("progress-right");
+        const bdEnergy = document.getElementById("bd-energy");
+        const bdEnergySub = document.getElementById("bd-energy-sub");
+        const bdSessionFee = document.getElementById("bd-session-fee");
+        const bdIdleFee = document.getElementById("bd-idle-fee");
+        const bdIdleSub = document.getElementById("bd-idle-sub");
+        const bdAuthorized = document.getElementById("bd-authorized");
+        const bdStartTime = document.getElementById("bd-start-time");
+
+        const doneEnergy = document.getElementById("done-energy");
+        const doneTotal = document.getElementById("done-total");
+        const doneTime = document.getElementById("done-time");
+        const doneAuthorized = document.getElementById("done-authorized");
+        const doneCaptured = document.getElementById("done-captured");
+        const doneStart = document.getElementById("done-start");
+        const doneStop = document.getElementById("done-stop");
+        const doneRefund = document.getElementById("done-refund");
+        const doneRefundCalc = document.getElementById("done-refund-calc");
+
+        const errorTitle = document.getElementById("error-title");
+        const errorDesc = document.getElementById("error-desc");
+        const errorPaymentStatus = document.getElementById("error-payment-status");
+        const errorLastStatus = document.getElementById("error-last-status");
+        const tryAgain = document.getElementById("try-again");
+
+        const toLower = (value) => String(value || "").trim().toLowerCase();
+        const hasValue = (value) => value !== null && value !== undefined && String(value).trim().length > 0;
+
+        const fmtMoney = (cents, currency) => {
+            if (cents === null || cents === undefined) return "-";
+            const num = Number(cents);
+            if (!Number.isFinite(num)) return "-";
+            const ccy = String(currency || "").toUpperCase();
+            return `${(num / 100).toFixed(2)} ${ccy}`.trim();
+        };
+
+        const fmtNumber = (value, digits = 1) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num.toFixed(digits) : "-";
+        };
+
+        const parseDate = (value) => {
+            if (!value) return null;
+            const raw = String(value).trim();
+            if (!raw) return null;
+            // Server returns timestamps without timezone suffix; treat them as UTC.
+            const hasTz = /([zZ]|[+-]\d\d:\d\d)$/.test(raw);
+            const dt = new Date(hasTz ? raw : `${raw}Z`);
+            return Number.isFinite(dt.getTime()) ? dt : null;
+        };
+
+        const fmtLocal = (dt) => {
+            if (!dt) return "-";
+            return dt.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", " ·");
+        };
+
+        const fmtDuration = (seconds) => {
+            if (!Number.isFinite(seconds) || seconds < 0) return "--:--:--";
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        };
+
+        const resolveState = (data) => {
+            const status = toLower(data?.status);
+            const live = toLower(data?.liveStatus);
+            const persisted = toLower(data?.persistedStatus);
+
+            const hasErrorDetails = hasValue(data?.failureCode) || hasValue(data?.failureMessage) || hasValue(data?.lastError);
+            const isErrorStatus =
+                status === "startrejected" ||
+                status === "starttimeout" ||
+                status === "failed" ||
+                status === "cancelled" ||
+                status === "abandoned" ||
+                status === "error" ||
+                hasErrorDetails;
+
+            if (isErrorStatus) return "error";
+
+            const hasStop = !!parseDate(data?.stopTransactionAtUtc) || !!parseDate(data?.capturedAtUtc) || data?.capturedAmountCents != null;
+            if (hasStop) return "done";
+
+            const hasStart = !!parseDate(data?.startTransactionAtUtc) || data?.activeTransaction === true || live === "occupied";
+            if (hasStart) return "charging";
+
+            const hasAuthorized = !!parseDate(data?.authorizedAtUtc) || data?.activeReservation === true || status === "authorized" || status === "startrequested" || status === "accepted";
+            if (hasAuthorized) return "waiting";
+
+            return "waiting";
+        };
+
+        const setActiveTab = (state) => {
+            navButtons.forEach(btn => {
+                btn.classList.toggle("active", btn.dataset.step === state);
+            });
+        };
+
+        const setActiveView = (state) => {
+            viewWaiting.classList.toggle("active", state === "waiting");
+            viewCharging.classList.toggle("active", state === "charging");
+            viewDone.classList.toggle("active", state === "done");
+            viewError.classList.toggle("active", state === "error");
+        };
+
+        const setHeader = (state, data) => {
+            const cp = data?.chargePointId || "-";
+            const conn = data?.connectorId != null ? String(data.connectorId) : "-";
+            const liveStatus = data?.liveStatus || data?.persistedStatus || "-";
+            title.textContent = cp;
+            sub.textContent = `Connector ${conn} · ${liveStatus}`;
+
+            badge.className = "status-badge";
+            if (state === "charging") {
+                badge.classList.add("charging");
+                badgeText.textContent = "Charging in progress";
+            } else if (state === "done") {
+                badge.classList.add("available");
+                badgeText.textContent = "Charging complete";
+                const dot = badge.querySelector(".dot");
+                if (dot) dot.style.animation = "none";
+            } else if (state === "error") {
+                badge.classList.add("error");
+                badgeText.textContent = "Error";
+            } else {
+                badge.classList.add("waiting");
+                badgeText.textContent = data?.awaitingPlug === true ? "Plug in cable..." : "Waiting for charger...";
+            }
+        };
+
+        const render = (state, data) => {
+            setActiveTab(state);
+            setActiveView(state);
+            setHeader(state, data);
+
+            const currency = data?.currency;
+            const authorizedText = fmtMoney(data?.maxAmountCents, currency);
+            const capturedText = fmtMoney(data?.capturedAmountCents, currency);
+
+            const status = toLower(data?.status);
+            const awaitingPlug = data?.awaitingPlug === true;
+            const deadline = parseDate(data?.startDeadlineAtUtc);
+            const secondsRemaining = deadline ? Math.max(0, Math.floor((deadline.getTime() - Date.now()) / 1000)) : null;
+
+            if (awaitingPlug) {
+                waitStatus.textContent = "Plug in your cable";
+                if (waitHint) {
+                    waitHint.textContent = secondsRemaining != null
+                        ? `Connect the cable to your vehicle to continue. Time remaining: ${Math.ceil(secondsRemaining / 60)} min.`
+                        : "Connect the cable to your vehicle to continue.";
+                }
+            } else if (status === "startrequested" || hasValue(data?.remoteStartSentAtUtc)) {
+                waitStatus.textContent = "Starting...";
+                if (waitHint) waitHint.textContent = "Charger is starting the session, please wait.";
+            } else if (data?.startable === false && hasValue(data?.startableReason)) {
+                waitStatus.textContent = data.startableReason;
+                if (waitHint) waitHint.textContent = "Charger is not ready yet. Please check the cable and try again.";
+            } else {
+                waitStatus.textContent = "Waiting...";
+                if (waitHint) waitHint.textContent = "Make sure the cable is plugged into your vehicle. The charger should start the session shortly.";
+            }
+            waitAuthorized.textContent = authorizedText;
+
+            const startAt = parseDate(data?.startTransactionAtUtc);
+            const stopAt = parseDate(data?.stopTransactionAtUtc);
+            const now = new Date();
+            const seconds = startAt ? Math.floor(((stopAt || now).getTime() - startAt.getTime()) / 1000) : NaN;
+            chargeTimer.textContent = fmtDuration(seconds);
+
+            const liveKw = data?.liveChargeRateKw;
+            statPower.textContent = Number.isFinite(Number(liveKw)) ? fmtNumber(liveKw, 1) : "-";
+
+            const maxEnergyKwh = Number(data?.maxEnergyKwh);
+            const actualEnergyKwh = data?.actualEnergyKwh;
+            const txEnergyKwh = data?.transactionEnergyKwh;
+            const liveMeterKwh = data?.liveMeterKwh;
+            const txMeterStart = data?.transactionMeterStart;
+            const txMeterStop = data?.transactionMeterStop;
+
+            let sessionEnergy = null;
+            if (actualEnergyKwh != null) sessionEnergy = Number(actualEnergyKwh);
+            else if (txEnergyKwh != null) sessionEnergy = Number(txEnergyKwh);
+            else if (txMeterStop != null && txMeterStart != null) sessionEnergy = Number(txMeterStop) - Number(txMeterStart);
+            else if (liveMeterKwh != null && txMeterStart != null) sessionEnergy = Number(liveMeterKwh) - Number(txMeterStart);
+
+            statEnergy.textContent = Number.isFinite(sessionEnergy) ? fmtNumber(sessionEnergy, 1) : "-";
+            statCost.textContent = authorizedText;
+
+            let pct = null;
+            if (Number.isFinite(sessionEnergy) && Number.isFinite(maxEnergyKwh) && maxEnergyKwh > 0) {
+                pct = Math.max(0, Math.min(100, (sessionEnergy / maxEnergyKwh) * 100));
+            }
+            progressFill.style.width = pct != null ? `${pct.toFixed(1)}%` : "0%";
+            progressLeft.textContent = (Number.isFinite(sessionEnergy) && Number.isFinite(maxEnergyKwh) && maxEnergyKwh > 0)
+                ? `${fmtNumber(sessionEnergy, 1)} / ${fmtNumber(maxEnergyKwh, 1)} kWh`
+                : "-";
+            progressRight.textContent = pct != null ? `${pct.toFixed(1)}%` : "-";
+
+            const energyCost = data?.transactionEnergyCost;
+            const sessionFeeAmount = data?.transactionSessionFeeAmount;
+            const idleFeeAmount = data?.transactionIdleFeeAmount;
+            bdEnergy.textContent = energyCost != null ? `${Number(energyCost).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
+            bdEnergySub.textContent = Number.isFinite(sessionEnergy) ? `${fmtNumber(sessionEnergy, 1)} kWh` : "-";
+            bdSessionFee.textContent = sessionFeeAmount != null ? `${Number(sessionFeeAmount).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
+            bdIdleFee.textContent = idleFeeAmount != null ? `${Number(idleFeeAmount).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
+            bdIdleSub.textContent = data?.transactionIdleFeeMinutes != null ? `${data.transactionIdleFeeMinutes} min` : "-";
+            bdAuthorized.textContent = authorizedText;
+            bdStartTime.textContent = fmtLocal(startAt);
+
+            doneEnergy.textContent = Number.isFinite(sessionEnergy) ? fmtNumber(sessionEnergy, 1) : "-";
+            doneTotal.textContent = capturedText;
+            doneTime.textContent = fmtDuration(seconds);
+            doneAuthorized.textContent = authorizedText;
+            doneCaptured.textContent = capturedText;
+            doneStart.textContent = fmtLocal(startAt);
+            doneStop.textContent = fmtLocal(stopAt);
+
+            const maxCents = Number(data?.maxAmountCents);
+            const capturedCents = Number(data?.capturedAmountCents);
+            if (Number.isFinite(maxCents) && Number.isFinite(capturedCents)) {
+                const refund = Math.max(0, maxCents - capturedCents);
+                doneRefund.textContent = fmtMoney(refund, currency);
+                doneRefundCalc.textContent = `Pre-auth ${fmtMoney(maxCents, currency)} − charged ${fmtMoney(capturedCents, currency)} = refund ${fmtMoney(refund, currency)}`;
+            } else {
+                doneRefund.textContent = "-";
+                doneRefundCalc.textContent = "-";
+            }
+
+            errorPaymentStatus.textContent = data?.status || "-";
+            errorLastStatus.textContent = data?.liveStatus || data?.persistedStatus || "-";
+            if (hasValue(data?.failureMessage)) {
+                errorDesc.textContent = data.failureMessage;
+            } else if (hasValue(data?.lastError)) {
+                errorDesc.textContent = data.lastError;
+            } else {
+                errorDesc.textContent = "The charger is currently offline or occupied. Check the cable and try again.";
+            }
+
+            const cp = data?.chargePointId;
+            const conn = data?.connectorId;
+            if (cp && conn != null) {
+                tryAgain.href = `${startUrlBase}?cp=${encodeURIComponent(cp)}&conn=${encodeURIComponent(conn)}`;
+            }
         };
 
         async function loadStatus() {
             try {
-                const res = await fetch(apiUrl, { cache: 'no-store' });
+                const res = await fetch(apiUrl, { cache: "no-store" });
                 if (!res.ok) throw new Error(res.status);
                 const data = await res.json();
-                paymentStatus.textContent = data.status || '-';
-                connector.textContent = `${data.chargePointId || '-'} / ${data.connectorId || '-'}`;
-                chargerStatus.textContent = data.liveStatus || data.persistedStatus || '-';
-                updatedAt.textContent = data.updatedAtUtc || '-';
-                transactionId.textContent = data.transactionId || '-';
-                amount.textContent = fmtMoney(data.maxAmountCents, data.currency);
-                activeRes.textContent = data.activeReservation ? 'Yes' : 'No';
-                activeTx.textContent = data.activeTransaction ? 'Yes' : 'No';
-                startable.textContent = data.startable ? 'Yes' : 'No';
-                startableReason.textContent = fmtReasons(data.startableReasons, data.startableReason || '-');
-
-                const status = (data.status || '').toLowerCase();
-                if (status === 'completed' || status === 'charging' || status === 'authorized' || status === 'startrequested') {
-                    pillText.textContent = 'Payment confirmed';
-                    pillDot.style.background = 'var(--ok)';
-                    pillDot.style.boxShadow = '0 0 12px rgba(82,255,168,0.9)';
-                } else if (status === 'failed' || status === 'cancelled') {
-                    pillText.textContent = 'Payment failed/cancelled';
-                    pillDot.style.background = 'var(--error)';
-                    pillDot.style.boxShadow = '0 0 12px rgba(255,75,109,0.8)';
-                } else {
-                    pillText.textContent = 'Waiting for charger…';
-                    pillDot.style.background = 'var(--warn)';
-                    pillDot.style.boxShadow = '0 0 12px rgba(255,190,61,0.8)';
-                }
+                const state = resolveState(data);
+                render(state, data);
             } catch (err) {
-                pillText.textContent = 'Unable to load status';
-                pillDot.style.background = 'var(--error)';
-                pillDot.style.boxShadow = '0 0 12px rgba(255,75,109,0.8)';
+                setActiveTab("error");
+                setActiveView("error");
+                badge.className = "status-badge error";
+                badgeText.textContent = "Unable to load status";
+                errorTitle.textContent = "Unable to load status";
+                errorDesc.textContent = "Please check your connection and try again.";
+                errorPaymentStatus.textContent = "-";
+                errorLastStatus.textContent = "-";
             }
         }
 
-        refreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadStatus(); });
         loadStatus();
         setInterval(loadStatus, 5000);
     </script>

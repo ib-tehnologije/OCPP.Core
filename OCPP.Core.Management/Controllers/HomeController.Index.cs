@@ -294,6 +294,17 @@ namespace OCPP.Core.Management.Controllers
                                             if (!string.IsNullOrWhiteSpace(currentCharge)) currentCharge += " | ";
                                             currentCharge += string.Format("{0:0}%", onlineConnectorStatus.SoC.Value);
                                         }
+                                        if (onlineConnectorStatus.MeterKWH != null &&
+                                            onlineConnectorStatus.MeterKWH >= 0 &&
+                                            cpovm.MeterStart >= 0)
+                                        {
+                                            double sessionKwh = onlineConnectorStatus.MeterKWH.Value - cpovm.MeterStart;
+                                            if (sessionKwh >= 0)
+                                            {
+                                                if (!string.IsNullOrWhiteSpace(currentCharge)) currentCharge += " | ";
+                                                currentCharge += string.Format("{0:0.0}kWh", sessionKwh);
+                                            }
+                                        }
                                         if (!string.IsNullOrWhiteSpace(currentCharge))
                                         {
                                             cpovm.CurrentChargeData = currentCharge;
