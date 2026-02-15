@@ -5,6 +5,7 @@
     var apiUrl = Url.Action("StatusData", "Payments", new { reservationId = Model.ReservationId });
     var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
     var brandTagline = Config["PublicPortal:Tagline"] ?? "Fast charging locations for your EV.";
+    var supportEmail = Config["PublicPortal:SupportEmail"] ?? Config["Email:ReplyToAddress"] ?? Config["Email:FromAddress"];
     var cancelUrl = Url.Action("Cancel", "Payments", new { reservationId = Model.ReservationId, origin = "public" });
     var mapUrl = Url.Action("Index", "Public");
     var startUrlBase = Url.Action("Start", "Public");
@@ -76,7 +77,10 @@
 
             <div id="view-charging" class="session-view">
                 <div class="charging-anim" aria-hidden="true">
-                    <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                    <div class="battery-icon">
+                        <div class="battery-fill"></div>
+                        <div class="battery-bolt">⚡</div>
+                    </div>
                 </div>
                 <div class="timer-display" id="charge-timer">--:--:--</div>
                 <div class="timer-label">Session duration</div>
@@ -240,12 +244,33 @@
                         <span>Try again</span>
                         <span class="arrow">→</span>
                     </a>
-                    <a class="btn-secondary" id="contact-support" href="mailto:ev@tehnoline.hr">Contact support</a>
+                    @if (!string.IsNullOrWhiteSpace(supportEmail))
+                    {
+                        <a class="btn-secondary" id="contact-support" href="mailto:@supportEmail">Contact support</a>
+                    }
                 </div>
 
                 <div class="footer-note">
-                    Need help? <a href="mailto:ev@tehnoline.hr">ev@tehnoline.hr</a> · <a href="@mapUrl">Back to map</a>
+                    @if (!string.IsNullOrWhiteSpace(supportEmail))
+                    {
+                        <span>Need help? <a href="mailto:@supportEmail">@supportEmail</a> · </span>
+                    }
+                    <a href="@mapUrl">Back to map</a>
                 </div>
+            </div>
+
+            <div class="company-footer">
+                <div class="company-footer-brand">@brandName</div>
+                @if (!string.IsNullOrWhiteSpace(brandTagline))
+                {
+                    <div class="company-footer-info">@brandTagline</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(supportEmail))
+                {
+                    <div class="company-footer-links">
+                        <a href="mailto:@supportEmail">@supportEmail</a>
+                    </div>
+                }
             </div>
         </div>
     </div>

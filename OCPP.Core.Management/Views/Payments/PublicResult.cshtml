@@ -8,6 +8,7 @@
     var returnUrl = string.IsNullOrWhiteSpace(Model.ReturnUrl) ? Url.Action("Start", "Public") : Model.ReturnUrl;
     var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
     var brandTagline = Config["PublicPortal:Tagline"] ?? "Fast charging locations for your EV.";
+    var supportEmail = Config["PublicPortal:SupportEmail"] ?? Config["Email:ReplyToAddress"] ?? Config["Email:FromAddress"];
     var badgeClass = Model.Success ? "available" : "error";
 }
 <!DOCTYPE html>
@@ -59,7 +60,19 @@
                 </a>
             </div>
 
-            <div class="footer-note">Powered by <a href="@returnUrl">@brandName</a></div>
+            <div class="company-footer">
+                <div class="company-footer-brand">@brandName</div>
+                @if (!string.IsNullOrWhiteSpace(brandTagline))
+                {
+                    <div class="company-footer-info">@brandTagline</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(supportEmail))
+                {
+                    <div class="company-footer-links">
+                        <a href="mailto:@supportEmail">@supportEmail</a>
+                    </div>
+                }
+            </div>
         </div>
     </div>
 </body>

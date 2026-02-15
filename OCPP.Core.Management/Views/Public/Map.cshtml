@@ -2,134 +2,170 @@
 @inject Microsoft.Extensions.Configuration.IConfiguration Config
 @{
     Layout = null;
-    ViewData["Title"] = "Charging locations";
+    ViewData["Title"] = "Charging map";
     var hasCoords = Model.ChargePoints?.Any(cp => cp.Latitude.HasValue && cp.Longitude.HasValue) == true;
     var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
     var brandTagline = Config["PublicPortal:Tagline"] ?? "Fast charging locations for your EV.";
-    var isMapPage = string.Equals(ViewContext?.RouteData?.Values["action"]?.ToString(), "Map", StringComparison.OrdinalIgnoreCase);
+    var supportEmail = Config["PublicPortal:SupportEmail"] ?? Config["Email:ReplyToAddress"] ?? Config["Email:FromAddress"];
 }
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Charging locations</title>
+    <title>Charging map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="~/css/public-portal.css" />
 </head>
 <body class="public-portal">
-    <main class="public-shell">
-        <header class="public-header">
-            <div class="public-branding">
-                <div class="public-badge">⚡</div>
-                <div class="public-brand-text">
-                    <h1 class="public-brand-title">@brandName</h1>
-                    <p class="public-brand-sub">@brandTagline</p>
-                </div>
-            </div>
-        </header>
-        <nav class="public-portal-nav">
-            <a class="public-nav-link @(isMapPage ? "active" : "")" href="@Url.Action("Index", "Public")">① Map</a>
-            <a class="public-nav-link @(!isMapPage ? "active" : "")" href="@Url.Action("Start", "Public")">② Start</a>
-        </nav>
-        <div class="public-lang-bar">
-            <span class="public-lang-label">🌐</span>
-            <button type="button" class="public-lang-btn is-active">EN</button>
-            <button type="button" class="public-lang-btn">HR</button>
-            <button type="button" class="public-lang-btn">DE</button>
-            <button type="button" class="public-lang-btn">IT</button>
-        </div>
-
-        <div class="public-grid">
-            <section class="public-card">
-                <div class="public-top">
-                    <h2 class="public-section-title">Charging map</h2>
-                    <p class="public-section-sub">Tap a station for details and start a session.</p>
+    <div class="page-wrap" style="align-items: flex-start; padding-top: 20px;">
+        <div class="map-container">
+            <div class="card" style="width: 100%; max-width: none;">
+                <div class="brand-bar">
+                    <div class="brand-logo">⚡</div>
+                    <div class="brand-name">@brandName</div>
                 </div>
 
-                <div class="public-toolbar">
-                    <input type="search" id="searchInput" class="public-search" placeholder="Search by name or location" />
-                    <button type="button" id="clearSearch" class="public-btn ghost">Clear</button>
-                    <span class="public-stat">@Model.ChargePoints.Count station(s)</span>
+                <div class="map-header">
+                    <h2>Charging map</h2>
+                    <div class="charger-count"><span>@Model.ChargePoints.Count</span> station(s)</div>
                 </div>
 
-                <div class="public-list-grid" id="cpList">
+                <div style="padding: 0 24px;">
+                    @if (hasCoords)
+                    {
+                        <div style="position: relative;">
+                            <button id="gpsBtn" type="button" title="Center on your location"
+                                    style="position:absolute;right:10px;top:10px;z-index:999;padding:7px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent);font:500 0.82rem var(--font);cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+                                📍 GPS
+                            </button>
+                            <button id="mapExpandBtn" type="button" title="Expand map"
+                                    style="position:absolute;right:10px;top:48px;z-index:999;padding:7px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent);font:500 0.82rem var(--font);cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+                                🗺 Expand
+                            </button>
+                            <div id="map"></div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert-box warning" style="margin: 0 0 16px;">
+                            <span class="alert-icon">🗺️</span>
+                            <span>No map data available (missing coordinates).</span>
+                        </div>
+                    }
+                </div>
+
+                <div class="map-legend">
+                    <div class="legend-item"><div class="legend-dot online"></div><span>Available</span></div>
+                    <div class="legend-item"><div class="legend-dot busy"></div><span>Busy</span></div>
+                    <div class="legend-item"><div class="legend-dot offline"></div><span>Offline</span></div>
+                </div>
+
+                <div class="map-search-wrap">
+                    <div class="map-search">
+                        <span class="map-search-icon">🔍</span>
+                        <input type="text" id="mapSearch" placeholder="Search by name, location, or charge point id..." autocomplete="off" />
+                        <button type="button" class="map-search-clear" id="mapSearchClear" aria-label="Clear search">&times;</button>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div style="padding: 16px 24px 8px;">
+                    <div class="info-section-title">Stations on map</div>
+                </div>
+
+                <div class="charger-list" id="charger-list">
                     @if (Model.ChargePoints.Count == 0)
                     {
-                        <div class="public-empty-state">No stations configured yet.</div>
+                        <div class="tile full" style="grid-column: 1 / -1;">
+                            <div class="label">No stations configured yet.</div>
+                        </div>
                     }
                     else
                     {
                         foreach (var cp in Model.ChargePoints)
                         {
-                            var statusClass = "open";
-                            if (string.Equals(cp.Status, "Faulted", StringComparison.InvariantCultureIgnoreCase))
+                            var statusClass = "busy";
+                            if (string.Equals(cp.Status, "Available", StringComparison.InvariantCultureIgnoreCase))
                             {
-                                statusClass = "faulted";
+                                statusClass = "online";
                             }
-                            else if (!string.Equals(cp.Status, "Available", StringComparison.InvariantCultureIgnoreCase))
+                            else if (string.Equals(cp.Status, "Faulted", StringComparison.InvariantCultureIgnoreCase) ||
+                                     string.Equals(cp.Status, "Unavailable", StringComparison.InvariantCultureIgnoreCase))
                             {
-                                statusClass = "occupied";
+                                statusClass = "offline";
                             }
+
                             var searchText = $"{cp.Name} {cp.LocationDescription} {cp.ChargePointId}";
-                            <div class="public-list-item cp-card" data-search="@searchText" data-cp-id="@cp.ChargePointId">
-                            <div class="public-status-pill @statusClass">
-                                <span class="status-dot"></span>
-                                @cp.Status
-                            </div>
-                                <h3 style="margin: 8px 0 4px;">@cp.Name</h3>
-                                <p class="public-tile-help">@cp.LocationDescription</p>
-                                <p class="public-tile-help">@cp.ConnectorCount connector(s)</p>
-                                <p class="public-tile-help">
+                            <div class="charger-card cp-card" data-search="@searchText" data-cp-id="@cp.ChargePointId">
+                                <div class="cc-top">
+                                    <div class="cc-name">@cp.Name</div>
+                                    <div class="cc-status @statusClass">@cp.Status</div>
+                                </div>
+                                <div class="cc-detail">@cp.LocationDescription</div>
+                                <div class="cc-detail">@cp.ConnectorCount connector(s)</div>
+                                <div class="cc-detail">
                                     @if (cp.PricePerKwh > 0)
                                     {
-                                        <span>@cp.PricePerKwh.ToString("0.##") @Model.CurrencySymbol / kWh</span>
+                                        <span class="cc-power">@cp.PricePerKwh.ToString("0.##") @Model.CurrencySymbol / kWh</span>
                                     }
                                     else
                                     {
-                                        <span>Free energy</span>
+                                        <span class="cc-power">Free energy</span>
                                     }
-                                </p>
+                                    @if (cp.UserSessionFee > 0)
+                                    {
+                                        <span> · Session fee @cp.UserSessionFee.ToString("0.##") @Model.CurrencySymbol</span>
+                                    }
+                                </div>
                                 @if (cp.ConnectorUsageFeePerMinute > 0)
                                 {
-                                    <p class="public-tile-help">Idle fee: @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (@(cp.UsageFeeAfterChargingEnds ? "after charge" : "from start"), grace @cp.StartUsageFeeAfterMinutes min)</p>
+                                    <div class="cc-detail">Idle fee @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (grace @cp.StartUsageFeeAfterMinutes min)</div>
                                 }
-                                <a class="public-btn" href="@Url.Action("Start", "Public", new { cp = cp.ChargePointId, conn = 1 })">Start session</a>
+                                <div class="cc-actions">
+                                    <a href="@Url.Action("Start", "Public", new { cp = cp.ChargePointId, conn = 1 })" onclick="event.stopPropagation();">Start session</a>
+                                </div>
                             </div>
                         }
                     }
                 </div>
-            </section>
 
-            <section class="public-card public-map-card">
-                @if (hasCoords)
-                {
-                    <div class="public-map-wrap">
-                        <div id="map" class="public-map" style="height: 100%; min-height: 360px; width: 100%;"></div>
-                    </div>
-                }
-                else
-                {
-                    <div class="public-empty-state">No map data available (missing coordinates).</div>
-                }
-            </section>
+                <div class="company-footer">
+                    <div class="company-footer-brand">@brandName</div>
+                    @if (!string.IsNullOrWhiteSpace(brandTagline))
+                    {
+                        <div class="company-footer-info">@brandTagline</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(supportEmail))
+                    {
+                        <div class="company-footer-links">
+                            <a href="mailto:@supportEmail">@supportEmail</a>
+                        </div>
+                    }
+                </div>
+            </div>
         </div>
-    </main>
+    </div>
 
     @if (hasCoords)
     {
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
             const points = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.ChargePoints ?? new List<PublicMapChargePoint>()));
+            const currencySymbol = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.CurrencySymbol));
             if (typeof L === 'undefined' || typeof L.map !== 'function') {
                 console.error('Public map: Leaflet library failed to load.');
             } else {
             const map = L.map('map');
             const startUrlBase = '@Url.Action("Start", "Public")';
-            const listEl = document.getElementById('cpList');
-            const searchInput = document.getElementById('searchInput');
-            const clearSearch = document.getElementById('clearSearch');
+            const listEl = document.getElementById('charger-list');
+            const searchInput = document.getElementById('mapSearch');
+            const clearSearch = document.getElementById('mapSearchClear');
+            const gpsBtn = document.getElementById('gpsBtn');
+            const mapExpandBtn = document.getElementById('mapExpandBtn');
             const markerLookup = {};
+            let userMarker = null;
 
             const pick = (obj, primary, secondary) => {
                 if (obj[primary] !== undefined && obj[primary] !== null) return obj[primary];
@@ -138,6 +174,12 @@
             };
 
             const asNumber = (value) => {
+                if (value === null || value === undefined) return null;
+                if (typeof value === 'string') {
+                    const trimmed = value.trim();
+                    if (trimmed.length === 0) return null;
+                    value = trimmed;
+                }
                 const num = Number(value);
                 return Number.isFinite(num) ? num : null;
             };
@@ -149,7 +191,7 @@
             });
 
             if (hasLocation.length > 0) {
-                const bounds = L.latLngBounds(hasLocation.map(p => [pick(p, 'Latitude', 'latitude'), pick(p, 'Longitude', 'longitude')]));
+                const bounds = L.latLngBounds(hasLocation.map(p => [asNumber(pick(p, 'Latitude', 'latitude')), asNumber(pick(p, 'Longitude', 'longitude'))]));
                 map.fitBounds(bounds.pad(0.2));
             } else {
                 map.setView([0, 0], 2);
@@ -168,10 +210,11 @@
                 const name = (pick(p, 'Name', 'name') || '').trim() || '(Unnamed station)';
                 const status = (pick(p, 'Status', 'status') || '').toLowerCase();
                 let color = '#00d4aa';
-                if (status.includes('fault')) {
-                    color = '#ff6477';
+                let statusLabel = pick(p, 'Status', 'status') || 'Unknown';
+                if (status.includes('fault') || status.includes('unavail') || status.includes('offline')) {
+                    color = '#ff6b81';
                 } else if (!status.includes('avail')) {
-                    color = '#ffc107';
+                    color = '#a78bfa';
                 }
 
                 const lat = asNumber(pick(p, 'Latitude', 'latitude'));
@@ -188,13 +231,22 @@
                 const usageFee = pick(p, 'ConnectorUsageFeePerMinute', 'connectorUsageFeePerMinute');
                 const startFeeTime = pick(p, 'StartUsageFeeAfterMinutes', 'startUsageFeeAfterMinutes');
                 const afterCharge = pick(p, 'UsageFeeAfterChargingEnds', 'usageFeeAfterChargingEnds');
-                const safePrice = Number(price) > 0 ? `${Number(price).toFixed(2)} @Model.CurrencySymbol / kWh` : 'Free energy';
+                const safePrice = Number(price) > 0 ? `${Number(price).toFixed(2)} ${currencySymbol} / kWh` : 'Free energy';
                 const idleText = usageFee > 0
-                    ? `<br/>Idle fee: ${Number(usageFee).toFixed(2)} @Model.CurrencySymbol/min (${afterCharge ? 'after charge' : 'from start'}, grace ${startFeeTime} min)`
-                    : '';
+                    ? `Idle fee: ${Number(usageFee).toFixed(2)} ${currencySymbol}/min (${afterCharge ? 'after charge' : 'from start'}, grace ${startFeeTime} min)`
+                    : null;
                 const startUrl = `${startUrlBase}?cp=${encodeURIComponent(chargePointId)}&conn=1`;
 
-                marker.bindPopup(`<strong>${escapeHtml(name)}</strong><br/>${safePrice}${idleText}<br/><a class="public-btn" href="${startUrl}">Start session</a>`);
+                const addr = (pick(p, 'LocationDescription', 'locationDescription') || '').trim();
+                const popupHtml = [
+                    `<div class="popup-name">${escapeHtml(name)}</div>`,
+                    addr ? `<div class="popup-addr">${escapeHtml(addr)}</div>` : '',
+                    `<div class="popup-status">${escapeHtml(statusLabel)}</div>`,
+                    `<div><span class="popup-power">${escapeHtml(safePrice)}</span></div>`,
+                    idleText ? `<div class="popup-status">${escapeHtml(idleText)}</div>` : '',
+                    `<div style="margin-top: 10px;"><a class="btn-secondary" style="margin-top:0;" href="${startUrl}">Start session →</a></div>`
+                ].filter(Boolean).join('');
+                marker.bindPopup(popupHtml);
                 markerLookup[chargePointId] = marker;
 
                 marker.on('click', () => {
@@ -214,7 +266,7 @@
                     '>': '&gt;',
                     '"': '&quot;',
                     "'": '&#39;'
-                }[match]);
+                }[match]));
             }
 
             function filterMapAndList(query) {
@@ -258,6 +310,9 @@
             if (searchInput) {
                 searchInput.addEventListener('input', function () {
                     filterMapAndList(this.value);
+                    if (clearSearch) {
+                        clearSearch.style.display = (this.value || '').length > 0 ? 'block' : 'none';
+                    }
                 });
             }
 
@@ -268,6 +323,7 @@
                         filterMapAndList('');
                         searchInput.focus();
                     }
+                    clearSearch.style.display = 'none';
                 });
             }
 
@@ -282,6 +338,45 @@
                     map.flyTo([latlng.lat, latlng.lng], 16, { animate: true, duration: 0.45 });
                     marker.openPopup();
                 });
+            }
+
+            function toggleMapSize() {
+                const mapEl = document.getElementById('map');
+                if (!mapEl) return;
+                const expanded = mapEl.classList.toggle('expanded');
+                if (mapExpandBtn) {
+                    mapExpandBtn.textContent = expanded ? '🗺 Shrink' : '🗺 Expand';
+                }
+                requestAnimationFrame(() => map.invalidateSize());
+            }
+
+            function locateUser() {
+                if (!navigator.geolocation) return;
+                navigator.geolocation.getCurrentPosition(pos => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    if (userMarker) {
+                        map.removeLayer(userMarker);
+                    }
+                    userMarker = L.circleMarker([lat, lng], {
+                        radius: 7,
+                        color: '#00d4aa',
+                        fillColor: '#00d4aa',
+                        fillOpacity: 0.9,
+                        weight: 2
+                    }).addTo(map);
+                    map.flyTo([lat, lng], 15, { animate: true, duration: 0.45 });
+                }, err => {
+                    console.error('Public map: geolocation failed', err);
+                }, { enableHighAccuracy: true, timeout: 10000 });
+            }
+
+            if (mapExpandBtn) {
+                mapExpandBtn.addEventListener('click', toggleMapSize);
+            }
+
+            if (gpsBtn) {
+                gpsBtn.addEventListener('click', locateUser);
             }
 
             const hasFiniteCoordinates = Object.keys(markerLookup).length > 0;

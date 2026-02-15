@@ -21,6 +21,9 @@ run-server: restore
 run-management: restore
 	$(DOTNET) run --project OCPP.Core.Management --configuration $(CONFIG)
 
+run:
+	make run-server & make run-management
+
 # Scaffold a new migration with a generated timestamped name
 migrate: restore
 	$(DOTNET) ef migrations add $(MIGRATION_NAME) --project $(DB_PROJECT) --startup-project $(STARTUP) --context $(DB_CONTEXT) --verbose

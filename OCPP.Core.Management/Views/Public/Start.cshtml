@@ -6,6 +6,7 @@
     ViewData["Title"] = "Start charging";
     var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
     var brandTagline = Config["PublicPortal:Tagline"] ?? "Start your EV session in one step.";
+    var supportEmail = Config["PublicPortal:SupportEmail"] ?? Config["Email:ReplyToAddress"] ?? Config["Email:FromAddress"];
     var chargePointLabel = string.IsNullOrWhiteSpace(Model.ChargePointName)
         ? Model.ChargePointId
         : Model.ChargePointName;
@@ -192,6 +193,20 @@
                     <span>@(Model.FreeChargingEnabled ? "Free charging enabled. No payment will be charged." : "Secure payment via Stripe. Only the actual cost is charged.")</span>
                 </div>
             }
+
+            <div class="company-footer">
+                <div class="company-footer-brand">@brandName</div>
+                @if (!string.IsNullOrWhiteSpace(brandTagline))
+                {
+                    <div class="company-footer-info">@brandTagline</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(supportEmail))
+                {
+                    <div class="company-footer-links">
+                        <a href="mailto:@supportEmail">@supportEmail</a>
+                    </div>
+                }
+            </div>
         </div>
     </div>
 </body>
