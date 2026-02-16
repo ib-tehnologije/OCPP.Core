@@ -99,6 +99,7 @@ namespace OCPP.Core.Server
                 sp.GetRequiredService<Payments.StartChargingMediator>(),
                 sp.GetService<IBackgroundJobClient>()));
             services.AddHostedService<Payments.PaymentReservationCleanupService>();
+            services.AddHostedService<Payments.IdleFeeWarningEmailService>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

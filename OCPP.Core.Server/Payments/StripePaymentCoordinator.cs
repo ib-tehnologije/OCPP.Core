@@ -521,6 +521,8 @@ namespace OCPP.Core.Server.Payments
                 transactionId,
                 reservation.ChargePointId,
                 reservation.ConnectorId);
+
+            TrySendR1RequestedNotification(dbContext, reservation);
         }
 
         public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
@@ -651,6 +653,7 @@ namespace OCPP.Core.Server.Payments
                 dbContext.SaveChanges();
 
                 PersistTransactionBreakdown(dbContext, transaction, reservation, actualEnergy, energyCostCents, usageFeeMinutes, usageFeeCents, sessionFeeCents, amountToCapture);
+                TrySendCompletionNotifications(dbContext, reservation, transaction);
             }
             catch (StripeException sex)
             {
@@ -660,6 +663,137 @@ namespace OCPP.Core.Server.Payments
                 reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
             }
+        }
+
+        private void TrySendR1RequestedNotification(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
+        {
+            if (_emailNotificationService == null || reservation == null)
+            {
+                return;
+            }
+
+            var session = TryGetCheckoutSession(reservation.StripeCheckoutSessionId, reservation.ReservationId, "R1Requested");
+            if (!IsR1InvoiceRequested(session))
+            {
+                return;
+            }
+
+            var recipientEmail = session?.CustomerDetails?.Email;
+            if (string.IsNullOrWhiteSpace(recipientEmail))
+            {
+                _logger.LogDebug("Stripe/Notify => R1 requested email skipped due to missing recipient reservation={ReservationId}", reservation.ReservationId);
+                return;
+            }
+
+            try
+            {
+                var chargePoint = dbContext.ChargePoints.Find(reservation.ChargePointId);
+                var statusUrl = BuildStatusUrl(reservation.ReservationId);
+                _emailNotificationService.SendR1InvoiceRequested(
+                    recipientEmail,
+                    reservation,
+                    chargePoint,
+                    statusUrl,
+                    GetMetadataValue(session, "buyer_company"),
+                    GetMetadataValue(session, "buyer_oib"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Stripe/Notify => Failed to send R1 requested email reservation={ReservationId}", reservation.ReservationId);
+            }
+        }
+
+        private void TrySendCompletionNotifications(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction)
+        {
+            if (_emailNotificationService == null || reservation == null || transaction == null)
+            {
+                return;
+            }
+
+            if (!string.Equals(reservation.Status, PaymentReservationStatus.Completed, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(reservation.Status, PaymentReservationStatus.Cancelled, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var session = TryGetCheckoutSession(reservation.StripeCheckoutSessionId, reservation.ReservationId, "Completion");
+            var recipientEmail = session?.CustomerDetails?.Email;
+            if (string.IsNullOrWhiteSpace(recipientEmail))
+            {
+                _logger.LogDebug("Stripe/Notify => Completion emails skipped due to missing recipient reservation={ReservationId}", reservation.ReservationId);
+                return;
+            }
+
+            var chargePoint = dbContext.ChargePoints.Find(reservation.ChargePointId);
+            var statusUrl = BuildStatusUrl(reservation.ReservationId);
+
+            try
+            {
+                _emailNotificationService.SendChargingCompleted(recipientEmail, reservation, transaction, chargePoint, statusUrl);
+                _emailNotificationService.SendSessionReceipt(recipientEmail, reservation, transaction, chargePoint, statusUrl, null, null);
+
+                if (IsR1InvoiceRequested(session))
+                {
+                    _emailNotificationService.SendR1InvoiceReady(recipientEmail, reservation, transaction, chargePoint, statusUrl, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Stripe/Notify => Failed sending completion emails reservation={ReservationId}", reservation.ReservationId);
+            }
+        }
+
+        private Session TryGetCheckoutSession(string checkoutSessionId, Guid reservationId, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(checkoutSessionId))
+            {
+                return null;
+            }
+
+            try
+            {
+                return _sessionService.Get(checkoutSessionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Stripe/Notify => Unable to load checkout session reservation={ReservationId} sessionId={SessionId} reason={Reason}",
+                    reservationId,
+                    checkoutSessionId,
+                    reason);
+                return null;
+            }
+        }
+
+        private static bool IsR1InvoiceRequested(Session session)
+        {
+            var invoiceType = GetMetadataValue(session, "invoice_type");
+            return string.Equals(invoiceType, "R1", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetMetadataValue(Session session, string key)
+        {
+            if (session?.Metadata == null || string.IsNullOrWhiteSpace(key))
+            {
+                return null;
+            }
+
+            if (session.Metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+
+            return null;
+        }
+
+        private string BuildStatusUrl(Guid reservationId)
+        {
+            if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(_options?.ReturnBaseUrl))
+            {
+                return null;
+            }
+
+            return $"{TrimTrailingSlash(_options.ReturnBaseUrl)}/Payments/Status?reservationId={reservationId}&origin=public";
         }
 
         private int CalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, DateTime? nowUtc = null)

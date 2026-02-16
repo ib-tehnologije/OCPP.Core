@@ -3,6 +3,7 @@ namespace OCPP.Core.Server.Payments
     public class NotificationOptions
     {
         public bool EnableCustomerEmails { get; set; } = false;
+        public int IdleWarningLeadMinutes { get; set; } = 15;
         public string FromAddress { get; set; }
         public string FromName { get; set; }
         public string ReplyToAddress { get; set; }
