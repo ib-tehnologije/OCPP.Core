@@ -159,18 +159,27 @@
                     <input type="hidden" name="ConnectorId" value="@Model.ConnectorId" />
 
                     <label class="r1-checkbox">
-                        <input type="checkbox" id="wantsR1">
+                        <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
                         <div class="r1-label">
                             <strong>Company invoice</strong>
-                            <span class="r1-hint">Company details are entered later via email link.</span>
+                            <span class="r1-hint">If you need an R1 invoice, enter your company info below.</span>
                         </div>
                     </label>
+
+                    <div id="r1Fields" style="display:@(Model.RequestR1Invoice ? "block" : "none"); margin-bottom: 14px;">
+                        <label for="buyerCompanyName" class="field-label">Company name (optional)</label>
+                        <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" autocomplete="organization" />
+
+                        <label for="buyerOib" class="field-label" style="margin-top: 10px;">OIB (required for R1)</label>
+                        <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
+                        <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
+                    </div>
 
                     <label for="chargeTagId" class="field-label">Charge tag / RFID (optional)</label>
                     <input type="text" class="field-input" id="chargeTagId" name="ChargeTagId" value="@Model.ChargeTagId" placeholder="Have a card? Enter it here" @(Model.HasError ? "" : "autofocus") />
                     <div class="field-help">Leave blank to auto-generate a temporary tag for this start.</div>
 
-                    <button type="submit" class="btn-primary" @(Model.HasError ? "disabled" : "")>
+                    <button type="submit" class="btn-primary">
                         <span>@(isFree ? "Start free session" : "Start charging")</span>
                         <span class="arrow" aria-hidden="true">→</span>
                     </button>
@@ -178,6 +187,22 @@
                     <a class="btn-secondary" href="@mapUrl">Back to map</a>
                 </form>
             </div>
+
+            <script>
+                (function () {
+                    const wantsR1 = document.getElementById('wantsR1');
+                    const fields = document.getElementById('r1Fields');
+                    if (!wantsR1 || !fields) return;
+                    const sync = () => {
+                        const enabled = wantsR1.checked;
+                        fields.style.display = enabled ? 'block' : 'none';
+                        const inputs = fields.querySelectorAll('input, select, textarea');
+                        inputs.forEach(i => i.disabled = !enabled);
+                    };
+                    wantsR1.addEventListener('change', sync);
+                    sync();
+                })();
+            </script>
 
             @if (Model.HasError)
             {

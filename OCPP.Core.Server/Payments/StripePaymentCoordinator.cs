@@ -178,6 +178,31 @@ namespace OCPP.Core.Server.Payments
                 cancelUrl += $"&origin={originParam}";
             }
 
+            var metadata = new Dictionary<string, string>
+            {
+                ["reservation_id"] = reservation.ReservationId.ToString(),
+                ["charge_point_id"] = reservation.ChargePointId,
+                ["connector_id"] = reservation.ConnectorId.ToString(),
+                ["charge_tag_id"] = reservation.ChargeTagId
+            };
+
+            if (request.RequestR1Invoice)
+            {
+                metadata["invoice_type"] = "R1";
+            }
+
+            var buyerOib = NormalizeOibDigits(request.BuyerOib);
+            if (!string.IsNullOrWhiteSpace(buyerOib))
+            {
+                metadata["buyer_oib"] = TrimMetadataValue(buyerOib, 32);
+            }
+
+            var buyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(buyerCompanyName))
+            {
+                metadata["buyer_company"] = TrimMetadataValue(buyerCompanyName, 200);
+            }
+
             var sessionOptions = new SessionCreateOptions
             {
                 Mode = "payment",
@@ -186,21 +211,9 @@ namespace OCPP.Core.Server.Payments
                 PaymentIntentData = new SessionPaymentIntentDataOptions
                 {
                     CaptureMethod = "manual",
-                    Metadata = new Dictionary<string, string>
-                    {
-                        ["reservation_id"] = reservation.ReservationId.ToString(),
-                        ["charge_point_id"] = reservation.ChargePointId,
-                        ["connector_id"] = reservation.ConnectorId.ToString(),
-                        ["charge_tag_id"] = reservation.ChargeTagId
-                    }
+                    Metadata = new Dictionary<string, string>(metadata)
                 },
-                Metadata = new Dictionary<string, string>
-                {
-                    ["reservation_id"] = reservation.ReservationId.ToString(),
-                    ["charge_point_id"] = reservation.ChargePointId,
-                    ["connector_id"] = reservation.ConnectorId.ToString(),
-                    ["charge_tag_id"] = reservation.ChargeTagId
-                },
+                Metadata = new Dictionary<string, string>(metadata),
                 LineItems = new List<SessionLineItemOptions>
                 {
                     new SessionLineItemOptions
@@ -259,6 +272,33 @@ namespace OCPP.Core.Server.Payments
                 _logger.LogError(sex, "Stripe checkout session creation failed: {Message}", sex.Message);
                 throw;
             }
+        }
+
+        private static string NormalizeOibDigits(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                return null;
+            }
+
+            var digits = new string(input.Where(char.IsDigit).ToArray());
+            return digits.Length == 0 ? null : digits;
+        }
+
+        private static string TrimMetadataValue(string value, int maxLength)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            value = value.Trim();
+            if (maxLength > 0 && value.Length > maxLength)
+            {
+                value = value.Substring(0, maxLength);
+            }
+
+            return value;
         }
 
         public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId)

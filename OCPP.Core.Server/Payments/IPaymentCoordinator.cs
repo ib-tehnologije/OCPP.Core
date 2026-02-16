@@ -28,6 +28,11 @@ namespace OCPP.Core.Server.Payments
         public string ChargeTagId { get; set; }
         public string Origin { get; set; }
         public string ReturnBaseUrl { get; set; }
+
+        // Optional buyer info (used for R1/business invoicing in some jurisdictions, e.g. Croatia).
+        public bool RequestR1Invoice { get; set; }
+        public string BuyerCompanyName { get; set; }
+        public string BuyerOib { get; set; }
     }
 
     public class PaymentSessionResult

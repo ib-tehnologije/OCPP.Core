@@ -46,11 +46,39 @@ namespace OCPP.Core.Management.Controllers
         {
             var model = BuildViewModel(request?.ChargePointId, request?.ConnectorId ?? 1);
             model.ChargeTagId = request?.ChargeTagId;
+            model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
+            model.BuyerCompanyName = request?.BuyerCompanyName;
+            model.BuyerOib = request?.BuyerOib;
 
             if (string.IsNullOrWhiteSpace(model.ChargePointId))
             {
                 model.ErrorMessage = "Charge point is missing.";
                 return View(model);
+            }
+
+            if (model.RequestR1Invoice)
+            {
+                var normalizedOib = NormalizeOib(model.BuyerOib);
+                if (string.IsNullOrWhiteSpace(normalizedOib))
+                {
+                    model.ErrorMessage = "For an R1 (company) invoice, please enter your OIB (11 digits).";
+                    return View(model);
+                }
+
+                if (!IsValidOib(normalizedOib))
+                {
+                    model.ErrorMessage = "The OIB you entered is not valid. Please check the 11 digits and try again.";
+                    return View(model);
+                }
+
+                model.BuyerOib = normalizedOib;
+                model.BuyerCompanyName = (model.BuyerCompanyName ?? string.Empty).Trim();
+            }
+            else
+            {
+                // Avoid leaking stale hidden form values when R1 is not requested.
+                model.BuyerOib = null;
+                model.BuyerCompanyName = null;
             }
 
             var chargeTagId = model.ChargeTagId;
@@ -65,6 +93,9 @@ namespace OCPP.Core.Management.Controllers
                 chargePointId = model.ChargePointId,
                 connectorId = model.ConnectorId,
                 chargeTagId = chargeTagId,
+                requestR1Invoice = model.RequestR1Invoice,
+                buyerCompanyName = model.BuyerCompanyName,
+                buyerOib = model.BuyerOib,
                 origin = "public",
                 returnBaseUrl = $"{Request.Scheme}://{Request.Host}"
             });
@@ -345,6 +376,41 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return null;
+        }
+
+        private static string NormalizeOib(string oib)
+        {
+            if (string.IsNullOrWhiteSpace(oib))
+            {
+                return null;
+            }
+
+            var digits = new string(oib.Where(char.IsDigit).ToArray());
+            return digits.Length == 0 ? null : digits;
+        }
+
+        /// <summary>
+        /// Croatian OIB validation (ISO 7064 MOD 11,10).
+        /// </summary>
+        private static bool IsValidOib(string oibDigits)
+        {
+            if (string.IsNullOrWhiteSpace(oibDigits) || oibDigits.Length != 11 || oibDigits.Any(c => c < '0' || c > '9'))
+            {
+                return false;
+            }
+
+            int a = 10;
+            for (int i = 0; i < 10; i++)
+            {
+                a = a + (oibDigits[i] - '0');
+                a = a % 10;
+                if (a == 0) a = 10;
+                a = (a * 2) % 11;
+            }
+
+            int control = 11 - a;
+            if (control == 10) control = 0;
+            return control == (oibDigits[10] - '0');
         }
     }
 }

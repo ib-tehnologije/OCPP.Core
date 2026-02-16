@@ -11,6 +11,9 @@ namespace OCPP.Core.Management.Models
         public string LastStatus { get; set; }
         public DateTime? LastStatusTime { get; set; }
         public string ChargeTagId { get; set; }
+        public bool RequestR1Invoice { get; set; }
+        public string BuyerCompanyName { get; set; }
+        public string BuyerOib { get; set; }
         public double MaxSessionKwh { get; set; }
         public decimal PricePerKwh { get; set; }
         public decimal UserSessionFee { get; set; }
