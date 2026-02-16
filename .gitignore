@@ -338,6 +338,7 @@ ASALocalRun/
 
 # Local notes (kept out of git)
 /CLIENT_COMMENTS.md
+/LOCAL_CHARGER_TESTING_IMPLEMENTATION.md
 
 # BeatPulse healthcheck temp database
 healthchecksdb
