@@ -33,7 +33,8 @@ namespace OCPP.Core.Server.Tests
             FakePaymentIntentService intentService,
             StripeOptions? stripeOptions = null,
             Func<DateTime>? now = null,
-            FakeEventFactory? eventFactory = null)
+            FakeEventFactory? eventFactory = null,
+            IEmailNotificationService? emailService = null)
         {
             var options = Options.Create(stripeOptions ?? new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" });
             var flowOptions = Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 });
@@ -44,7 +45,8 @@ namespace OCPP.Core.Server.Tests
                 sessionService,
                 intentService,
                 eventFactory ?? new FakeEventFactory(),
-                now ?? (() => DateTime.UtcNow));
+                now ?? (() => DateTime.UtcNow),
+                emailService);
         }
 
         [Theory]
@@ -311,6 +313,107 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void ConfirmReservation_SendsPaymentAuthorizedEmail_WhenEmailServiceProvided()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                StripeCheckoutSessionId = "sess_email",
+                Status = PaymentReservationStatus.Pending,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG1",
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_email",
+                    PaymentIntentId = "pi_email",
+                    Status = "complete",
+                    PaymentStatus = "paid",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "driver@example.com"
+                    }
+                }
+            };
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_email",
+                    Status = "requires_capture",
+                    Amount = 123
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(context, sessionService, intentService, emailService: emailService);
+
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_email");
+
+            Assert.True(result.Success);
+            Assert.Equal(1, emailService.PaymentAuthorizedCount);
+            Assert.Equal("driver@example.com", emailService.LastToEmail);
+        }
+
+        [Fact]
+        public void MarkTransactionStarted_SendsR1RequestedEmail_WhenR1CheckoutMetadataPresent()
+        {
+            using var context = CreateContext();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_r1_start",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_r1_start",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "r1@example.com"
+                    },
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["invoice_type"] = "R1",
+                        ["buyer_company"] = "Acme d.o.o.",
+                        ["buyer_oib"] = "12345678901"
+                    }
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService(), emailService: emailService);
+
+            coordinator.MarkTransactionStarted(context, "CP1", 1, "TAG1", 555);
+
+            var reservation = context.ChargePaymentReservations.Single();
+            Assert.Equal(PaymentReservationStatus.Charging, reservation.Status);
+            Assert.Equal(1, emailService.R1InvoiceRequestedCount);
+            Assert.Equal("r1@example.com", emailService.LastToEmail);
+            Assert.Equal("Acme d.o.o.", emailService.LastBuyerCompanyName);
+            Assert.Equal("12345678901", emailService.LastBuyerOib);
+        }
+
+        [Fact]
         public void CompleteReservation_CapturesWhenAmountDue()
         {
             using var context = CreateContext();
@@ -358,6 +461,153 @@ namespace OCPP.Core.Server.Tests
             Assert.True(intentService.CaptureCalled);
             Assert.Equal(reservation.CapturedAmountCents, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
             Assert.True(reservation.CapturedAmountCents > 0);
+        }
+
+        [Fact]
+        public void CompleteReservation_SendsCompletionReceiptAndR1ReadyEmails_ForR1Flow()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_r1_complete",
+                StripePaymentIntentId = "pi_r1_complete",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 10,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+
+            var transaction = new Transaction
+            {
+                TransactionId = 420,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2025, 1, 1, 12, 10, 0, DateTimeKind.Utc),
+                MeterStart = 0,
+                MeterStop = 2
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_r1_complete", Status = "requires_capture", Amount = 10_000 }
+            };
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_r1_complete",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "complete-r1@example.com"
+                    },
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["invoice_type"] = "R1"
+                    }
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                now: () => new DateTime(2025, 1, 1, 12, 20, 0, DateTimeKind.Utc),
+                emailService: emailService);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(1, emailService.ChargingCompletedCount);
+            Assert.Equal(1, emailService.SessionReceiptCount);
+            Assert.Equal(1, emailService.R1InvoiceReadyCount);
+            Assert.Equal("complete-r1@example.com", emailService.LastToEmail);
+        }
+
+        [Fact]
+        public void CompleteReservation_DoesNotSendR1ReadyEmail_ForNonR1Flow()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_r2_complete",
+                StripePaymentIntentId = "pi_r2_complete",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 10,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+
+            var transaction = new Transaction
+            {
+                TransactionId = 421,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2025, 1, 1, 12, 10, 0, DateTimeKind.Utc),
+                MeterStart = 0,
+                MeterStop = 2
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_r2_complete", Status = "requires_capture", Amount = 10_000 }
+            };
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_r2_complete",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "complete-r2@example.com"
+                    },
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["invoice_type"] = "R2"
+                    }
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                now: () => new DateTime(2025, 1, 1, 12, 20, 0, DateTimeKind.Utc),
+                emailService: emailService);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(1, emailService.ChargingCompletedCount);
+            Assert.Equal(1, emailService.SessionReceiptCount);
+            Assert.Equal(0, emailService.R1InvoiceReadyCount);
         }
 
         [Fact]
@@ -756,6 +1006,95 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task IdleWarningService_SendsWarningOnlyOnce_WhenWithinWarningWindow()
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Maintenance:IdleWarningSweepSeconds"] = "30"
+                } as IEnumerable<KeyValuePair<string, string?>>)
+                .Build());
+
+            var dbName = Guid.NewGuid().ToString();
+            services.AddDbContext<OCPPCoreContext>(options => options.UseInMemoryDatabase(dbName));
+
+            var fakeEmailService = new FakeEmailNotificationService();
+            services.AddSingleton<IEmailNotificationService>(fakeEmailService);
+
+            var provider = services.BuildServiceProvider();
+            var ctx = provider.GetRequiredService<OCPPCoreContext>();
+            var now = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+
+            ctx.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_idle",
+                Status = PaymentReservationStatus.Charging,
+                UsageFeeAnchorMinutes = 1,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 20,
+                MaxUsageFeeMinutes = 120,
+                Currency = "eur",
+                TransactionId = 991,
+                CreatedAtUtc = now.AddMinutes(-30),
+                UpdatedAtUtc = now.AddMinutes(-5)
+            });
+
+            ctx.Transactions.Add(new Transaction
+            {
+                TransactionId = 991,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = now.AddHours(-1),
+                ChargingEndedAtUtc = now.AddMinutes(-10),
+                StopTime = null
+            });
+            ctx.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_idle",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "idle@example.com"
+                    }
+                }
+            };
+
+            var svc = new TestIdleWarningEmailService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<ILogger<IdleFeeWarningEmailService>>(),
+                provider.GetRequiredService<IConfiguration>(),
+                Options.Create(new NotificationOptions
+                {
+                    EnableCustomerEmails = true,
+                    IdleWarningLeadMinutes = 15
+                }),
+                Options.Create(new StripeOptions
+                {
+                    Enabled = true,
+                    ApiKey = "test",
+                    ReturnBaseUrl = "https://return"
+                }),
+                () => now);
+            svc.SessionToReturn = sessionService.GetResponse;
+
+            await svc.RunOnce();
+            await svc.RunOnce();
+
+            Assert.Equal(1, fakeEmailService.IdleFeeWarningCount);
+            Assert.Equal("idle@example.com", fakeEmailService.LastToEmail);
+        }
+
+        [Fact]
         public async Task CleanupService_CancelsStaleReservations()
         {
             var services = new ServiceCollection();
@@ -796,6 +1135,57 @@ namespace OCPP.Core.Server.Tests
             var reservation = ctx.ChargePaymentReservations.Single();
             Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
             Assert.Contains("Auto-cancelled", reservation.LastError);
+        }
+    }
+
+    internal class FakeEmailNotificationService : IEmailNotificationService
+    {
+        public int PaymentAuthorizedCount { get; private set; }
+        public int ChargingCompletedCount { get; private set; }
+        public int IdleFeeWarningCount { get; private set; }
+        public int SessionReceiptCount { get; private set; }
+        public int R1InvoiceRequestedCount { get; private set; }
+        public int R1InvoiceReadyCount { get; private set; }
+        public string? LastToEmail { get; private set; }
+        public string? LastBuyerCompanyName { get; private set; }
+        public string? LastBuyerOib { get; private set; }
+
+        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session)
+        {
+            PaymentAuthorizedCount++;
+            LastToEmail = toEmail;
+        }
+
+        public void SendChargingCompleted(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl)
+        {
+            ChargingCompletedCount++;
+            LastToEmail = toEmail;
+        }
+
+        public void SendIdleFeeWarning(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, DateTime idleFeeStartsAtUtc, TimeSpan remainingUntilIdleFee, string statusUrl)
+        {
+            IdleFeeWarningCount++;
+            LastToEmail = toEmail;
+        }
+
+        public void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoicePdfUrl)
+        {
+            SessionReceiptCount++;
+            LastToEmail = toEmail;
+        }
+
+        public void SendR1InvoiceRequested(string toEmail, ChargePaymentReservation reservation, ChargePoint chargePoint, string statusUrl, string buyerCompanyName, string buyerOib)
+        {
+            R1InvoiceRequestedCount++;
+            LastToEmail = toEmail;
+            LastBuyerCompanyName = buyerCompanyName;
+            LastBuyerOib = buyerOib;
+        }
+
+        public void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoicePdfUrl)
+        {
+            R1InvoiceReadyCount++;
+            LastToEmail = toEmail;
         }
     }
 
@@ -880,5 +1270,25 @@ namespace OCPP.Core.Server.Tests
 
             await _ctx.SaveChangesAsync(token);
         }
+    }
+
+    internal class TestIdleWarningEmailService : IdleFeeWarningEmailService
+    {
+        public Session? SessionToReturn { get; set; }
+
+        public TestIdleWarningEmailService(
+            IServiceScopeFactory scopeFactory,
+            ILogger<IdleFeeWarningEmailService> logger,
+            IConfiguration configuration,
+            IOptions<NotificationOptions> notificationOptions,
+            IOptions<StripeOptions> stripeOptions,
+            Func<DateTime> utcNow)
+            : base(scopeFactory, logger, configuration, notificationOptions, stripeOptions, utcNow)
+        {
+        }
+
+        public Task RunOnce(CancellationToken token = default) => SweepAsync(token);
+
+        protected override Session GetCheckoutSession(string checkoutSessionId, Guid reservationId) => SessionToReturn ?? new Session();
     }
 }

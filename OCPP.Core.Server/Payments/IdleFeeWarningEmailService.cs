@@ -27,6 +27,7 @@ namespace OCPP.Core.Server.Payments
         private readonly TimeSpan _interval;
         private readonly int _warningLeadMinutes;
         private readonly IStripeSessionService _sessionService;
+        private readonly Func<DateTime> _utcNow;
         private readonly ConcurrentDictionary<int, DateTime> _sentWarnings = new();
 
         public IdleFeeWarningEmailService(
@@ -35,12 +36,24 @@ namespace OCPP.Core.Server.Payments
             IConfiguration configuration,
             IOptions<NotificationOptions> notificationOptions,
             IOptions<StripeOptions> stripeOptions)
+            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, null)
+        {
+        }
+
+        public IdleFeeWarningEmailService(
+            IServiceScopeFactory scopeFactory,
+            ILogger<IdleFeeWarningEmailService> logger,
+            IConfiguration configuration,
+            IOptions<NotificationOptions> notificationOptions,
+            IOptions<StripeOptions> stripeOptions,
+            Func<DateTime> utcNow)
         {
             _scopeFactory = scopeFactory;
             _logger = logger;
             _notificationOptions = notificationOptions?.Value ?? new NotificationOptions();
             _stripeOptions = stripeOptions?.Value ?? new StripeOptions();
             _sessionService = new StripeSessionServiceWrapper();
+            _utcNow = utcNow ?? (() => DateTime.UtcNow);
 
             _warningLeadMinutes = Math.Max(1, _notificationOptions.IdleWarningLeadMinutes);
             int intervalSeconds = configuration.GetValue<int?>("Maintenance:IdleWarningSweepSeconds") ?? 60;
@@ -80,7 +93,7 @@ namespace OCPP.Core.Server.Payments
             }
         }
 
-        private async Task SweepAsync(CancellationToken token)
+        protected virtual async Task SweepAsync(CancellationToken token)
         {
             if (!_notificationOptions.EnableCustomerEmails || string.IsNullOrWhiteSpace(_stripeOptions.ApiKey))
             {
@@ -130,7 +143,7 @@ namespace OCPP.Core.Server.Payments
                 .Where(cp => chargePointIds.Contains(cp.ChargePointId))
                 .ToDictionaryAsync(cp => cp.ChargePointId, token);
 
-            var now = DateTime.UtcNow;
+            var now = _utcNow();
             foreach (var reservation in reservations)
             {
                 if (!reservation.TransactionId.HasValue)
@@ -173,7 +186,7 @@ namespace OCPP.Core.Server.Payments
                     continue;
                 }
 
-                var checkoutSession = TryGetCheckoutSession(reservation.StripeCheckoutSessionId, reservation.ReservationId);
+                var checkoutSession = GetCheckoutSession(reservation.StripeCheckoutSessionId, reservation.ReservationId);
                 var recipientEmail = checkoutSession?.CustomerDetails?.Email;
                 if (string.IsNullOrWhiteSpace(recipientEmail))
                 {
@@ -204,7 +217,7 @@ namespace OCPP.Core.Server.Payments
             PruneSentWarnings(now);
         }
 
-        private Session TryGetCheckoutSession(string checkoutSessionId, Guid reservationId)
+        protected virtual Session GetCheckoutSession(string checkoutSessionId, Guid reservationId)
         {
             if (string.IsNullOrWhiteSpace(checkoutSessionId))
             {
