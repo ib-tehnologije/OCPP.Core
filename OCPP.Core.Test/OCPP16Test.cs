@@ -13,18 +13,17 @@ namespace OCPP.Core.Test
         /*
          * Configure valid data for database and installation here
          */
-        private static string _chargePointId = "Test1234";
-        private static string _serverUrl = $"ws://localhost:8081";
-        private static string _chargeTagId = "12345";
-        private static string _apiKey = "36029A5F-B736-4DA9-AE46-D66847C9062C";
+        private static string _chargePointId = TestRuntime.GetSetting("OCPP_TEST_CP16", "Test1234");
+        private static string _serverUrl = TestRuntime.GetSetting("OCPP_TEST_SERVER_URL", "ws://localhost:8081");
+        private static string _chargeTagId = TestRuntime.GetSetting("OCPP_TEST_TAG", "12345");
+        private static string _apiKey = TestRuntime.GetSetting("OCPP_TEST_API_KEY", "36029A5F-B736-4DA9-AE46-D66847C9062C");
 
         private static ClientWebSocket _webSocket = new ClientWebSocket();
         private static TaskCompletionSource<JArray>? _responseTcs;
 
         internal static void Execute()
         {
-            Console.WriteLine("Press enter to start test with OCPP 1.6");
-            Console.ReadLine();
+            TestRuntime.Pause("Press enter to start test with OCPP 1.6");
 
             try
             {
@@ -112,8 +111,7 @@ namespace OCPP.Core.Test
                         /* 8.  Check chargepoint status in/from server  */
                         ReadServerStatus();
 
-                        Console.WriteLine("Press enter to stop transaction");
-                        Console.ReadLine();
+                        TestRuntime.Pause("Press enter to stop transaction");
 
                         SendAndVerifyStopTransaction(1, transactionId).Wait();
                     }
@@ -170,8 +168,7 @@ namespace OCPP.Core.Test
                     }
                 }
 
-                Console.WriteLine("Simulation ended. Press enter to exit.");
-                Console.ReadLine();
+                TestRuntime.Pause("Simulation ended. Press enter to exit.");
 
                 /* 12.  Close connection  */
                 _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Simulation end", CancellationToken.None).Wait();
@@ -181,7 +178,7 @@ namespace OCPP.Core.Test
                 Console.BackgroundColor = ConsoleColor.Red;
                 Console.WriteLine($"Error in Test: {ex.ToString()}");
                 Console.BackgroundColor = ConsoleColor.Black;
-                Console.ReadLine();
+                TestRuntime.Pause("Press enter to exit.");
             }
         }
 

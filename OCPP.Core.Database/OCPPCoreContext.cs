@@ -318,10 +318,12 @@ namespace OCPP.Core.Database
                     .HasMaxLength(64)
                     .HasColumnType("nvarchar(64)");
 
-                var isInMemory = string.Equals(Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.OrdinalIgnoreCase);
-                if (isInMemory)
+                var providerName = Database.ProviderName ?? string.Empty;
+                var isInMemory = string.Equals(providerName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.OrdinalIgnoreCase);
+                var isSqlite = string.Equals(providerName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.OrdinalIgnoreCase);
+                if (isInMemory || isSqlite)
                 {
-                    // InMemory provider ignores computed columns; provide a default so required constraint is satisfied in tests.
+                    // InMemory/SQLite: avoid SQL Server computed expression and provide a simple default.
                     activeKey.HasDefaultValue("ACTIVE");
                 }
                 else

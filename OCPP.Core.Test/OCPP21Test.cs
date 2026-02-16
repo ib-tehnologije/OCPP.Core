@@ -13,10 +13,10 @@ namespace OCPP.Core.Test
         /*
          * Configure valid data for database and installation here
          */
-        private static string _chargePointId = "Test1234";
-        private static string _serverUrl = $"ws://localhost:8081";
-        private static string _chargeTagId = "12345";
-        private static string _apiKey = "36029A5F-B736-4DA9-AE46-D66847C9062C";
+        private static string _chargePointId = TestRuntime.GetSetting("OCPP_TEST_CP21", "Test1234");
+        private static string _serverUrl = TestRuntime.GetSetting("OCPP_TEST_SERVER_URL", "ws://localhost:8081");
+        private static string _chargeTagId = TestRuntime.GetSetting("OCPP_TEST_TAG", "12345");
+        private static string _apiKey = TestRuntime.GetSetting("OCPP_TEST_API_KEY", "36029A5F-B736-4DA9-AE46-D66847C9062C");
 
         private static ClientWebSocket _webSocket = new ClientWebSocket();
         private static TaskCompletionSource<JArray>? _responseTcs;
@@ -24,8 +24,7 @@ namespace OCPP.Core.Test
 
         internal static void Execute()
         {
-            Console.WriteLine("Press enter to start test with OCPP 2.1");
-            Console.ReadLine();
+            TestRuntime.Pause("Press enter to start test with OCPP 2.1");
 
             try
             {
@@ -110,8 +109,7 @@ namespace OCPP.Core.Test
                         /* 8.  Check chargepoint status in/from server  */
                         ReadServerStatus();
 
-                        Console.WriteLine("Press enter to stop transaction");
-                        Console.ReadLine();
+                        TestRuntime.Pause("Press enter to stop transaction");
 
                         /*
                         // KEBA sends status availabe before ending the transaction
@@ -126,8 +124,7 @@ namespace OCPP.Core.Test
                 }
 
                 ReadServerStatus();
-                Console.WriteLine("Transaction ended - Press enter send StatusUpdate");
-                Console.ReadLine();
+                TestRuntime.Pause("Transaction ended - Press enter send StatusUpdate");
 
                 /* 9.  Update connector status  */
                 SendAndVerifyStatusNotification(1, "Available").Wait();
@@ -171,8 +168,7 @@ namespace OCPP.Core.Test
                     }
                 }
 
-                Console.WriteLine("Simulation ended. Press enter to exit.");
-                Console.ReadLine();
+                TestRuntime.Pause("Simulation ended. Press enter to exit.");
 
                 /* 12.  Close connection  */
                 _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Simulation end", CancellationToken.None).Wait();
@@ -180,7 +176,7 @@ namespace OCPP.Core.Test
             catch (Exception ex)
             {
                 Console.WriteLine($"Error in Test: {ex.ToString()}");
-                Console.ReadLine();
+                TestRuntime.Pause("Press enter to exit.");
             }
         }
 

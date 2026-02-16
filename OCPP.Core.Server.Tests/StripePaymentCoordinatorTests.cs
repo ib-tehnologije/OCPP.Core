@@ -365,6 +365,101 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void ConfirmReservation_FailsWhenPaymentIntentStatusUnexpected()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                StripeCheckoutSessionId = "sess_unexpected",
+                Status = PaymentReservationStatus.Pending,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG1",
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_unexpected",
+                    PaymentIntentId = "pi_unexpected",
+                    Status = "complete",
+                    PaymentStatus = "paid"
+                }
+            };
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_unexpected",
+                    Status = "processing",
+                    Amount = 100
+                }
+            };
+
+            var coordinator = CreateCoordinator(context, sessionService, intentService);
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_unexpected");
+
+            Assert.False(result.Success);
+            Assert.Equal("processing", result.Status);
+            Assert.Equal(PaymentReservationStatus.Failed, result.Reservation.Status);
+            Assert.Contains("Unexpected PaymentIntent status", result.Reservation.LastError);
+        }
+
+        [Fact]
+        public void ConfirmReservation_GeneratesOcppTag_AndCreatesChargeTag()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                StripeCheckoutSessionId = "sess_tag",
+                Status = PaymentReservationStatus.Pending,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG1",
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_tag",
+                    PaymentIntentId = "pi_tag",
+                    Status = "complete",
+                    PaymentStatus = "paid"
+                }
+            };
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_tag",
+                    Status = "requires_capture",
+                    Amount = 250
+                }
+            };
+
+            var coordinator = CreateCoordinator(context, sessionService, intentService);
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_tag");
+
+            Assert.True(result.Success);
+            Assert.False(string.IsNullOrWhiteSpace(result.Reservation.OcppIdTag));
+            Assert.StartsWith("R", result.Reservation.OcppIdTag);
+            Assert.True(result.Reservation.OcppIdTag.Length <= 20);
+            Assert.True(context.ChargeTags.Any(t => t.TagId == result.Reservation.OcppIdTag));
+        }
+
+        [Fact]
         public void MarkTransactionStarted_SendsR1RequestedEmail_WhenR1CheckoutMetadataPresent()
         {
             using var context = CreateContext();
@@ -659,6 +754,61 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CompleteReservation_UsesAlreadySucceededPaymentIntent()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripePaymentIntentId = "pi_done",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 10,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 199,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2025, 1, 1, 12, 5, 0, DateTimeKind.Utc),
+                MeterStart = 0,
+                MeterStop = 1
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_done",
+                    Status = "succeeded",
+                    AmountReceived = 456
+                }
+            };
+
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), intentService);
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(456, reservation.CapturedAmountCents);
+            Assert.True(reservation.CapturedAtUtc.HasValue);
+            Assert.False(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+        }
+
+        [Fact]
         public void HandleWebhookEvent_CheckoutCompletedMarksAuthorized()
         {
             using var context = CreateContext();
@@ -787,6 +937,48 @@ namespace OCPP.Core.Server.Tests
             var reservation = context.ChargePaymentReservations.Single(r => r.StripeCheckoutSessionId == "sess_expired");
             Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
             Assert.Equal("Checkout session expired", reservation.LastError);
+        }
+
+        [Fact]
+        public void HandleWebhookEvent_CheckoutExpired_DoesNotChangeCompletedReservation()
+        {
+            using var context = CreateContext();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_done",
+                Status = PaymentReservationStatus.Completed,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var evt = new Event
+            {
+                Type = EventTypes.CheckoutSessionExpired,
+                Data = new EventData
+                {
+                    Object = new Session
+                    {
+                        Id = "sess_done"
+                    }
+                }
+            };
+
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                new FakePaymentIntentService(),
+                stripeOptions: new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return", WebhookSecret = "whsec_test" },
+                eventFactory: new FakeEventFactory { EventToReturn = evt });
+
+            coordinator.HandleWebhookEvent(context, "payload", "sig");
+
+            var reservation = context.ChargePaymentReservations.Single(r => r.StripeCheckoutSessionId == "sess_done");
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Null(reservation.LastError);
         }
 
         [Fact]

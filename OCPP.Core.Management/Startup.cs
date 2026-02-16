@@ -47,20 +47,26 @@ namespace OCPP.Core.Management
 
         public IConfiguration Configuration { get; }
 
+        private bool HasSqlServerHangfireStorage =>
+            !string.IsNullOrWhiteSpace(Configuration.GetConnectionString("SqlServer"));
+
 
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddOCPPDbContext(Configuration);
 
-            services.AddHangfire((serviceProvider, config) =>
+            if (HasSqlServerHangfireStorage)
             {
-                var cs = Configuration.GetConnectionString("SqlServer");
-                config.UseSimpleAssemblyNameTypeSerializer()
-                      .UseRecommendedSerializerSettings()
-                      .UseSqlServerStorage(cs);
-            });
-            services.AddHangfireServer();
+                services.AddHangfire((serviceProvider, config) =>
+                {
+                    var cs = Configuration.GetConnectionString("SqlServer");
+                    config.UseSimpleAssemblyNameTypeSerializer()
+                          .UseRecommendedSerializerSettings()
+                          .UseSqlServerStorage(cs);
+                });
+                services.AddHangfireServer();
+            }
 
             services.AddControllersWithViews();
 
@@ -125,15 +131,18 @@ namespace OCPP.Core.Management
                     pattern: "{controller=Home}/{action=Index}/{id?}/{connectorId?}/{param?}/");
             });
 
-            var scopeFactory = app.ApplicationServices.GetService<IServiceScopeFactory>();
-            using (var scope = scopeFactory.CreateScope())
+            if (HasSqlServerHangfireStorage)
             {
-                var ownerReportService = scope.ServiceProvider.GetService<Services.IOwnerReportService>();
-                ownerReportService?.ScheduleRecurringReport();
+                var scopeFactory = app.ApplicationServices.GetService<IServiceScopeFactory>();
+                using (var scope = scopeFactory.CreateScope())
+                {
+                    var ownerReportService = scope.ServiceProvider.GetService<Services.IOwnerReportService>();
+                    ownerReportService?.ScheduleRecurringReport();
+                }
             }
 
             var enableDashboard = Configuration.GetValue<bool>("Hangfire:EnableDashboard");
-            if (enableDashboard)
+            if (enableDashboard && HasSqlServerHangfireStorage)
             {
                 var dashboardPath = Configuration.GetValue<string>("Hangfire:DashboardPath") ?? "/hangfire";
                 app.UseHangfireDashboard(dashboardPath, new DashboardOptions

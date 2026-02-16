@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 
 namespace OCPP.Core.Test
 {
@@ -6,6 +7,11 @@ namespace OCPP.Core.Test
     {
         static void Main(string[] args)
         {
+            if (args.Any(arg => arg.Equals("--non-interactive", StringComparison.OrdinalIgnoreCase)))
+            {
+                Environment.SetEnvironmentVariable("OCPP_TEST_NON_INTERACTIVE", "1");
+            }
+
             OCPP16Test.Execute();
             OCPP20Test.Execute();
             OCPP21Test.Execute();

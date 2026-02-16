@@ -49,6 +49,9 @@ namespace OCPP.Core.Server
         /// </summary>
         private ILoggerFactory LoggerFactory { get; set; }
 
+        private bool HasSqlServerHangfireStorage =>
+            !string.IsNullOrWhiteSpace(Configuration.GetConnectionString("SqlServer"));
+
         public Startup(IConfiguration configuration)
         {
             if (!configuration.GetSection("ConnectionStrings").Exists())
@@ -71,18 +74,21 @@ namespace OCPP.Core.Server
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             services.Configure<Payments.PaymentFlowOptions>(Configuration.GetSection("Payments"));
             services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
-            services.AddHangfire((serviceProvider, config) =>
+            if (HasSqlServerHangfireStorage)
             {
-                var cs = Configuration.GetConnectionString("SqlServer");
-                config.UseSimpleAssemblyNameTypeSerializer()
-                      .UseRecommendedSerializerSettings()
-                      .UseSqlServerStorage(cs);
-            });
-            var hangfireQueue = Configuration.GetValue<string>("Hangfire:Queue") ?? "payments";
-            services.AddHangfireServer(options =>
-            {
-                options.Queues = new[] { hangfireQueue };
-            });
+                services.AddHangfire((serviceProvider, config) =>
+                {
+                    var cs = Configuration.GetConnectionString("SqlServer");
+                    config.UseSimpleAssemblyNameTypeSerializer()
+                          .UseRecommendedSerializerSettings()
+                          .UseSqlServerStorage(cs);
+                });
+                var hangfireQueue = Configuration.GetValue<string>("Hangfire:Queue") ?? "payments";
+                services.AddHangfireServer(options =>
+                {
+                    options.Queues = new[] { hangfireQueue };
+                });
+            }
             services.AddSingleton<Payments.StartChargingMediator>();
             services.AddSingleton<Payments.ReservationLinkService>();
             services.AddSingleton<Payments.IEmailNotificationService, Payments.EmailNotificationService>();
@@ -125,7 +131,16 @@ namespace OCPP.Core.Server
             bool dbMigrate = Configuration.GetValue<bool>("AutoMigrateDB", true);
             if (dbMigrate)
             {
-                dbContext.Database.Migrate();
+                var providerName = dbContext.Database.ProviderName ?? string.Empty;
+                if (providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Existing migrations are SQL Server-oriented; for local SQLite runs create schema directly from model.
+                    dbContext.Database.EnsureCreated();
+                }
+                else
+                {
+                    dbContext.Database.Migrate();
+                }
             }
 
             // Startup maintenance: clear stale reservations and stuck connector statuses.
@@ -140,7 +155,7 @@ namespace OCPP.Core.Server
             app.UseWebSockets(webSocketOptions);
 
             var enableDashboard = Configuration.GetValue<bool>("Hangfire:EnableDashboard");
-            if (enableDashboard)
+            if (enableDashboard && HasSqlServerHangfireStorage)
             {
                 var dashboardPath = Configuration.GetValue<string>("Hangfire:DashboardPath") ?? "/hangfire";
                 app.UseHangfireDashboard(dashboardPath, new DashboardOptions
