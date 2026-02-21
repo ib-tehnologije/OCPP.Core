@@ -127,6 +127,11 @@ namespace OCPP.Core.Management
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllerRoute(
+                    name: "public-start-path",
+                    pattern: "cp/{cp}/{conn?}",
+                    defaults: new { controller = "Public", action = "Start", conn = 1 });
+
+                endpoints.MapControllerRoute(
                     name: "default",
                     pattern: "{controller=Home}/{action=Index}/{id?}/{connectorId?}/{param?}/");
             });
