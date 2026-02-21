@@ -14,6 +14,7 @@ namespace OCPP.Core.Server.Payments
         bool IsEnabled { get; }
         PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request);
         PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId);
+        PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request);
         void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason);
         void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason);
         void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId);
@@ -45,6 +46,23 @@ namespace OCPP.Core.Server.Payments
     {
         public Guid ReservationId { get; set; }
         public string CheckoutSessionId { get; set; }
+    }
+
+    public class PaymentR1InvoiceRequest
+    {
+        public Guid ReservationId { get; set; }
+        public string BuyerCompanyName { get; set; }
+        public string BuyerOib { get; set; }
+    }
+
+    public class PaymentR1InvoiceResult
+    {
+        public bool Success { get; set; }
+        public string Status { get; set; }
+        public string Error { get; set; }
+        public string BuyerCompanyName { get; set; }
+        public string BuyerOib { get; set; }
+        public ChargePaymentReservation Reservation { get; set; }
     }
 
     public class PaymentCancelRequest

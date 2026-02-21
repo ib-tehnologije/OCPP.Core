@@ -301,6 +301,32 @@ namespace OCPP.Core.Server.Payments
             return value;
         }
 
+        /// <summary>
+        /// Croatian OIB validation (ISO 7064 MOD 11,10).
+        /// </summary>
+        private static bool IsValidOib(string oibDigits)
+        {
+            if (string.IsNullOrWhiteSpace(oibDigits) ||
+                oibDigits.Length != 11 ||
+                oibDigits.Any(c => c < '0' || c > '9'))
+            {
+                return false;
+            }
+
+            int a = 10;
+            for (int i = 0; i < 10; i++)
+            {
+                a = a + (oibDigits[i] - '0');
+                a = a % 10;
+                if (a == 0) a = 10;
+                a = (a * 2) % 11;
+            }
+
+            int control = 11 - a;
+            if (control == 10) control = 0;
+            return control == (oibDigits[10] - '0');
+        }
+
         public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId)
         {
             var result = new PaymentConfirmationResult
@@ -428,6 +454,153 @@ namespace OCPP.Core.Server.Payments
                 reservation.LastError = sex.Message;
                 reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
+                return result;
+            }
+        }
+
+        public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request)
+        {
+            var result = new PaymentR1InvoiceResult
+            {
+                Success = false,
+                Status = "Invalid",
+                Error = "Invalid request."
+            };
+
+            if (!IsEnabled)
+            {
+                result.Status = "Disabled";
+                result.Error = "Stripe integration is disabled.";
+                return result;
+            }
+
+            if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
+
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                result.Error = "Reservation id is required.";
+                return result;
+            }
+
+            var normalizedOib = NormalizeOibDigits(request.BuyerOib);
+            if (string.IsNullOrWhiteSpace(normalizedOib) || !IsValidOib(normalizedOib))
+            {
+                result.Status = "InvalidOib";
+                result.Error = "Valid OIB (11 digits) is required for R1 invoice.";
+                return result;
+            }
+
+            var reservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
+            if (reservation == null)
+            {
+                result.Status = "NotFound";
+                result.Error = "Reservation not found.";
+                return result;
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.StripeCheckoutSessionId))
+            {
+                result.Status = "MissingCheckoutSession";
+                result.Error = "Checkout session id is missing.";
+                result.Reservation = reservation;
+                return result;
+            }
+
+            var buyerCompanyName = TrimMetadataValue(request.BuyerCompanyName, 200);
+            var buyerOibForMetadata = TrimMetadataValue(normalizedOib, 32);
+
+            try
+            {
+                var session = _sessionService.Get(reservation.StripeCheckoutSessionId);
+                if (session == null)
+                {
+                    result.Status = "SessionNotFound";
+                    result.Error = "Stripe checkout session not found.";
+                    result.Reservation = reservation;
+                    return result;
+                }
+
+                bool alreadyRequested = IsR1InvoiceRequested(session);
+
+                var sessionMetadata = new Dictionary<string, string>(
+                    session.Metadata ?? new Dictionary<string, string>(),
+                    StringComparer.OrdinalIgnoreCase);
+                sessionMetadata["invoice_type"] = "R1";
+                sessionMetadata["buyer_oib"] = buyerOibForMetadata;
+                if (!string.IsNullOrWhiteSpace(buyerCompanyName))
+                {
+                    sessionMetadata["buyer_company"] = buyerCompanyName;
+                }
+                else
+                {
+                    sessionMetadata.Remove("buyer_company");
+                }
+
+                _sessionService.Update(
+                    reservation.StripeCheckoutSessionId,
+                    new SessionUpdateOptions
+                    {
+                        Metadata = sessionMetadata
+                    });
+
+                var paymentIntentId = string.IsNullOrWhiteSpace(session.PaymentIntentId)
+                    ? reservation.StripePaymentIntentId
+                    : session.PaymentIntentId;
+                if (!string.IsNullOrWhiteSpace(paymentIntentId))
+                {
+                    var paymentIntent = _paymentIntentService.Get(paymentIntentId);
+                    var intentMetadata = new Dictionary<string, string>(
+                        paymentIntent?.Metadata ?? new Dictionary<string, string>(),
+                        StringComparer.OrdinalIgnoreCase);
+                    intentMetadata["invoice_type"] = "R1";
+                    intentMetadata["buyer_oib"] = buyerOibForMetadata;
+                    if (!string.IsNullOrWhiteSpace(buyerCompanyName))
+                    {
+                        intentMetadata["buyer_company"] = buyerCompanyName;
+                    }
+                    else
+                    {
+                        intentMetadata.Remove("buyer_company");
+                    }
+
+                    _paymentIntentService.Update(
+                        paymentIntentId,
+                        new PaymentIntentUpdateOptions
+                        {
+                            Metadata = intentMetadata
+                        });
+                    reservation.StripePaymentIntentId = paymentIntentId;
+                }
+
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+
+                if (!alreadyRequested)
+                {
+                    TrySendR1RequestedNotification(dbContext, reservation);
+                }
+
+                result.Success = true;
+                result.Status = "Updated";
+                result.Error = null;
+                result.Reservation = reservation;
+                result.BuyerCompanyName = buyerCompanyName;
+                result.BuyerOib = buyerOibForMetadata;
+
+                _logger.LogInformation(
+                    "Stripe/R1Request => Updated metadata reservation={ReservationId} sessionId={SessionId} hasCompany={HasCompany}",
+                    reservation.ReservationId,
+                    reservation.StripeCheckoutSessionId,
+                    !string.IsNullOrWhiteSpace(buyerCompanyName));
+
+                return result;
+            }
+            catch (StripeException sex)
+            {
+                _logger.LogError(sex, "Stripe/R1Request => Failed updating metadata reservation={ReservationId}", request.ReservationId);
+                result.Status = "StripeError";
+                result.Error = sex.Message;
+                result.Reservation = reservation;
                 return result;
             }
         }
@@ -1346,11 +1519,13 @@ namespace OCPP.Core.Server.Payments
     {
         Session Create(SessionCreateOptions options, RequestOptions requestOptions = null);
         Session Get(string id);
+        Session Update(string id, SessionUpdateOptions options, RequestOptions requestOptions = null);
     }
 
     internal interface IStripePaymentIntentService
     {
         PaymentIntent Get(string id);
+        PaymentIntent Update(string id, PaymentIntentUpdateOptions options, RequestOptions requestOptions = null);
         PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null);
         void Cancel(string id, RequestOptions requestOptions = null);
     }
@@ -1367,6 +1542,9 @@ namespace OCPP.Core.Server.Payments
         public Session Create(SessionCreateOptions options, RequestOptions requestOptions = null) => _inner.Create(options, requestOptions);
 
         public Session Get(string id) => _inner.Get(id);
+
+        public Session Update(string id, SessionUpdateOptions options, RequestOptions requestOptions = null) =>
+            _inner.Update(id, options, requestOptions);
     }
 
     internal class StripePaymentIntentServiceWrapper : IStripePaymentIntentService
@@ -1374,6 +1552,9 @@ namespace OCPP.Core.Server.Payments
         private readonly PaymentIntentService _inner = new PaymentIntentService();
 
         public PaymentIntent Get(string id) => _inner.Get(id);
+
+        public PaymentIntent Update(string id, PaymentIntentUpdateOptions options, RequestOptions requestOptions = null) =>
+            _inner.Update(id, options, requestOptions);
 
         public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null) => _inner.Capture(id, options, requestOptions);
 

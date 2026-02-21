@@ -509,6 +509,115 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void RequestR1Invoice_UpdatesStripeMetadataAndSendsNotification()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP1",
+                Name = "Station A"
+            });
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_r1_update",
+                StripePaymentIntentId = "pi_r1_update",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_r1_update",
+                    PaymentIntentId = "pi_r1_update",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "billing@example.com"
+                    },
+                    Metadata = new Dictionary<string, string>()
+                }
+            };
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_r1_update",
+                    Metadata = new Dictionary<string, string>()
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(context, sessionService, intentService, emailService: emailService);
+
+            var result = coordinator.RequestR1Invoice(context, new PaymentR1InvoiceRequest
+            {
+                ReservationId = reservationId,
+                BuyerCompanyName = "Acme d.o.o.",
+                BuyerOib = "12345678903"
+            });
+
+            Assert.True(result.Success);
+            Assert.Equal("Updated", result.Status);
+            Assert.Equal("12345678903", result.BuyerOib);
+            Assert.NotNull(sessionService.LastUpdateOptions);
+            Assert.Equal("R1", sessionService.LastUpdateOptions?.Metadata?["invoice_type"]);
+            Assert.Equal("Acme d.o.o.", sessionService.LastUpdateOptions?.Metadata?["buyer_company"]);
+            Assert.Equal("12345678903", sessionService.LastUpdateOptions?.Metadata?["buyer_oib"]);
+            Assert.NotNull(intentService.LastUpdateOptions);
+            Assert.Equal("R1", intentService.LastUpdateOptions?.Metadata?["invoice_type"]);
+            Assert.Equal("12345678903", intentService.LastUpdateOptions?.Metadata?["buyer_oib"]);
+            Assert.Equal(1, emailService.R1InvoiceRequestedCount);
+            Assert.Equal("billing@example.com", emailService.LastToEmail);
+        }
+
+        [Fact]
+        public void RequestR1Invoice_RejectsInvalidOib()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_invalid_oib",
+                StripePaymentIntentId = "pi_invalid_oib",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService();
+            var intentService = new FakePaymentIntentService();
+            var coordinator = CreateCoordinator(context, sessionService, intentService);
+
+            var result = coordinator.RequestR1Invoice(context, new PaymentR1InvoiceRequest
+            {
+                ReservationId = reservationId,
+                BuyerCompanyName = "Acme",
+                BuyerOib = "12345678901"
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal("InvalidOib", result.Status);
+            Assert.Null(sessionService.LastUpdateOptions);
+            Assert.Null(intentService.LastUpdateOptions);
+        }
+
+        [Fact]
         public void CompleteReservation_CapturesWhenAmountDue()
         {
             using var context = CreateContext();
@@ -1385,6 +1494,9 @@ namespace OCPP.Core.Server.Tests
     {
         public SessionCreateOptions? LastCreateOptions { get; private set; }
         public RequestOptions? LastCreateRequestOptions { get; private set; }
+        public SessionUpdateOptions? LastUpdateOptions { get; private set; }
+        public RequestOptions? LastUpdateRequestOptions { get; private set; }
+        public string? LastUpdatedSessionId { get; private set; }
         public Session CreateResponse { get; set; } = new Session();
         public Session GetResponse { get; set; } = new Session();
 
@@ -1396,11 +1508,23 @@ namespace OCPP.Core.Server.Tests
         }
 
         public Session Get(string id) => GetResponse;
+
+        public Session Update(string id, SessionUpdateOptions options, RequestOptions requestOptions = null!)
+        {
+            LastUpdatedSessionId = id;
+            LastUpdateOptions = options;
+            LastUpdateRequestOptions = requestOptions;
+            GetResponse.Metadata = options?.Metadata ?? GetResponse.Metadata;
+            return GetResponse;
+        }
     }
 
     internal class FakePaymentIntentService : IStripePaymentIntentService
     {
         public PaymentIntent GetResponse { get; set; } = new PaymentIntent();
+        public PaymentIntentUpdateOptions? LastUpdateOptions { get; private set; }
+        public RequestOptions? LastUpdateRequestOptions { get; private set; }
+        public string? LastUpdatedPaymentIntentId { get; private set; }
         public PaymentIntentCaptureOptions? LastCaptureOptions { get; private set; }
         public RequestOptions? LastCaptureRequestOptions { get; private set; }
         public bool CaptureCalled { get; private set; }
@@ -1408,6 +1532,15 @@ namespace OCPP.Core.Server.Tests
         public RequestOptions? LastCancelRequestOptions { get; private set; }
 
         public PaymentIntent Get(string id) => GetResponse;
+
+        public PaymentIntent Update(string id, PaymentIntentUpdateOptions options, RequestOptions requestOptions = null!)
+        {
+            LastUpdatedPaymentIntentId = id;
+            LastUpdateOptions = options;
+            LastUpdateRequestOptions = requestOptions;
+            GetResponse.Metadata = options?.Metadata ?? GetResponse.Metadata;
+            return GetResponse;
+        }
 
         public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null!)
         {
