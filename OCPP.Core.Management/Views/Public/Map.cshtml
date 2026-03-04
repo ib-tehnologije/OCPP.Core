@@ -124,7 +124,7 @@
                                     <div class="cc-detail">Idle fee @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (grace @cp.StartUsageFeeAfterMinutes min)</div>
                                 }
                                 <div class="cc-actions">
-                                    <a href="@Url.Action("Start", "Public", new { cp = cp.ChargePointId, conn = 1 })" onclick="event.stopPropagation();">Start session</a>
+                                    <a href="@Url.RouteUrl("public-start-path", new { cp = cp.ChargePointId, conn = 1 })" onclick="event.stopPropagation();">Start session</a>
                                 </div>
                             </div>
                         }
@@ -159,6 +159,7 @@
             } else {
             const map = L.map('map');
             const startUrlBase = '@Url.Action("Start", "Public")';
+            const startPathTemplate = '@Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" })';
             const listEl = document.getElementById('charger-list');
             const searchInput = document.getElementById('mapSearch');
             const clearSearch = document.getElementById('mapSearchClear');
@@ -182,6 +183,16 @@
                 }
                 const num = Number(value);
                 return Number.isFinite(num) ? num : null;
+            };
+
+            const buildStartUrl = (chargePointId, connectorId) => {
+                const safeCp = encodeURIComponent(chargePointId || '');
+                const safeConn = encodeURIComponent((connectorId == null ? 1 : connectorId).toString());
+                if (startPathTemplate && startPathTemplate.indexOf('__cp__') >= 0) {
+                    return startPathTemplate.replace('__cp__', safeCp).replace('__conn__', safeConn);
+                }
+
+                return `${startUrlBase}?cp=${safeCp}&conn=${safeConn}`;
             };
 
             const hasLocation = points.filter(p => {
@@ -235,7 +246,7 @@
                 const idleText = usageFee > 0
                     ? `Idle fee: ${Number(usageFee).toFixed(2)} ${currencySymbol}/min (${afterCharge ? 'after charge' : 'from start'}, grace ${startFeeTime} min)`
                     : null;
-                const startUrl = `${startUrlBase}?cp=${encodeURIComponent(chargePointId)}&conn=1`;
+                const startUrl = buildStartUrl(chargePointId, 1);
 
                 const addr = (pick(p, 'LocationDescription', 'locationDescription') || '').trim();
                 const popupHtml = [

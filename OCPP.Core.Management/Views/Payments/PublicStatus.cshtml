@@ -9,6 +9,8 @@
     var cancelUrl = Url.Action("Cancel", "Payments", new { reservationId = Model.ReservationId, origin = "public" });
     var mapUrl = Url.Action("Index", "Public");
     var startUrlBase = Url.Action("Start", "Public");
+    var startPathTemplate = Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" }) ?? string.Empty;
+    var requestR1InvoiceUrl = Url.Action("RequestR1Invoice", "Payments");
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -259,6 +261,40 @@
                 </div>
             </div>
 
+            <div id="r1-panel" class="info-section" style="padding-top: 0;">
+                <div class="divider"></div>
+                <div class="info-section-title" style="padding-top: 12px;">R1 invoice (company)</div>
+                <div class="field-help" style="margin-bottom: 12px;">
+                    Need an R1 invoice? You can submit company details now or later using this secure session link.
+                </div>
+                <div class="info-row">
+                    <div class="tile full">
+                        <label for="r1-company" class="field-label">Company name (optional)</label>
+                        <input type="text"
+                               class="field-input"
+                               id="r1-company"
+                               placeholder="Company / organization name"
+                               autocomplete="organization" />
+
+                        <label for="r1-oib" class="field-label" style="margin-top: 10px;">OIB (required for R1)</label>
+                        <input type="text"
+                               class="field-input"
+                               id="r1-oib"
+                               placeholder="11 digits"
+                               inputmode="numeric"
+                               autocomplete="off"
+                               pattern="[0-9]{11}"
+                               maxlength="11" />
+                        <div class="field-help">OIB is validated before the request is saved.</div>
+
+                        <div class="form-section" style="padding: 10px 0 0;">
+                            <button type="button" id="r1-submit" class="btn-secondary">Save R1 details</button>
+                        </div>
+                        <div id="r1-result" class="field-help" style="margin-top: 8px;"></div>
+                    </div>
+                </div>
+            </div>
+
             <div class="company-footer">
                 <div class="company-footer-brand">@brandName</div>
                 @if (!string.IsNullOrWhiteSpace(brandTagline))
@@ -279,6 +315,9 @@
         const apiUrl = "@apiUrl";
         const cancelUrl = "@cancelUrl";
         const startUrlBase = "@startUrlBase";
+        const startPathTemplate = "@startPathTemplate";
+        const requestR1InvoiceUrl = "@requestR1InvoiceUrl";
+        const reservationId = "@Model.ReservationId";
 
         const navButtons = Array.from(document.querySelectorAll(".public-session-nav [data-step]"));
         const badge = document.getElementById("status-badge");
@@ -326,6 +365,12 @@
         const errorLastStatus = document.getElementById("error-last-status");
         const tryAgain = document.getElementById("try-again");
 
+        const r1Panel = document.getElementById("r1-panel");
+        const r1Company = document.getElementById("r1-company");
+        const r1Oib = document.getElementById("r1-oib");
+        const r1Submit = document.getElementById("r1-submit");
+        const r1Result = document.getElementById("r1-result");
+
         const toLower = (value) => String(value || "").trim().toLowerCase();
         const hasValue = (value) => value !== null && value !== undefined && String(value).trim().length > 0;
 
@@ -363,6 +408,21 @@
             const m = Math.floor((seconds % 3600) / 60);
             const s = Math.floor(seconds % 60);
             return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        };
+
+        const buildStartUrl = (chargePointId, connectorId) => {
+            const safeCp = encodeURIComponent(chargePointId || "");
+            const safeConn = encodeURIComponent((connectorId == null ? 1 : connectorId).toString());
+            if (startPathTemplate && startPathTemplate.indexOf("__cp__") >= 0) {
+                return startPathTemplate.replace("__cp__", safeCp).replace("__conn__", safeConn);
+            }
+            return `${startUrlBase}?cp=${safeCp}&conn=${safeConn}`;
+        };
+
+        const setR1Result = (message, isError) => {
+            if (!r1Result) return;
+            r1Result.textContent = message || "";
+            r1Result.style.color = isError ? "var(--danger)" : "var(--success)";
         };
 
         const resolveState = (data) => {
@@ -540,12 +600,68 @@
                 errorDesc.textContent = "The charger is currently offline or occupied. Check the cable and try again.";
             }
 
+            if (r1Panel) {
+                r1Panel.style.display = state === "error" ? "none" : "";
+            }
+
             const cp = data?.chargePointId;
             const conn = data?.connectorId;
             if (cp && conn != null) {
-                tryAgain.href = `${startUrlBase}?cp=${encodeURIComponent(cp)}&conn=${encodeURIComponent(conn)}`;
+                tryAgain.href = buildStartUrl(cp, conn);
             }
         };
+
+        async function submitR1Details() {
+            if (!r1Submit || !r1Oib) return;
+
+            const normalizedOib = String(r1Oib.value || "").replace(/\D/g, "");
+            if (normalizedOib.length !== 11) {
+                setR1Result("Please enter a valid OIB (11 digits).", true);
+                return;
+            }
+
+            r1Submit.disabled = true;
+            setR1Result("Saving R1 details...", false);
+
+            try {
+                const payload = {
+                    reservationId,
+                    buyerCompanyName: (r1Company?.value || "").trim(),
+                    buyerOib: normalizedOib
+                };
+
+                const res = await fetch(requestR1InvoiceUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                let data = null;
+                try {
+                    data = await res.json();
+                } catch (_) {
+                    // ignore parse issues and show fallback message below
+                }
+
+                if (!res.ok || !data?.success) {
+                    setR1Result(data?.message || "Unable to save R1 details.", true);
+                    return;
+                }
+
+                r1Oib.value = normalizedOib;
+                setR1Result(data?.message || "R1 details saved successfully.", false);
+            } catch (err) {
+                setR1Result("Unable to save R1 details right now. Please try again.", true);
+            } finally {
+                r1Submit.disabled = false;
+            }
+        }
+
+        if (r1Submit) {
+            r1Submit.addEventListener("click", submitR1Details);
+        }
 
         async function loadStatus() {
             try {

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -158,6 +159,58 @@ namespace OCPP.Core.Management.Controllers
                 ? "Upstream status unavailable."
                 : statusResult.ErrorMessage;
             return Content($"{{\"status\":\"Error\",\"message\":\"{safeMessage}\"}}", "application/json");
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> RequestR1Invoice([FromBody] R1InvoicePayload request)
+        {
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
+                return Json(new { success = false, status = "Invalid", message = "Reservation id is required." });
+            }
+
+            var normalizedOib = NormalizeOib(request.BuyerOib);
+            if (string.IsNullOrWhiteSpace(normalizedOib))
+            {
+                Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
+                return Json(new { success = false, status = "InvalidOib", message = "For an R1 (company) invoice, please enter your OIB (11 digits)." });
+            }
+
+            if (!IsValidOib(normalizedOib))
+            {
+                Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
+                return Json(new { success = false, status = "InvalidOib", message = "The OIB you entered is not valid. Please check the 11 digits and try again." });
+            }
+
+            var apiResult = await PostAsync("Payments/RequestR1", new
+            {
+                reservationId = request.ReservationId,
+                buyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim(),
+                buyerOib = normalizedOib
+            });
+
+            var status = ExtractStatus(apiResult.Payload) ?? "Error";
+            if (!apiResult.Success)
+            {
+                Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
+                return Json(new
+                {
+                    success = false,
+                    status,
+                    message = ExtractMessage(apiResult.Payload) ?? apiResult.ErrorMessage ?? "Unable to save R1 invoice request."
+                });
+            }
+
+            return Json(new
+            {
+                success = true,
+                status,
+                message = "R1 invoice details were saved successfully.",
+                buyerOib = normalizedOib,
+                buyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim()
+            });
         }
 
         private string GetReturnUrl(string origin)
@@ -351,6 +404,41 @@ namespace OCPP.Core.Management.Controllers
             return null;
         }
 
+        private static string NormalizeOib(string oib)
+        {
+            if (string.IsNullOrWhiteSpace(oib))
+            {
+                return null;
+            }
+
+            var digits = new string(oib.Where(char.IsDigit).ToArray());
+            return digits.Length == 0 ? null : digits;
+        }
+
+        /// <summary>
+        /// Croatian OIB validation (ISO 7064 MOD 11,10).
+        /// </summary>
+        private static bool IsValidOib(string oibDigits)
+        {
+            if (string.IsNullOrWhiteSpace(oibDigits) || oibDigits.Length != 11 || oibDigits.Any(c => c < '0' || c > '9'))
+            {
+                return false;
+            }
+
+            int a = 10;
+            for (int i = 0; i < 10; i++)
+            {
+                a = a + (oibDigits[i] - '0');
+                a = a % 10;
+                if (a == 0) a = 10;
+                a = (a * 2) % 11;
+            }
+
+            int control = 11 - a;
+            if (control == 10) control = 0;
+            return control == (oibDigits[10] - '0');
+        }
+
         private string L(string key, string fallback)
         {
             var value = _localizer[key];
@@ -367,6 +455,13 @@ namespace OCPP.Core.Management.Controllers
         {
             public Guid ReservationId { get; set; }
             public string Reason { get; set; }
+        }
+
+        public class R1InvoicePayload
+        {
+            public Guid ReservationId { get; set; }
+            public string BuyerCompanyName { get; set; }
+            public string BuyerOib { get; set; }
         }
     }
 }
