@@ -457,7 +457,7 @@ namespace OCPP.Core.Management.Controllers
             public string Reason { get; set; }
         }
 
-        private class R1InvoicePayload
+        public class R1InvoicePayload
         {
             public Guid ReservationId { get; set; }
             public string BuyerCompanyName { get; set; }

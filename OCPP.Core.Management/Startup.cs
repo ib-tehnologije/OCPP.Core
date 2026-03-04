@@ -25,6 +25,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.Mvc.Razor;
@@ -98,6 +99,14 @@ namespace OCPP.Core.Management
             services.AddDistributedMemoryCache();
             services.Configure<EmailSettings>(Configuration.GetSection("Email"));
             services.Configure<OwnerReportScheduleSettings>(Configuration.GetSection("OwnerReportSchedule"));
+            services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                // Deployed behind Traefik/reverse proxy: trust forwarded proto/for headers
+                // so generated URLs stay HTTPS and use the public host.
+                options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
+            });
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -112,6 +121,7 @@ namespace OCPP.Core.Management
                 app.UseExceptionHandler("/Home/Error");
             }
 
+            app.UseForwardedHeaders();
             app.UseStaticFiles();
 
             app.UseAuthentication();

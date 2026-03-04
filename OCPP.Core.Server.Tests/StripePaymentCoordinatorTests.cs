@@ -460,6 +460,107 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void ConfirmReservation_DoesNotReauthorizeTerminalReservation()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                StripeCheckoutSessionId = "sess_cancelled",
+                Status = PaymentReservationStatus.Cancelled,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG1",
+                LastError = "cancelled manually",
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_cancelled",
+                    PaymentIntentId = "pi_cancelled",
+                    Status = "complete",
+                    PaymentStatus = "paid"
+                }
+            };
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_cancelled",
+                    Status = "requires_capture",
+                    Amount = 250
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(context, sessionService, intentService, emailService: emailService);
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_cancelled");
+
+            Assert.False(result.Success);
+            Assert.Equal(PaymentReservationStatus.Cancelled, result.Status);
+            Assert.Equal(PaymentReservationStatus.Cancelled, result.Reservation.Status);
+            Assert.Equal("cancelled manually", result.Reservation.LastError);
+            Assert.Equal(0, emailService.PaymentAuthorizedCount);
+        }
+
+        [Fact]
+        public void ConfirmReservation_DoesNotDowngradeStartRequestedReservation()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                StripeCheckoutSessionId = "sess_started",
+                Status = PaymentReservationStatus.StartRequested,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG1",
+                Currency = "eur",
+                AuthorizedAtUtc = DateTime.UtcNow.AddMinutes(-3),
+                StartDeadlineAtUtc = DateTime.UtcNow.AddMinutes(4)
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_started",
+                    PaymentIntentId = "pi_started",
+                    Status = "complete",
+                    PaymentStatus = "paid"
+                }
+            };
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_started",
+                    Status = "requires_capture",
+                    Amount = 250
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(context, sessionService, intentService, emailService: emailService);
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_started");
+
+            Assert.True(result.Success);
+            Assert.Equal(PaymentReservationStatus.StartRequested, result.Status);
+            Assert.Equal(PaymentReservationStatus.StartRequested, result.Reservation.Status);
+            Assert.Equal("pi_started", result.Reservation.StripePaymentIntentId);
+            Assert.Equal(0, emailService.PaymentAuthorizedCount);
+        }
+
+        [Fact]
         public void MarkTransactionStarted_SendsR1RequestedEmail_WhenR1CheckoutMetadataPresent()
         {
             using var context = CreateContext();
@@ -921,20 +1022,25 @@ namespace OCPP.Core.Server.Tests
         public void HandleWebhookEvent_CheckoutCompletedMarksAuthorized()
         {
             using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
             context.ChargePaymentReservations.Add(new ChargePaymentReservation
             {
-                ReservationId = Guid.NewGuid(),
+                ReservationId = reservationId,
                 ChargePointId = "CP1",
                 ConnectorId = 1,
                 ChargeTagId = "TAG1",
                 StripeCheckoutSessionId = "sess_webhook",
                 Status = PaymentReservationStatus.Pending,
+                LastError = "old failure text",
+                FailureCode = "OldFailure",
+                FailureMessage = "Old failure message",
                 Currency = "eur"
             });
             context.SaveChanges();
 
             var evt = new Event
             {
+                Id = "evt_webhook_completed",
                 Type = EventTypes.CheckoutSessionCompleted,
                 Data = new EventData
                 {
@@ -960,6 +1066,12 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
             Assert.Equal("pi_webhook", reservation.StripePaymentIntentId);
             Assert.NotNull(reservation.AuthorizedAtUtc);
+            Assert.Null(reservation.LastError);
+            Assert.Null(reservation.FailureCode);
+            Assert.Null(reservation.FailureMessage);
+
+            var processedWebhook = context.StripeWebhookEvents.Single(e => e.EventId == "evt_webhook_completed");
+            Assert.Equal(reservationId, processedWebhook.ReservationId);
         }
 
         [Fact]
