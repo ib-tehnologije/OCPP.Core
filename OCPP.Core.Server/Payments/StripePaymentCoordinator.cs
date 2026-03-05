@@ -305,6 +305,32 @@ namespace OCPP.Core.Server.Payments
             return value;
         }
 
+        /// <summary>
+        /// Croatian OIB validation (ISO 7064 MOD 11,10).
+        /// </summary>
+        private static bool IsValidOib(string oibDigits)
+        {
+            if (string.IsNullOrWhiteSpace(oibDigits) ||
+                oibDigits.Length != 11 ||
+                oibDigits.Any(c => c < '0' || c > '9'))
+            {
+                return false;
+            }
+
+            int a = 10;
+            for (int i = 0; i < 10; i++)
+            {
+                a = a + (oibDigits[i] - '0');
+                a = a % 10;
+                if (a == 0) a = 10;
+                a = (a * 2) % 11;
+            }
+
+            int control = 11 - a;
+            if (control == 10) control = 0;
+            return control == (oibDigits[10] - '0');
+        }
+
         public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId)
         {
             var result = new PaymentConfirmationResult
@@ -332,6 +358,16 @@ namespace OCPP.Core.Server.Payments
             }
 
             result.Reservation = reservation;
+
+            if (IsTerminalReservationStatus(reservation.Status))
+            {
+                _logger.LogWarning("Stripe/Confirm => Reservation is terminal and cannot be confirmed reservation={ReservationId} status={Status}",
+                    reservationId,
+                    reservation.Status ?? "(null)");
+                result.Error = $"Reservation is in terminal status '{reservation.Status ?? "Unknown"}'.";
+                result.Status = reservation.Status ?? "InvalidStatus";
+                return result;
+            }
 
             if (!string.Equals(reservation.StripeCheckoutSessionId, checkoutSessionId, StringComparison.OrdinalIgnoreCase))
             {
@@ -377,48 +413,75 @@ namespace OCPP.Core.Server.Payments
                     return result;
                 }
 
-            reservation.StripePaymentIntentId = paymentIntentId;
-            reservation.Status = PaymentReservationStatus.Authorized;
-            reservation.AuthorizedAtUtc = _utcNow();
-            reservation.UpdatedAtUtc = reservation.AuthorizedAtUtc.Value;
-            var paymentIntentAmount = (long?)paymentIntent.Amount;
-            reservation.MaxAmountCents = paymentIntentAmount ?? reservation.MaxAmountCents;
-            reservation.StartDeadlineAtUtc = reservation.AuthorizedAtUtc.Value.AddMinutes(Math.Max(1, _flowOptions.StartWindowMinutes));
-            if (string.IsNullOrWhiteSpace(reservation.OcppIdTag))
-            {
-                reservation.OcppIdTag = GenerateOcppIdTag();
-            }
-            EnsureChargeTagExists(dbContext, reservation.OcppIdTag);
+                string previousStatus = reservation.Status;
+                bool shouldSendAuthorizationEmail =
+                    string.Equals(previousStatus, PaymentReservationStatus.Pending, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(previousStatus, PaymentReservationStatus.Authorized, StringComparison.OrdinalIgnoreCase);
+
+                reservation.StripePaymentIntentId = paymentIntentId;
+                var paymentIntentAmount = (long?)paymentIntent.Amount;
+                reservation.MaxAmountCents = paymentIntentAmount ?? reservation.MaxAmountCents;
+
+                var now = _utcNow();
+                if (string.Equals(previousStatus, PaymentReservationStatus.Pending, StringComparison.OrdinalIgnoreCase))
+                {
+                    reservation.Status = PaymentReservationStatus.Authorized;
+                    reservation.AuthorizedAtUtc = now;
+                    reservation.StartDeadlineAtUtc = now.AddMinutes(Math.Max(1, _flowOptions.StartWindowMinutes));
+                }
+                else if (string.Equals(previousStatus, PaymentReservationStatus.Authorized, StringComparison.OrdinalIgnoreCase))
+                {
+                    reservation.AuthorizedAtUtc ??= now;
+                    reservation.StartDeadlineAtUtc ??= reservation.AuthorizedAtUtc.Value.AddMinutes(Math.Max(1, _flowOptions.StartWindowMinutes));
+                }
+
+                if (shouldSendAuthorizationEmail)
+                {
+                    ClearFailureState(reservation);
+                    if (string.IsNullOrWhiteSpace(reservation.OcppIdTag))
+                    {
+                        reservation.OcppIdTag = GenerateOcppIdTag();
+                    }
+                    EnsureChargeTagExists(dbContext, reservation.OcppIdTag);
+                }
+
+                reservation.UpdatedAtUtc = now;
+                dbContext.SaveChanges();
 
                 _logger.LogInformation(
-                    "Stripe/Confirm => Authorized reservation={ReservationId} paymentIntent={PaymentIntentId} amount={Amount} status={PaymentStatus}",
+                    "Stripe/Confirm => Reservation confirmed reservation={ReservationId} paymentIntent={PaymentIntentId} amount={Amount} paymentStatus={PaymentStatus} previousStatus={PreviousStatus} newStatus={NewStatus}",
                     reservationId,
                     paymentIntentId,
                     paymentIntentAmount,
-                    paymentIntent.Status);
+                    paymentIntent.Status,
+                    previousStatus ?? "(null)",
+                    reservation.Status ?? "(null)");
 
-                try
+                if (shouldSendAuthorizationEmail)
                 {
-                    var recipientEmail = session?.CustomerDetails?.Email;
-                    var sessionId = session?.Id;
-                    if (_backgroundJobClient != null)
+                    try
                     {
-                        _backgroundJobClient.Enqueue<PaymentAuthorizationEmailJob>(job =>
-                            job.SendPaymentAuthorized(reservationId, recipientEmail, sessionId));
-                        _logger.LogInformation("Stripe/Confirm => Queued payment authorization email reservation={ReservationId}", reservationId);
+                        var recipientEmail = session?.CustomerDetails?.Email;
+                        var sessionId = session?.Id;
+                        if (_backgroundJobClient != null)
+                        {
+                            _backgroundJobClient.Enqueue<PaymentAuthorizationEmailJob>(job =>
+                                job.SendPaymentAuthorized(reservationId, recipientEmail, sessionId));
+                            _logger.LogInformation("Stripe/Confirm => Queued payment authorization email reservation={ReservationId}", reservationId);
+                        }
+                        else
+                        {
+                            _emailNotificationService?.SendPaymentAuthorized(recipientEmail, reservation, session);
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        _emailNotificationService?.SendPaymentAuthorized(recipientEmail, reservation, session);
+                        _logger.LogWarning(ex, "Stripe/Confirm => Failed to enqueue payment authorization email for reservation={ReservationId}", reservationId);
                     }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Stripe/Confirm => Failed to enqueue payment authorization email for reservation={ReservationId}", reservationId);
                 }
 
                 result.Success = true;
-                result.Status = PaymentReservationStatus.Authorized;
+                result.Status = reservation.Status ?? PaymentReservationStatus.Authorized;
                 result.Error = null;
 
                 return result;
@@ -432,6 +495,153 @@ namespace OCPP.Core.Server.Payments
                 reservation.LastError = sex.Message;
                 reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
+                return result;
+            }
+        }
+
+        public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request)
+        {
+            var result = new PaymentR1InvoiceResult
+            {
+                Success = false,
+                Status = "Invalid",
+                Error = "Invalid request."
+            };
+
+            if (!IsEnabled)
+            {
+                result.Status = "Disabled";
+                result.Error = "Stripe integration is disabled.";
+                return result;
+            }
+
+            if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
+
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                result.Error = "Reservation id is required.";
+                return result;
+            }
+
+            var normalizedOib = NormalizeOibDigits(request.BuyerOib);
+            if (string.IsNullOrWhiteSpace(normalizedOib) || !IsValidOib(normalizedOib))
+            {
+                result.Status = "InvalidOib";
+                result.Error = "Valid OIB (11 digits) is required for R1 invoice.";
+                return result;
+            }
+
+            var reservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
+            if (reservation == null)
+            {
+                result.Status = "NotFound";
+                result.Error = "Reservation not found.";
+                return result;
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.StripeCheckoutSessionId))
+            {
+                result.Status = "MissingCheckoutSession";
+                result.Error = "Checkout session id is missing.";
+                result.Reservation = reservation;
+                return result;
+            }
+
+            var buyerCompanyName = TrimMetadataValue(request.BuyerCompanyName, 200);
+            var buyerOibForMetadata = TrimMetadataValue(normalizedOib, 32);
+
+            try
+            {
+                var session = _sessionService.Get(reservation.StripeCheckoutSessionId);
+                if (session == null)
+                {
+                    result.Status = "SessionNotFound";
+                    result.Error = "Stripe checkout session not found.";
+                    result.Reservation = reservation;
+                    return result;
+                }
+
+                bool alreadyRequested = IsR1InvoiceRequested(session);
+
+                var sessionMetadata = new Dictionary<string, string>(
+                    session.Metadata ?? new Dictionary<string, string>(),
+                    StringComparer.OrdinalIgnoreCase);
+                sessionMetadata["invoice_type"] = "R1";
+                sessionMetadata["buyer_oib"] = buyerOibForMetadata;
+                if (!string.IsNullOrWhiteSpace(buyerCompanyName))
+                {
+                    sessionMetadata["buyer_company"] = buyerCompanyName;
+                }
+                else
+                {
+                    sessionMetadata.Remove("buyer_company");
+                }
+
+                _sessionService.Update(
+                    reservation.StripeCheckoutSessionId,
+                    new SessionUpdateOptions
+                    {
+                        Metadata = sessionMetadata
+                    });
+
+                var paymentIntentId = string.IsNullOrWhiteSpace(session.PaymentIntentId)
+                    ? reservation.StripePaymentIntentId
+                    : session.PaymentIntentId;
+                if (!string.IsNullOrWhiteSpace(paymentIntentId))
+                {
+                    var paymentIntent = _paymentIntentService.Get(paymentIntentId);
+                    var intentMetadata = new Dictionary<string, string>(
+                        paymentIntent?.Metadata ?? new Dictionary<string, string>(),
+                        StringComparer.OrdinalIgnoreCase);
+                    intentMetadata["invoice_type"] = "R1";
+                    intentMetadata["buyer_oib"] = buyerOibForMetadata;
+                    if (!string.IsNullOrWhiteSpace(buyerCompanyName))
+                    {
+                        intentMetadata["buyer_company"] = buyerCompanyName;
+                    }
+                    else
+                    {
+                        intentMetadata.Remove("buyer_company");
+                    }
+
+                    _paymentIntentService.Update(
+                        paymentIntentId,
+                        new PaymentIntentUpdateOptions
+                        {
+                            Metadata = intentMetadata
+                        });
+                    reservation.StripePaymentIntentId = paymentIntentId;
+                }
+
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+
+                if (!alreadyRequested)
+                {
+                    TrySendR1RequestedNotification(dbContext, reservation);
+                }
+
+                result.Success = true;
+                result.Status = "Updated";
+                result.Error = null;
+                result.Reservation = reservation;
+                result.BuyerCompanyName = buyerCompanyName;
+                result.BuyerOib = buyerOibForMetadata;
+
+                _logger.LogInformation(
+                    "Stripe/R1Request => Updated metadata reservation={ReservationId} sessionId={SessionId} hasCompany={HasCompany}",
+                    reservation.ReservationId,
+                    reservation.StripeCheckoutSessionId,
+                    !string.IsNullOrWhiteSpace(buyerCompanyName));
+
+                return result;
+            }
+            catch (StripeException sex)
+            {
+                _logger.LogError(sex, "Stripe/R1Request => Failed updating metadata reservation={ReservationId}", request.ReservationId);
+                result.Status = "StripeError";
+                result.Error = sex.Message;
+                result.Reservation = reservation;
                 return result;
             }
         }
@@ -1048,23 +1258,24 @@ namespace OCPP.Core.Server.Payments
 
             _logger.LogInformation("Stripe/Webhook => Processing eventId={EventId} type={Type}", stripeEvent.Id, stripeEvent.Type);
 
+            Guid? linkedReservationId = null;
             switch (stripeEvent.Type)
             {
                 case EventTypes.CheckoutSessionCompleted:
-                    HandleCheckoutCompleted(dbContext, stripeEvent);
+                    linkedReservationId = HandleCheckoutCompleted(dbContext, stripeEvent);
                     break;
                 case EventTypes.CheckoutSessionExpired:
-                    HandleCheckoutExpired(dbContext, stripeEvent);
+                    linkedReservationId = HandleCheckoutExpired(dbContext, stripeEvent);
                     break;
                 case EventTypes.PaymentIntentPaymentFailed:
-                    HandlePaymentFailed(dbContext, stripeEvent);
+                    linkedReservationId = HandlePaymentFailed(dbContext, stripeEvent);
                     break;
                 default:
                     _logger.LogDebug("Unhandled Stripe event type: {Type}", stripeEvent.Type);
                     break;
             }
 
-            MarkWebhookEventProcessed(dbContext, stripeEvent);
+            MarkWebhookEventProcessed(dbContext, stripeEvent, linkedReservationId);
         }
 
         private static bool IsApiVersionMismatch(StripeException ex) =>
@@ -1098,10 +1309,10 @@ namespace OCPP.Core.Server.Payments
                    message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void HandleCheckoutCompleted(OCPPCoreContext dbContext, Event stripeEvent)
+        private Guid? HandleCheckoutCompleted(OCPPCoreContext dbContext, Event stripeEvent)
         {
             var session = stripeEvent.Data.Object as Session;
-            if (session == null) return;
+            if (session == null) return null;
 
             _logger.LogInformation("Stripe/Webhook => Checkout session completed eventId={EventId} sessionId={SessionId} paymentStatus={PaymentStatus}", stripeEvent.Id, session.Id, session.PaymentStatus);
 
@@ -1111,7 +1322,7 @@ namespace OCPP.Core.Server.Payments
             if (reservation == null)
             {
                 _logger.LogWarning("Stripe/Webhook => Checkout completed but reservation not found sessionId={SessionId}", session.Id);
-                return;
+                return null;
             }
 
             reservation.StripePaymentIntentId = reservation.StripePaymentIntentId ?? session.PaymentIntentId;
@@ -1121,6 +1332,7 @@ namespace OCPP.Core.Server.Payments
                 reservation.Status = PaymentReservationStatus.Authorized;
                 reservation.AuthorizedAtUtc = _utcNow();
                 reservation.StartDeadlineAtUtc = reservation.AuthorizedAtUtc.Value.AddMinutes(Math.Max(1, _flowOptions.StartWindowMinutes));
+                ClearFailureState(reservation);
                 if (string.IsNullOrWhiteSpace(reservation.OcppIdTag))
                 {
                     reservation.OcppIdTag = GenerateOcppIdTag();
@@ -1130,12 +1342,13 @@ namespace OCPP.Core.Server.Payments
 
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
+            return reservation.ReservationId;
         }
 
-        private void HandleCheckoutExpired(OCPPCoreContext dbContext, Event stripeEvent)
+        private Guid? HandleCheckoutExpired(OCPPCoreContext dbContext, Event stripeEvent)
         {
             var session = stripeEvent.Data.Object as Session;
-            if (session == null) return;
+            if (session == null) return null;
 
             _logger.LogInformation("Stripe/Webhook => Checkout session expired eventId={EventId} sessionId={SessionId}", stripeEvent.Id, session.Id);
 
@@ -1145,24 +1358,25 @@ namespace OCPP.Core.Server.Payments
             if (reservation == null)
             {
                 _logger.LogWarning("Stripe/Webhook => Checkout expired but reservation not found sessionId={SessionId}", session.Id);
-                return;
+                return null;
             }
             if (reservation.Status != PaymentReservationStatus.Pending &&
                 reservation.Status != PaymentReservationStatus.Authorized)
             {
-                return;
+                return reservation.ReservationId;
             }
 
             reservation.Status = PaymentReservationStatus.Cancelled;
             reservation.LastError = "Checkout session expired";
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
+            return reservation.ReservationId;
         }
 
-        private void HandlePaymentFailed(OCPPCoreContext dbContext, Event stripeEvent)
+        private Guid? HandlePaymentFailed(OCPPCoreContext dbContext, Event stripeEvent)
         {
             var paymentIntent = stripeEvent.Data.Object as PaymentIntent;
-            if (paymentIntent == null) return;
+            if (paymentIntent == null) return null;
 
             _logger.LogInformation("Stripe/Webhook => Payment failed eventId={EventId} paymentIntent={PaymentIntentId} code={ErrorCode} message={ErrorMessage}",
                 stripeEvent.Id,
@@ -1176,13 +1390,22 @@ namespace OCPP.Core.Server.Payments
             if (reservation == null)
             {
                 _logger.LogWarning("Stripe/Webhook => Payment failed but reservation not found paymentIntent={PaymentIntentId}", paymentIntent.Id);
-                return;
+                return null;
+            }
+
+            if (IsTerminalReservationStatus(reservation.Status))
+            {
+                _logger.LogInformation("Stripe/Webhook => Payment failed ignored for terminal reservation={ReservationId} status={Status}",
+                    reservation.ReservationId,
+                    reservation.Status ?? "(null)");
+                return reservation.ReservationId;
             }
 
             reservation.Status = PaymentReservationStatus.Failed;
             reservation.LastError = paymentIntent.LastPaymentError?.Message ?? "Payment failed.";
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
+            return reservation.ReservationId;
         }
 
         private ChargePaymentReservation FindReservationForTransaction(OCPPCoreContext dbContext, Transaction transaction)
@@ -1220,6 +1443,19 @@ namespace OCPP.Core.Server.Payments
             if (string.IsNullOrWhiteSpace(tag)) return tag;
             int separatorIndex = tag.IndexOf('_');
             return separatorIndex >= 0 ? tag.Substring(0, separatorIndex) : tag;
+        }
+
+        private static bool IsTerminalReservationStatus(string status)
+        {
+            return !PaymentReservationStatus.IsActive(status);
+        }
+
+        private static void ClearFailureState(ChargePaymentReservation reservation)
+        {
+            if (reservation == null) return;
+            reservation.LastError = null;
+            reservation.FailureCode = null;
+            reservation.FailureMessage = null;
         }
 
         private static void EnsureChargeTagExists(OCPPCoreContext dbContext, string tagId)
@@ -1399,11 +1635,13 @@ namespace OCPP.Core.Server.Payments
     {
         Session Create(SessionCreateOptions options, RequestOptions requestOptions = null);
         Session Get(string id);
+        Session Update(string id, SessionUpdateOptions options, RequestOptions requestOptions = null);
     }
 
     internal interface IStripePaymentIntentService
     {
         PaymentIntent Get(string id);
+        PaymentIntent Update(string id, PaymentIntentUpdateOptions options, RequestOptions requestOptions = null);
         PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null);
         void Cancel(string id, RequestOptions requestOptions = null);
     }
@@ -1420,6 +1658,9 @@ namespace OCPP.Core.Server.Payments
         public Session Create(SessionCreateOptions options, RequestOptions requestOptions = null) => _inner.Create(options, requestOptions);
 
         public Session Get(string id) => _inner.Get(id);
+
+        public Session Update(string id, SessionUpdateOptions options, RequestOptions requestOptions = null) =>
+            _inner.Update(id, options, requestOptions);
     }
 
     internal class StripePaymentIntentServiceWrapper : IStripePaymentIntentService
@@ -1427,6 +1668,9 @@ namespace OCPP.Core.Server.Payments
         private readonly PaymentIntentService _inner = new PaymentIntentService();
 
         public PaymentIntent Get(string id) => _inner.Get(id);
+
+        public PaymentIntent Update(string id, PaymentIntentUpdateOptions options, RequestOptions requestOptions = null) =>
+            _inner.Update(id, options, requestOptions);
 
         public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null) => _inner.Capture(id, options, requestOptions);
 

@@ -72,7 +72,7 @@ namespace OCPP.Core.Server
         private bool ReservationProfileEnabled => false;
 
         // Dictionary with status objects for each charge point
-        private static Dictionary<string, ChargePointStatus> _chargePointStatusDict = new Dictionary<string, ChargePointStatus>();
+        private static readonly ConcurrentDictionary<string, ChargePointStatus> _chargePointStatusDict = new ConcurrentDictionary<string, ChargePointStatus>();
 
         // Dictionary for processing asynchronous API calls
         private readonly ConcurrentDictionary<string, OCPPMessage> _requestQueue = new ConcurrentDictionary<string, OCPPMessage>();
@@ -114,6 +114,77 @@ namespace OCPP.Core.Server
         private static bool IsStatus(string value, string expected) =>
             !string.IsNullOrWhiteSpace(value) &&
             string.Equals(value.Trim(), expected, StringComparison.OrdinalIgnoreCase);
+
+        private static string NormalizeOibDigits(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                return null;
+            }
+
+            var digits = new string(input.Where(char.IsDigit).ToArray());
+            return digits.Length == 0 ? null : digits;
+        }
+
+        /// <summary>
+        /// Croatian OIB validation (ISO 7064 MOD 11,10).
+        /// </summary>
+        private static bool IsValidOib(string oibDigits)
+        {
+            if (string.IsNullOrWhiteSpace(oibDigits) ||
+                oibDigits.Length != 11 ||
+                oibDigits.Any(c => c < '0' || c > '9'))
+            {
+                return false;
+            }
+
+            int a = 10;
+            for (int i = 0; i < 10; i++)
+            {
+                a = a + (oibDigits[i] - '0');
+                a = a % 10;
+                if (a == 0) a = 10;
+                a = (a * 2) % 11;
+            }
+
+            int control = 11 - a;
+            if (control == 10) control = 0;
+            return control == (oibDigits[10] - '0');
+        }
+
+        // Removes entry only when key and object instance still match.
+        // This prevents stale receive loops from removing a newer reconnect session.
+        internal static bool TryRemoveStatusIfSameInstance(
+            ConcurrentDictionary<string, ChargePointStatus> statusDict,
+            ChargePointStatus candidateStatus)
+        {
+            if (statusDict == null ||
+                candidateStatus == null ||
+                string.IsNullOrWhiteSpace(candidateStatus.Id))
+            {
+                return false;
+            }
+
+            return ((ICollection<KeyValuePair<string, ChargePointStatus>>)statusDict)
+                .Remove(new KeyValuePair<string, ChargePointStatus>(candidateStatus.Id, candidateStatus));
+        }
+
+        private void RemoveChargePointStatusIfCurrentSession(ChargePointStatus chargePointStatus, string source)
+        {
+            if (chargePointStatus == null)
+            {
+                return;
+            }
+
+            if (TryRemoveStatusIfSameInstance(_chargePointStatusDict, chargePointStatus))
+            {
+                _logger.LogInformation("OCPPMiddleware => Removed status for '{0}' ({1})", chargePointStatus.Id, source);
+            }
+            else
+            {
+                _logger.LogInformation("OCPPMiddleware => Keeping status for '{0}' ({1}, already replaced)", chargePointStatus.Id, source);
+            }
+        }
 
         private bool IsConnectorPreparing(OCPPCoreContext dbContext, ChargePaymentReservation reservation, ChargePointStatus cpStatus)
         {
@@ -390,13 +461,9 @@ namespace OCPP.Core.Server
                             try
                             {
                                 _logger.LogTrace("OCPPMiddleware => Store/Update status object");
-
-                                lock (_chargePointStatusDict)
-                                {
-                                    // Replace any existing status entry to avoid duplicate-key errors on reconnects
-                                    _chargePointStatusDict[chargepointIdentifier] = chargePointStatus;
-                                    statusSuccess = true;
-                                }
+                                // Replace any existing status entry to avoid duplicate-key errors on reconnects
+                                _chargePointStatusDict[chargepointIdentifier] = chargePointStatus;
+                                statusSuccess = true;
                             }
                             catch (Exception exp)
                             {
@@ -456,7 +523,7 @@ namespace OCPP.Core.Server
                                         catch { }
                                     }
                                     // Remove chargepoint status
-                                    _chargePointStatusDict.Remove(chargePointStatus.Id);
+                                    RemoveChargePointStatusIfCurrentSession(chargePointStatus, "accept-loop-catch");
                                 }
                             }
                         }
@@ -1023,6 +1090,10 @@ namespace OCPP.Core.Server
             {
                 await HandlePaymentCancelAsync(context, dbContext);
             }
+            else if (string.Equals(action, "RequestR1", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePaymentRequestR1Async(context, dbContext);
+            }
             else if (string.Equals(action, "Status", StringComparison.OrdinalIgnoreCase))
             {
                 await HandlePaymentStatusAsync(context, dbContext);
@@ -1241,6 +1312,80 @@ namespace OCPP.Core.Server
             {
                 status = updatedReservation?.Status ?? "NotFound",
                 cancellationApplied = string.Equals(updatedReservation?.Status, PaymentReservationStatus.Cancelled, StringComparison.OrdinalIgnoreCase)
+            }));
+        }
+
+        private async Task HandlePaymentRequestR1Async(HttpContext context, OCPPCoreContext dbContext)
+        {
+            if (!HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                return;
+            }
+
+            PaymentR1InvoiceRequest request = null;
+            try
+            {
+                string body = await ReadRequestBodyAsync(context);
+                request = JsonConvert.DeserializeObject<PaymentR1InvoiceRequest>(body);
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(exp, "Payments/RequestR1 => Invalid request payload");
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"Invalid\",\"error\":\"Invalid payload\"}");
+                return;
+            }
+
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"Invalid\",\"error\":\"reservationId required\"}");
+                return;
+            }
+
+            request.BuyerOib = NormalizeOibDigits(request.BuyerOib);
+            request.BuyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(request.BuyerOib) || !IsValidOib(request.BuyerOib))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"InvalidOib\",\"error\":\"Valid OIB (11 digits) is required.\"}");
+                return;
+            }
+
+            _logger.LogInformation(
+                "Payments/RequestR1 => Incoming request reservation={ReservationId} hasCompany={HasCompany} ip={RemoteIp}",
+                request.ReservationId,
+                !string.IsNullOrWhiteSpace(request.BuyerCompanyName),
+                context.Connection.RemoteIpAddress?.ToString() ?? "(unknown)");
+
+            var updateResult = _paymentCoordinator.RequestR1Invoice(dbContext, request);
+            if (!updateResult.Success)
+            {
+                context.Response.StatusCode = string.Equals(updateResult.Status, "NotFound", StringComparison.OrdinalIgnoreCase)
+                    ? (int)HttpStatusCode.NotFound
+                    : (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+                {
+                    status = updateResult.Status ?? "Error",
+                    error = updateResult.Error ?? "Unable to update R1 request."
+                }));
+                return;
+            }
+
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+            {
+                status = updateResult.Status ?? "Updated",
+                reservationId = updateResult.Reservation?.ReservationId ?? request.ReservationId,
+                buyerCompanyName = updateResult.BuyerCompanyName,
+                buyerOib = updateResult.BuyerOib
             }));
         }
 

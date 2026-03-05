@@ -5,7 +5,7 @@ This outlines the public-facing flow that lets a driver scan a QR code, pay with
 
 Overview
 --------
-- Landing page: `OCPP.Core.Management` exposes an anonymous page at `/Public/Start?cp={chargePointId}&conn={connectorId}` (`PublicController`, `Views/Public/Start.cshtml`).
+- Landing page: `OCPP.Core.Management` exposes an anonymous page at `/cp/{chargePointId}/{connectorId}` (preferred) and keeps legacy query links `/Public/Start?cp={chargePointId}&conn={connectorId}` (`PublicController`, `Views/Public/Start.cshtml`).
 - Payment/session orchestration: the management UI calls the server API `/API/Payments/*` endpoints (`OCPPMiddleware`) which delegate to `StripePaymentCoordinator`.
 - Success/cancel: Stripe redirects to `/Payments/Success` or `/Payments/Cancel` in the management UI, which then confirms or cancels the reservation via the server API.
 - Webhooks: Stripe posts to the server endpoint `/API/Payments/Webhook` to update reservation status and capture failures.
@@ -13,7 +13,8 @@ Overview
 QR Code Deep Link
 -----------------
 - Encode the management UI URL for the target connector:
-  - Format: `https://{management-host}/Public/Start?cp={ChargePointId}&conn={ConnectorId}`
+  - Preferred format: `https://{management-host}/cp/{ChargePointId}/{ConnectorId}`
+  - Legacy format (still supported): `https://{management-host}/Public/Start?cp={ChargePointId}&conn={ConnectorId}`
   - `cp`: must match the `ChargePointId` in the database (table `ChargePoints`).
   - `conn`: 1-based connector id; defaults to `1` if omitted.
 - Print the QR with that URL and place it near the connector label. Scanning opens the public start page with pricing and status information for that connector.
@@ -27,10 +28,14 @@ Public Start Page (anonymous)
    - `chargePointId`, `connectorId`, `chargeTagId`
    - `origin = "public"`
    - `returnBaseUrl = {current management base URL}` (used for Stripe return URLs)
+   - optional `requestR1Invoice`, `buyerCompanyName`, `buyerOib`
 5) Server response handling:
    - `status: Redirect` + `checkoutUrl` → browser is redirected to Stripe Checkout.
    - `status: Accepted` → free session or direct start; public result page shows success.
    - `status: ChargerOffline` or other → error message shown.
+6) Optional delayed R1 flow:
+   - Public status page (`/Payments/Status?reservationId=...&origin=public`) can submit R1 details later.
+   - It calls `POST /Payments/RequestR1Invoice` (management), which proxies to `POST /API/Payments/RequestR1`.
 
 Server Payment Endpoints (`OCPP.Core.Server`)
 ---------------------------------------------
@@ -42,6 +47,8 @@ Server Payment Endpoints (`OCPP.Core.Server`)
   - Confirms the Stripe session (`StripePaymentCoordinator.ConfirmReservation`), then triggers remote start against the charge point.
 - `POST /API/Payments/Cancel` (`HandlePaymentCancelAsync`)
   - Cancels a pending reservation and Stripe PaymentIntent.
+- `POST /API/Payments/RequestR1` (`HandlePaymentRequestR1Async`)
+  - Saves/updates R1 metadata (`invoice_type`, `buyer_company`, `buyer_oib`) in Stripe Checkout Session and PaymentIntent for an existing reservation.
 - `POST /API/Payments/Webhook` (`HandlePaymentWebhookAsync`)
   - Validates `Stripe-Signature` using `Stripe:WebhookSecret`.
   - Handles `checkout.session.completed` (marks reservation authorized) and `payment_intent.payment_failed`.
@@ -74,9 +81,10 @@ Stripe Webhook
 
 End-to-End Flow Recap
 ---------------------
-1) Driver scans QR → `/Public/Start?cp=...&conn=...`.
+1) Driver scans QR → `/cp/{cp}/{conn}` (or legacy `/Public/Start?cp=...&conn=...`).
 2) Management UI posts `/API/Payments/Create` to the server.
 3) Server creates Stripe Checkout session (unless free charging) and returns a redirect URL.
 4) Driver pays on Stripe; Stripe redirects to `/Payments/Success` (or `/Payments/Cancel`).
 5) Management UI calls `/API/Payments/Confirm`; server verifies Stripe, then remote-starts the connector.
 6) Server listens for OCPP response; if accepted, reservation moves to `Authorized/Charging`. On completion, server captures the Stripe payment.
+7) Optional: driver submits R1 details later from the status page, and Stripe metadata is updated via `/API/Payments/RequestR1`.
