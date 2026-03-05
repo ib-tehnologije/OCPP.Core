@@ -25,6 +25,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Invoices;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -1232,9 +1233,15 @@ namespace OCPP.Core.Server
             {
                 _logger.LogDebug(ex, "Payments/Cancel => Best-effort CancelReservation failed");
             }
+
+            var updatedReservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
             context.Response.StatusCode = (int)HttpStatusCode.OK;
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync("{\"status\":\"Cancelled\"}");
+            await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+            {
+                status = updatedReservation?.Status ?? "NotFound",
+                cancellationApplied = string.Equals(updatedReservation?.Status, PaymentReservationStatus.Cancelled, StringComparison.OrdinalIgnoreCase)
+            }));
         }
 
         private async Task HandlePaymentStatusAsync(HttpContext context, OCPPCoreContext dbContext)
@@ -1272,6 +1279,12 @@ namespace OCPP.Core.Server
             bool activeReservation = false;
             StartabilityResult startability = null;
             Transaction transaction = null;
+            var latestInvoiceLog = InvoiceSubmissionLogLookup.TryGetLatest(
+                dbContext,
+                reservation.ReservationId,
+                _logger,
+                "Payments/Status");
+            var latestInvoiceUrl = InvoiceSubmissionLogLookup.GetPreferredDocumentUrl(latestInvoiceLog);
 
             _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var cpStatus);
             if (cpStatus?.OnlineConnectors != null &&
@@ -1302,7 +1315,8 @@ namespace OCPP.Core.Server
             activeReservation = dbContext.ChargePaymentReservations.Any(r =>
                 r.ChargePointId == reservation.ChargePointId &&
                 r.ConnectorId == reservation.ConnectorId &&
-                EF.Property<string>(r, "ActiveConnectorKey") == "ACTIVE");
+                r.Status != null &&
+                !PaymentReservationStatus.InactiveStatuses.Contains(r.Status));
 
             startability = GetConnectorStartability(dbContext, reservation.ChargePointId, reservation.ConnectorId, cpStatus, reservation.ReservationId);
 
@@ -1376,7 +1390,26 @@ namespace OCPP.Core.Server
                 startableReasons = startability?.Reasons,
                 startableLiveStatus = startability?.LiveStatus,
                 startablePersistedStatus = startability?.PersistedStatus,
-                startablePersistedAgeMinutes = startability?.PersistedStatusAgeMinutes
+                startablePersistedAgeMinutes = startability?.PersistedStatusAgeMinutes,
+                invoice = latestInvoiceLog == null
+                    ? null
+                    : new
+                    {
+                        provider = latestInvoiceLog.Provider,
+                        mode = latestInvoiceLog.Mode,
+                        status = latestInvoiceLog.Status,
+                        invoiceKind = latestInvoiceLog.InvoiceKind,
+                        providerOperation = latestInvoiceLog.ProviderOperation,
+                        httpStatusCode = latestInvoiceLog.HttpStatusCode,
+                        externalDocumentId = latestInvoiceLog.ExternalDocumentId,
+                        externalInvoiceNumber = latestInvoiceLog.ExternalInvoiceNumber,
+                        externalPublicUrl = latestInvoiceLog.ExternalPublicUrl,
+                        externalPdfUrl = latestInvoiceLog.ExternalPdfUrl,
+                        invoiceUrl = latestInvoiceUrl,
+                        providerResponseStatus = latestInvoiceLog.ProviderResponseStatus,
+                        createdAtUtc = latestInvoiceLog.CreatedAtUtc,
+                        completedAtUtc = latestInvoiceLog.CompletedAtUtc
+                    }
             };
 
             context.Response.StatusCode = (int)HttpStatusCode.OK;
@@ -1432,7 +1465,8 @@ namespace OCPP.Core.Server
                     r.ChargePointId == chargePointId &&
                     r.ConnectorId == connectorId &&
                     (!reservationToIgnore.HasValue || r.ReservationId != reservationToIgnore.Value) &&
-                    EF.Property<string>(r, "ActiveConnectorKey") == "ACTIVE");
+                    r.Status != null &&
+                    !PaymentReservationStatus.InactiveStatuses.Contains(r.Status));
             }
             catch (Exception ex)
             {
@@ -1715,15 +1749,32 @@ namespace OCPP.Core.Server
             string connectorId = reservation.ConnectorId.ToString();
             string apiResult = await ExecuteRemoteStartAsync(status, dbContext, connectorId, idTag);
             string remoteStatus = ExtractStatusFromApiResult(apiResult);
+            DateTime remoteStartResultAtUtc = _utcNow();
 
-            reservation.RemoteStartSentAtUtc = _utcNow();
+            await dbContext.Entry(reservation).ReloadAsync();
+
+            reservation.RemoteStartSentAtUtc = remoteStartResultAtUtc;
             reservation.RemoteStartResult = remoteStatus;
-            reservation.UpdatedAtUtc = reservation.RemoteStartSentAtUtc.Value;
+            reservation.UpdatedAtUtc = remoteStartResultAtUtc;
+
+            if (reservation.TransactionId.HasValue ||
+                !string.Equals(reservation.Status, PaymentReservationStatus.Authorized, StringComparison.OrdinalIgnoreCase))
+            {
+                dbContext.SaveChanges();
+                _logger.LogInformation(
+                    "TryStartCharging => Preserving advanced reservation state after remote start result reservation={ReservationId} caller={Caller} status={Status} tx={TransactionId} remoteStatus={RemoteStatus}",
+                    reservation.ReservationId,
+                    caller,
+                    reservation.Status,
+                    reservation.TransactionId,
+                    remoteStatus ?? "(null)");
+                return (reservation.Status ?? PaymentReservationStatus.Authorized, "AlreadyAdvanced");
+            }
 
             if (string.Equals(remoteStatus, "Accepted", StringComparison.OrdinalIgnoreCase))
             {
                 reservation.Status = PaymentReservationStatus.StartRequested;
-                reservation.RemoteStartAcceptedAtUtc = _utcNow();
+                reservation.RemoteStartAcceptedAtUtc = remoteStartResultAtUtc;
                 dbContext.SaveChanges();
                 _logger.LogInformation("TryStartCharging => Remote start accepted reservation={ReservationId} caller={Caller}", reservation.ReservationId, caller);
                 return ("StartRequested", "Accepted");
@@ -1733,7 +1784,7 @@ namespace OCPP.Core.Server
             {
                 reservation.Status = PaymentReservationStatus.Authorized;
                 reservation.LastError = "Remote start result: Timeout";
-                reservation.UpdatedAtUtc = _utcNow();
+                reservation.UpdatedAtUtc = remoteStartResultAtUtc;
                 dbContext.SaveChanges();
                 _logger.LogWarning("TryStartCharging => Remote start timeout reservation={ReservationId}", reservation.ReservationId);
                 return ("Timeout", "Timeout");

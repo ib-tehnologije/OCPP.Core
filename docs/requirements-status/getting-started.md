@@ -10,5 +10,4 @@ Implemented
 - Optional logging/pricing/Stripe settings exist in server config (`MessageDumpDir`, `DbMessageLog`, `Stripe:*`); see `OCPP.Core.Server/appsettings.json:35-55`.
 
 Notes / gaps
-- Guide suggests running `dotnet` commands; AGENTS instructions say not to run them in this environment (manual step remains for users).
 - No automated validation of config prerequisites (DB reachability, Stripe keys); users must supply values.

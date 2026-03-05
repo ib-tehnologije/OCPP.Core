@@ -27,11 +27,21 @@ namespace OCPP.Core.Server
             int statusReleaseMinutes = configuration.GetValue<int?>("Maintenance:StatusReleaseMinutes") ?? 240;
 
             int cancelledReservations = 0;
+            int repairedActiveKeys = 0;
             int releasedStatuses = 0;
 
             try
             {
-            cancelledReservations = CancelStalePendingReservations(dbContext, now, reservationTimeoutMinutes, logger);
+                repairedActiveKeys = RepairReservationActiveConnectorKeys(dbContext, logger);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "StartupMaintenance => Failed to repair reservation active keys");
+            }
+
+            try
+            {
+                cancelledReservations = CancelStalePendingReservations(dbContext, now, reservationTimeoutMinutes, logger);
             }
             catch (Exception ex)
             {
@@ -47,12 +57,55 @@ namespace OCPP.Core.Server
                 logger?.LogWarning(ex, "StartupMaintenance => Failed to release stale connector statuses");
             }
 
-            if (cancelledReservations > 0 || releasedStatuses > 0)
+            if (repairedActiveKeys > 0 || cancelledReservations > 0 || releasedStatuses > 0)
             {
-                logger?.LogInformation("StartupMaintenance => Cancelled {Cancelled} stale reservations; released {Released} stale connector statuses",
+                logger?.LogInformation("StartupMaintenance => Repaired {Repaired} reservation active keys; cancelled {Cancelled} stale reservations; released {Released} stale connector statuses",
+                    repairedActiveKeys,
                     cancelledReservations,
                     releasedStatuses);
             }
+        }
+
+        private static int RepairReservationActiveConnectorKeys(OCPPCoreContext dbContext, ILogger logger = null)
+        {
+            if (!ChargePaymentReservationActiveKey.RequiresManualSync(dbContext?.Database?.ProviderName))
+            {
+                return 0;
+            }
+
+            var reservations = dbContext.ChargePaymentReservations.ToList();
+            var repaired = 0;
+
+            foreach (var reservation in reservations)
+            {
+                var entry = dbContext.Entry(reservation);
+                var property = entry.Property<string>("ActiveConnectorKey");
+                var expected = ChargePaymentReservationActiveKey.Compute(reservation.ReservationId, reservation.Status);
+
+                if (string.Equals(property.CurrentValue, expected, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                logger?.LogInformation(
+                    "StartupMaintenance => Repairing active connector key reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} status={Status} current={Current} expected={Expected}",
+                    reservation.ReservationId,
+                    reservation.ChargePointId,
+                    reservation.ConnectorId,
+                    reservation.Status,
+                    property.CurrentValue ?? "(null)",
+                    expected);
+
+                property.CurrentValue = expected;
+                repaired++;
+            }
+
+            if (repaired > 0)
+            {
+                dbContext.SaveChanges();
+            }
+
+            return repaired;
         }
 
         private static int CancelStalePendingReservations(OCPPCoreContext dbContext, DateTime now, int timeoutMinutes, ILogger logger = null)
@@ -118,7 +171,8 @@ namespace OCPP.Core.Server
                     hasActiveReservation = dbContext.ChargePaymentReservations.Any(r =>
                         r.ChargePointId == status.ChargePointId &&
                         r.ConnectorId == status.ConnectorId &&
-                        EF.Property<string>(r, "ActiveConnectorKey") == "ACTIVE");
+                        r.Status != null &&
+                        !PaymentReservationStatus.InactiveStatuses.Contains(r.Status));
                 }
                 catch
                 {

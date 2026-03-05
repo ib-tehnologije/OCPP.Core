@@ -206,6 +206,31 @@
                     </div>
                 </div>
 
+                <div class="info-section" id="done-invoice-section" style="display:none;">
+                    <div class="info-section-title">Invoice</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label">Status</div>
+                            <div class="value" id="done-invoice-status">-</div>
+                            <div class="sub" id="done-invoice-provider">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label">Invoice number</div>
+                            <div class="value mono" id="done-invoice-number">-</div>
+                            <div class="sub" id="done-invoice-document">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label">Updated</div>
+                            <div class="value mono" id="done-invoice-updated">-</div>
+                        </div>
+                    </div>
+                    <div class="form-section" style="padding-top: 0; display:none;" id="done-invoice-actions">
+                        <a class="btn-secondary" id="done-invoice-link" href="#" target="_blank" rel="noopener">Open invoice</a>
+                    </div>
+                </div>
+
                 <div class="form-section" style="padding-top: 0;">
                     <a class="btn-primary" href="@mapUrl">
                         <span>Back to map</span>
@@ -319,6 +344,14 @@
         const doneStop = document.getElementById("done-stop");
         const doneRefund = document.getElementById("done-refund");
         const doneRefundCalc = document.getElementById("done-refund-calc");
+        const doneInvoiceSection = document.getElementById("done-invoice-section");
+        const doneInvoiceStatus = document.getElementById("done-invoice-status");
+        const doneInvoiceProvider = document.getElementById("done-invoice-provider");
+        const doneInvoiceNumber = document.getElementById("done-invoice-number");
+        const doneInvoiceDocument = document.getElementById("done-invoice-document");
+        const doneInvoiceUpdated = document.getElementById("done-invoice-updated");
+        const doneInvoiceActions = document.getElementById("done-invoice-actions");
+        const doneInvoiceLink = document.getElementById("done-invoice-link");
 
         const errorTitle = document.getElementById("error-title");
         const errorDesc = document.getElementById("error-desc");
@@ -432,6 +465,30 @@
             }
         };
 
+        const renderInvoice = (invoice) => {
+            if (!invoice) {
+                doneInvoiceSection.style.display = "none";
+                doneInvoiceActions.style.display = "none";
+                doneInvoiceLink.removeAttribute("href");
+                return;
+            }
+
+            doneInvoiceSection.style.display = "";
+            doneInvoiceStatus.textContent = invoice.status || "-";
+            doneInvoiceProvider.textContent = [invoice.provider, invoice.mode].filter(Boolean).join(" · ") || "-";
+            doneInvoiceNumber.textContent = invoice.externalInvoiceNumber || "-";
+            doneInvoiceDocument.textContent = invoice.externalDocumentId || "-";
+            doneInvoiceUpdated.textContent = fmtLocal(parseDate(invoice.completedAtUtc) || parseDate(invoice.createdAtUtc));
+
+            if (invoice.invoiceUrl) {
+                doneInvoiceLink.href = invoice.invoiceUrl;
+                doneInvoiceActions.style.display = "";
+            } else {
+                doneInvoiceLink.removeAttribute("href");
+                doneInvoiceActions.style.display = "none";
+            }
+        };
+
         const render = (state, data) => {
             setActiveTab(state);
             setActiveView(state);
@@ -530,6 +587,8 @@
                 doneRefundCalc.textContent = "-";
             }
 
+            renderInvoice(data?.invoice);
+
             errorPaymentStatus.textContent = data?.status || "-";
             errorLastStatus.textContent = data?.liveStatus || data?.persistedStatus || "-";
             if (hasValue(data?.failureMessage)) {
@@ -563,6 +622,7 @@
                 errorDesc.textContent = "Please check your connection and try again.";
                 errorPaymentStatus.textContent = "-";
                 errorLastStatus.textContent = "-";
+                renderInvoice(null);
             }
         }
 

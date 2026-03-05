@@ -18,7 +18,11 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Configuration;
@@ -29,6 +33,8 @@ namespace OCPP.Core.Database
 {
     public partial class OCPPCoreContext : DbContext
     {
+        private static readonly EntityState[] ReservationSyncStates = new[] { EntityState.Added, EntityState.Modified };
+
         public OCPPCoreContext(DbContextOptions<OCPPCoreContext> options)
             : base(options)
         {
@@ -39,6 +45,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<ChargeTag> ChargeTags { get; set; }
         public virtual DbSet<ChargeTagPrivilege> ChargeTagPrivileges { get; set; }
         public virtual DbSet<ConnectorStatus> ConnectorStatuses { get; set; }
+        public virtual DbSet<InvoiceSubmissionLog> InvoiceSubmissionLogs { get; set; }
         public virtual DbSet<MessageLog> MessageLogs { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
         public virtual DbSet<ChargePaymentReservation> ChargePaymentReservations { get; set; }
@@ -180,6 +187,66 @@ namespace OCPP.Core.Database
                 entity.HasIndex(e => e.ProcessedAtUtc);
             });
 
+            modelBuilder.Entity<InvoiceSubmissionLog>(entity =>
+            {
+                entity.HasKey(e => e.InvoiceSubmissionLogId);
+
+                entity.ToTable("InvoiceSubmissionLog");
+
+                entity.Property(e => e.Provider)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Mode)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Status)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.InvoiceKind)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.ProviderOperation)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.ApiTransactionId)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.StripeCheckoutSessionId)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.StripePaymentIntentId)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.ExternalDocumentId)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.ExternalInvoiceNumber)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.ExternalPublicUrl)
+                    .HasMaxLength(1000);
+
+                entity.Property(e => e.ExternalPdfUrl)
+                    .HasMaxLength(1000);
+
+                entity.Property(e => e.ProviderResponseStatus)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.Error)
+                    .HasMaxLength(4000);
+
+                entity.HasIndex(e => new { e.ReservationId, e.CreatedAtUtc })
+                    .HasDatabaseName("IX_InvoiceSubmissionLog_Reservation_Created");
+
+                entity.HasIndex(e => e.TransactionId)
+                    .HasDatabaseName("IX_InvoiceSubmissionLog_Transaction");
+
+                entity.HasIndex(e => e.CreatedAtUtc)
+                    .HasDatabaseName("IX_InvoiceSubmissionLog_Created");
+            });
+
             modelBuilder.Entity<MessageLog>(entity =>
             {
                 entity.HasKey(e => e.LogId);
@@ -318,13 +385,10 @@ namespace OCPP.Core.Database
                     .HasMaxLength(64)
                     .HasColumnType("nvarchar(64)");
 
-                var providerName = Database.ProviderName ?? string.Empty;
-                var isInMemory = string.Equals(providerName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.OrdinalIgnoreCase);
-                var isSqlite = string.Equals(providerName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.OrdinalIgnoreCase);
-                if (isInMemory || isSqlite)
+                if (ChargePaymentReservationActiveKey.RequiresManualSync(Database.ProviderName))
                 {
-                    // InMemory/SQLite: avoid SQL Server computed expression and provide a simple default.
-                    activeKey.HasDefaultValue("ACTIVE");
+                    // InMemory/SQLite: keep the column writable and synchronize it in SaveChanges.
+                    activeKey.HasDefaultValue(ChargePaymentReservationActiveKey.ActiveValue);
                 }
                 else
                 {
@@ -339,6 +403,51 @@ namespace OCPP.Core.Database
             });
 
             OnModelCreatingPartial(modelBuilder);
+        }
+
+        public override int SaveChanges()
+        {
+            SynchronizeReservationActiveConnectorKeys();
+            return base.SaveChanges();
+        }
+
+        public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        {
+            SynchronizeReservationActiveConnectorKeys();
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            SynchronizeReservationActiveConnectorKeys();
+            return base.SaveChangesAsync(cancellationToken);
+        }
+
+        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        {
+            SynchronizeReservationActiveConnectorKeys();
+            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+
+        private void SynchronizeReservationActiveConnectorKeys()
+        {
+            if (!ChargePaymentReservationActiveKey.RequiresManualSync(Database.ProviderName))
+            {
+                return;
+            }
+
+            ChangeTracker.DetectChanges();
+
+            foreach (var entry in ChangeTracker.Entries<ChargePaymentReservation>().Where(e => ReservationSyncStates.Contains(e.State)))
+            {
+                var activeKey = entry.Property<string>("ActiveConnectorKey");
+                var expected = ChargePaymentReservationActiveKey.Compute(entry.Entity.ReservationId, entry.Entity.Status);
+
+                if (!string.Equals(activeKey.CurrentValue, expected, StringComparison.Ordinal))
+                {
+                    activeKey.CurrentValue = expected;
+                }
+            }
         }
 
         partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

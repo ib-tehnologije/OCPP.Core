@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments.Invoices;
 using Stripe;
 using Stripe.Checkout;
 using System.Threading.Tasks;
@@ -30,6 +31,7 @@ namespace OCPP.Core.Server.Payments
         private readonly IEmailNotificationService _emailNotificationService;
         private readonly StartChargingMediator _startMediator;
         private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly IInvoiceIntegrationService _invoiceIntegrationService;
         private const string IdempotencyCheckoutCreate = "checkout_create";
         private const string IdempotencyCapture = "capture";
         private const string IdempotencyCancel = "cancel";
@@ -43,7 +45,7 @@ namespace OCPP.Core.Server.Payments
             IOptions<StripeOptions> options,
             IOptions<PaymentFlowOptions> flowOptions,
             ILogger<StripePaymentCoordinator> logger)
-            : this(options, flowOptions, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow, null, null, null)
+            : this(options, flowOptions, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow, null, null, null, null)
         {
         }
 
@@ -57,7 +59,8 @@ namespace OCPP.Core.Server.Payments
             Func<DateTime> utcNow,
             IEmailNotificationService emailNotificationService = null,
             StartChargingMediator startMediator = null,
-            IBackgroundJobClient backgroundJobClient = null)
+            IBackgroundJobClient backgroundJobClient = null,
+            IInvoiceIntegrationService invoiceIntegrationService = null)
         {
             _options = options?.Value ?? new StripeOptions();
             _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
@@ -69,6 +72,7 @@ namespace OCPP.Core.Server.Payments
             _emailNotificationService = emailNotificationService;
             _startMediator = startMediator;
             _backgroundJobClient = backgroundJobClient;
+            _invoiceIntegrationService = invoiceIntegrationService;
 
             if (!string.IsNullOrWhiteSpace(_options.ApiKey))
             {
@@ -440,6 +444,15 @@ namespace OCPP.Core.Server.Payments
             var reservation = dbContext.ChargePaymentReservations.Find(reservationId);
             if (reservation == null) return;
 
+            if (!PaymentReservationStatus.IsCancelable(reservation.Status))
+            {
+                _logger.LogInformation(
+                    "Stripe/Cancel => Ignoring cancel for reservation={ReservationId} status={Status}",
+                    reservationId,
+                    reservation.Status ?? "(none)");
+                return;
+            }
+
             CancelPaymentIntentIfCancelable(dbContext, reservation, reason);
 
             reservation.Status = PaymentReservationStatus.Cancelled;
@@ -653,6 +666,7 @@ namespace OCPP.Core.Server.Payments
                 dbContext.SaveChanges();
 
                 PersistTransactionBreakdown(dbContext, transaction, reservation, actualEnergy, energyCostCents, usageFeeMinutes, usageFeeCents, sessionFeeCents, amountToCapture);
+                TryHandleInvoiceIntegration(dbContext, reservation, transaction);
                 TrySendCompletionNotifications(dbContext, reservation, transaction);
             }
             catch (StripeException sex)
@@ -726,20 +740,59 @@ namespace OCPP.Core.Server.Payments
 
             var chargePoint = dbContext.ChargePoints.Find(reservation.ChargePointId);
             var statusUrl = BuildStatusUrl(reservation.ReservationId);
+            var invoiceLog = InvoiceSubmissionLogLookup.TryGetLatestDeliverable(
+                dbContext,
+                reservation.ReservationId,
+                _logger,
+                "CompletionNotifications");
+            var invoiceNumber = invoiceLog?.ExternalInvoiceNumber;
+            var invoiceUrl = InvoiceSubmissionLogLookup.GetPreferredDocumentUrl(invoiceLog);
 
             try
             {
                 _emailNotificationService.SendChargingCompleted(recipientEmail, reservation, transaction, chargePoint, statusUrl);
-                _emailNotificationService.SendSessionReceipt(recipientEmail, reservation, transaction, chargePoint, statusUrl, null, null);
+                _emailNotificationService.SendSessionReceipt(
+                    recipientEmail,
+                    reservation,
+                    transaction,
+                    chargePoint,
+                    statusUrl,
+                    invoiceNumber,
+                    invoiceUrl);
 
                 if (IsR1InvoiceRequested(session))
                 {
-                    _emailNotificationService.SendR1InvoiceReady(recipientEmail, reservation, transaction, chargePoint, statusUrl, null);
+                    _emailNotificationService.SendR1InvoiceReady(
+                        recipientEmail,
+                        reservation,
+                        transaction,
+                        chargePoint,
+                        statusUrl,
+                        invoiceNumber,
+                        invoiceUrl);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Stripe/Notify => Failed sending completion emails reservation={ReservationId}", reservation.ReservationId);
+            }
+        }
+
+        private void TryHandleInvoiceIntegration(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction)
+        {
+            if (_invoiceIntegrationService == null || reservation == null || transaction == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var session = TryGetCheckoutSession(reservation.StripeCheckoutSessionId, reservation.ReservationId, "InvoiceIntegration");
+                _invoiceIntegrationService.HandleCompletedReservation(dbContext, reservation, transaction, session);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Invoice/Integration => Failed to prepare invoice draft reservation={ReservationId}", reservation.ReservationId);
             }
         }
 

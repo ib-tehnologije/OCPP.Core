@@ -324,6 +324,56 @@ async function testPaymentsCreateCancel({ chargePointId, connectorId, chargeTagI
     results.status_http_status_after_cancel = statusAfter.status;
     results.status_payload_after_cancel = statusAfter.json ?? null;
     assert(statusAfter.ok, `Payments/Status(after cancel) failed: ${statusAfter.status}`);
+
+    const recreateRes = await httpJson(`${SERVER_API_BASE}/Payments/Create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": SERVER_API_KEY,
+      },
+      body: JSON.stringify({
+        chargePointId,
+        connectorId,
+        chargeTagId,
+        origin: "public",
+        returnBaseUrl: MGMT_HTTP_BASE,
+      }),
+    });
+
+    results.recreate_http_status = recreateRes.status;
+    if (recreateRes.json && typeof recreateRes.json === "object") {
+      const recreateClone = { ...recreateRes.json };
+      if (typeof recreateClone.checkoutUrl === "string") {
+        recreateClone.checkoutUrl = "<redacted>";
+      }
+      results.recreate_payload = recreateClone;
+    } else {
+      results.recreate_payload = recreateRes.json ?? null;
+    }
+
+    assert(recreateRes.ok, `Payments/Create(after cancel) failed: ${recreateRes.status} ${recreateRes.text.slice(0, 200)}`);
+    assert(recreateRes.json?.status === "Redirect", `Payments/Create(after cancel) expected Redirect, got ${recreateRes.json?.status ?? "null"}`);
+
+    const recreateReservationId = recreateRes.json?.reservationId;
+    if (typeof recreateReservationId === "string" && recreateReservationId.length > 20) {
+      results.recreate_reservationId = recreateReservationId;
+
+      const cancelRecreateRes = await httpJson(`${SERVER_API_BASE}/Payments/Cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": SERVER_API_KEY,
+        },
+        body: JSON.stringify({
+          reservationId: recreateReservationId,
+          reason: "e2e_smoke_test_recreate",
+        }),
+      });
+
+      results.recreate_cancel_http_status = cancelRecreateRes.status;
+      results.recreate_cancel_payload = cancelRecreateRes.json ?? null;
+      assert(cancelRecreateRes.ok, `Payments/Cancel(recreated) failed: ${cancelRecreateRes.status} ${cancelRecreateRes.text.slice(0, 200)}`);
+    }
   }
 
   return results;

@@ -39,6 +39,8 @@ using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Invoices;
+using OCPP.Core.Server.Payments.Invoices.ERacuni;
 
 namespace OCPP.Core.Server
 {
@@ -71,9 +73,11 @@ namespace OCPP.Core.Server
         {
             services.AddOCPPDbContext(Configuration);
             services.AddControllers();
+            services.AddHttpClient();
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             services.Configure<Payments.PaymentFlowOptions>(Configuration.GetSection("Payments"));
             services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
+            services.Configure<InvoiceIntegrationOptions>(Configuration.GetSection("Invoices"));
             if (HasSqlServerHangfireStorage)
             {
                 services.AddHangfire((serviceProvider, config) =>
@@ -92,6 +96,10 @@ namespace OCPP.Core.Server
             services.AddSingleton<Payments.StartChargingMediator>();
             services.AddSingleton<Payments.ReservationLinkService>();
             services.AddSingleton<Payments.IEmailNotificationService, Payments.EmailNotificationService>();
+            services.AddSingleton<IInvoiceDraftBuilder, InvoiceDraftBuilder>();
+            services.AddSingleton<IERacuniInvoiceRequestFactory, ERacuniInvoiceRequestFactory>();
+            services.AddSingleton<IERacuniApiClient, ERacuniApiClient>();
+            services.AddSingleton<Payments.Invoices.IInvoiceIntegrationService, Payments.Invoices.InvoiceIntegrationService>();
             services.AddTransient<Payments.PaymentAuthorizationEmailJob>();
             services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
                 sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
@@ -103,7 +111,8 @@ namespace OCPP.Core.Server
                 () => DateTime.UtcNow,
                 sp.GetService<Payments.IEmailNotificationService>(),
                 sp.GetRequiredService<Payments.StartChargingMediator>(),
-                sp.GetService<IBackgroundJobClient>()));
+                sp.GetService<IBackgroundJobClient>(),
+                sp.GetService<Payments.Invoices.IInvoiceIntegrationService>()));
             services.AddHostedService<Payments.PaymentReservationCleanupService>();
             services.AddHostedService<Payments.IdleFeeWarningEmailService>();
         }

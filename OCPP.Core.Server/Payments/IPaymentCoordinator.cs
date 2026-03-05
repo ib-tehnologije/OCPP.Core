@@ -74,9 +74,7 @@ namespace OCPP.Core.Server.Payments
         public const string Cancelled = "Cancelled";
         public const string Failed = "Failed";
 
-        // Keep this aligned with the database computed column for ActiveConnectorKey
-        // (Status NOT IN Completed/Cancelled/Failed/StartRejected/StartTimeout/Abandoned => active).
-        private static readonly HashSet<string> InactiveStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        public static readonly string[] InactiveStatuses =
         {
             Completed,
             Cancelled,
@@ -86,9 +84,24 @@ namespace OCPP.Core.Server.Payments
             Abandoned
         };
 
+        // Keep this aligned with the database computed column for ActiveConnectorKey
+        // (Status NOT IN Completed/Cancelled/Failed/StartRejected/StartTimeout/Abandoned => active).
+        private static readonly HashSet<string> InactiveStatusSet = new HashSet<string>(InactiveStatuses, StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> CancelableStatusSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Pending,
+            Authorized,
+            StartRequested
+        };
+
         public static bool IsActive(string status)
         {
-            return !string.IsNullOrWhiteSpace(status) && !InactiveStatuses.Contains(status);
+            return !string.IsNullOrWhiteSpace(status) && !InactiveStatusSet.Contains(status);
+        }
+
+        public static bool IsCancelable(string status)
+        {
+            return !string.IsNullOrWhiteSpace(status) && CancelableStatusSet.Contains(status);
         }
     }
 }

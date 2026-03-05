@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Invoices;
 using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
@@ -34,7 +35,8 @@ namespace OCPP.Core.Server.Tests
             StripeOptions? stripeOptions = null,
             Func<DateTime>? now = null,
             FakeEventFactory? eventFactory = null,
-            IEmailNotificationService? emailService = null)
+            IEmailNotificationService? emailService = null,
+            IInvoiceIntegrationService? invoiceIntegrationService = null)
         {
             var options = Options.Create(stripeOptions ?? new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" });
             var flowOptions = Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 });
@@ -46,7 +48,8 @@ namespace OCPP.Core.Server.Tests
                 intentService,
                 eventFactory ?? new FakeEventFactory(),
                 now ?? (() => DateTime.UtcNow),
-                emailService);
+                emailService,
+                invoiceIntegrationService: invoiceIntegrationService);
         }
 
         [Theory]
@@ -412,6 +415,83 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CancelReservation_CancelsAuthorizedReservation()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-CANCEL",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-CANCEL",
+                StripePaymentIntentId = "pi_cancel_me",
+                Status = PaymentReservationStatus.Authorized,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_cancel_me",
+                    Status = "requires_capture",
+                    Amount = 1000
+                }
+            };
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), intentService);
+
+            coordinator.CancelReservation(context, reservationId, "user_cancelled");
+
+            var reservation = context.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
+            Assert.Equal("user_cancelled", reservation.LastError);
+            Assert.True(intentService.CancelCalled);
+        }
+
+        [Fact]
+        public void CancelReservation_IgnoresCompletedReservation()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-COMPLETE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-COMPLETE",
+                StripePaymentIntentId = "pi_complete",
+                Status = PaymentReservationStatus.Completed,
+                CapturedAmountCents = 50,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_complete",
+                    Status = "succeeded",
+                    AmountReceived = 50
+                }
+            };
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), intentService);
+
+            coordinator.CancelReservation(context, reservationId, "late_cancel");
+
+            var reservation = context.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(50, reservation.CapturedAmountCents);
+            Assert.False(intentService.CancelCalled);
+        }
+
+        [Fact]
         public void ConfirmReservation_GeneratesOcppTag_AndCreatesChargeTag()
         {
             using var context = CreateContext();
@@ -703,6 +783,218 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(1, emailService.ChargingCompletedCount);
             Assert.Equal(1, emailService.SessionReceiptCount);
             Assert.Equal(0, emailService.R1InvoiceReadyCount);
+        }
+
+        [Fact]
+        public void CompleteReservation_CallsInvoiceIntegration_AfterBreakdownIsPersisted()
+        {
+            using var context = CreateContext();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-INV",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-INV",
+                TransactionId = 200,
+                StripeCheckoutSessionId = "sess_invoice",
+                StripePaymentIntentId = "pi_invoice",
+                PricePerKwh = 0.30m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                Status = PaymentReservationStatus.Charging,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.Transactions.Add(new Transaction
+            {
+                TransactionId = 200,
+                ChargePointId = "CP-INV",
+                ConnectorId = 1,
+                StartTagId = "TAG-INV",
+                StartTime = new DateTime(2026, 3, 5, 10, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 3, 5, 10, 30, 0, DateTimeKind.Utc),
+                MeterStart = 100,
+                MeterStop = 108
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_invoice",
+                    CustomerDetails = new SessionCustomerDetails { Email = "billing@example.com" }
+                }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_invoice", Status = "requires_capture", Amount = 10_000 }
+            };
+            var invoiceIntegration = new FakeInvoiceIntegrationService();
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                invoiceIntegrationService: invoiceIntegration);
+
+            var transaction = context.Transactions.Single(t => t.TransactionId == 200);
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(1, invoiceIntegration.HandleCompletedReservationCount);
+            Assert.NotNull(invoiceIntegration.LastReservation);
+            Assert.NotNull(invoiceIntegration.LastTransaction);
+            Assert.Equal(8d, invoiceIntegration.LastTransaction!.EnergyKwh);
+            Assert.Equal(2.40m, invoiceIntegration.LastTransaction.EnergyCost);
+            Assert.Equal(PaymentReservationStatus.Completed, invoiceIntegration.LastReservation!.Status);
+        }
+
+        [Fact]
+        public void CompleteReservation_KeepsPaymentCompleted_WhenInvoiceIntegrationThrows()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-INV-ERR",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-INV-ERR",
+                TransactionId = 201,
+                StripeCheckoutSessionId = "sess_invoice_err",
+                StripePaymentIntentId = "pi_invoice_err",
+                PricePerKwh = 0.25m,
+                Status = PaymentReservationStatus.Charging,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.Transactions.Add(new Transaction
+            {
+                TransactionId = 201,
+                ChargePointId = "CP-INV-ERR",
+                ConnectorId = 1,
+                StartTagId = "TAG-INV-ERR",
+                StartTime = new DateTime(2026, 3, 5, 11, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 3, 5, 11, 20, 0, DateTimeKind.Utc),
+                MeterStart = 50,
+                MeterStop = 54
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session { Id = "sess_invoice_err" }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_invoice_err", Status = "requires_capture", Amount = 5_000 }
+            };
+            var invoiceIntegration = new FakeInvoiceIntegrationService { ThrowOnHandle = true };
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                invoiceIntegrationService: invoiceIntegration);
+
+            var transaction = context.Transactions.Single(t => t.TransactionId == 201);
+            coordinator.CompleteReservation(context, transaction);
+
+            var reservation = context.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.True(intentService.CaptureCalled);
+            Assert.Equal(1, invoiceIntegration.HandleCompletedReservationCount);
+        }
+
+        [Fact]
+        public void CompleteReservation_PassesPersistedInvoiceMetadata_ToCompletionEmails()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-INV-MAIL",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-INV-MAIL",
+                TransactionId = 202,
+                StripeCheckoutSessionId = "sess_invoice_mail",
+                StripePaymentIntentId = "pi_invoice_mail",
+                PricePerKwh = 0.40m,
+                UserSessionFee = 0.50m,
+                Status = PaymentReservationStatus.Charging,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.Transactions.Add(new Transaction
+            {
+                TransactionId = 202,
+                ChargePointId = "CP-INV-MAIL",
+                ConnectorId = 1,
+                StartTagId = "TAG-INV-MAIL",
+                StartTime = new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 3, 5, 12, 10, 0, DateTimeKind.Utc),
+                MeterStart = 10,
+                MeterStop = 12
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_invoice_mail",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "invoice-mail@example.com"
+                    },
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["invoice_type"] = "R1"
+                    }
+                }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_invoice_mail", Status = "requires_capture", Amount = 5_000 }
+            };
+            var emailService = new FakeEmailNotificationService();
+            var invoiceIntegration = new FakeInvoiceIntegrationService
+            {
+                OnHandle = (dbContext, reservation, transaction, session) =>
+                {
+                    dbContext.InvoiceSubmissionLogs.Add(new InvoiceSubmissionLog
+                    {
+                        ReservationId = reservation.ReservationId,
+                        TransactionId = transaction.TransactionId,
+                        Provider = "ERacuni",
+                        Mode = "Submit",
+                        Status = "Submitted",
+                        ExternalInvoiceNumber = "R1-2026-0007",
+                        ExternalPdfUrl = "https://example.test/invoices/r1-2026-0007.pdf",
+                        CreatedAtUtc = DateTime.UtcNow,
+                        CompletedAtUtc = DateTime.UtcNow
+                    });
+                    dbContext.SaveChanges();
+                }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                emailService: emailService,
+                invoiceIntegrationService: invoiceIntegration);
+
+            var transaction = context.Transactions.Single(t => t.TransactionId == 202);
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(1, emailService.SessionReceiptCount);
+            Assert.Equal("R1-2026-0007", emailService.LastSessionReceiptInvoiceNumber);
+            Assert.Equal("https://example.test/invoices/r1-2026-0007.pdf", emailService.LastSessionReceiptInvoiceUrl);
+            Assert.Equal(1, emailService.R1InvoiceReadyCount);
+            Assert.Equal("R1-2026-0007", emailService.LastR1InvoiceNumber);
+            Assert.Equal("https://example.test/invoices/r1-2026-0007.pdf", emailService.LastR1InvoiceUrl);
         }
 
         [Fact]
@@ -1341,6 +1633,10 @@ namespace OCPP.Core.Server.Tests
         public string? LastToEmail { get; private set; }
         public string? LastBuyerCompanyName { get; private set; }
         public string? LastBuyerOib { get; private set; }
+        public string? LastSessionReceiptInvoiceNumber { get; private set; }
+        public string? LastSessionReceiptInvoiceUrl { get; private set; }
+        public string? LastR1InvoiceNumber { get; private set; }
+        public string? LastR1InvoiceUrl { get; private set; }
 
         public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session)
         {
@@ -1360,10 +1656,12 @@ namespace OCPP.Core.Server.Tests
             LastToEmail = toEmail;
         }
 
-        public void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoicePdfUrl)
+        public void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl)
         {
             SessionReceiptCount++;
             LastToEmail = toEmail;
+            LastSessionReceiptInvoiceNumber = invoiceNumber;
+            LastSessionReceiptInvoiceUrl = invoiceUrl;
         }
 
         public void SendR1InvoiceRequested(string toEmail, ChargePaymentReservation reservation, ChargePoint chargePoint, string statusUrl, string buyerCompanyName, string buyerOib)
@@ -1374,10 +1672,12 @@ namespace OCPP.Core.Server.Tests
             LastBuyerOib = buyerOib;
         }
 
-        public void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoicePdfUrl)
+        public void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl)
         {
             R1InvoiceReadyCount++;
             LastToEmail = toEmail;
+            LastR1InvoiceNumber = invoiceNumber;
+            LastR1InvoiceUrl = invoiceUrl;
         }
     }
 
@@ -1430,6 +1730,30 @@ namespace OCPP.Core.Server.Tests
         public Event EventToReturn { get; set; } = new Event();
 
         public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret, bool throwOnApiVersionMismatch = true) => EventToReturn;
+    }
+
+    internal class FakeInvoiceIntegrationService : IInvoiceIntegrationService
+    {
+        public int HandleCompletedReservationCount { get; private set; }
+        public bool ThrowOnHandle { get; set; }
+        public ChargePaymentReservation? LastReservation { get; private set; }
+        public Transaction? LastTransaction { get; private set; }
+        public Session? LastCheckoutSession { get; private set; }
+        public Action<OCPPCoreContext, ChargePaymentReservation, Transaction, Session>? OnHandle { get; set; }
+
+        public void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
+        {
+            HandleCompletedReservationCount++;
+            LastReservation = reservation;
+            LastTransaction = transaction;
+            LastCheckoutSession = checkoutSession;
+            OnHandle?.Invoke(dbContext, reservation, transaction, checkoutSession);
+
+            if (ThrowOnHandle)
+            {
+                throw new InvalidOperationException("Invoice integration failure");
+            }
+        }
     }
 
     internal class TestCleanupService : PaymentReservationCleanupService

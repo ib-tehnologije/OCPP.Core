@@ -17,9 +17,9 @@ namespace OCPP.Core.Server.Payments
         void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session);
         void SendChargingCompleted(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl);
         void SendIdleFeeWarning(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, DateTime idleFeeStartsAtUtc, TimeSpan remainingUntilIdleFee, string statusUrl);
-        void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoicePdfUrl);
+        void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl);
         void SendR1InvoiceRequested(string toEmail, ChargePaymentReservation reservation, ChargePoint chargePoint, string statusUrl, string buyerCompanyName, string buyerOib);
-        void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoicePdfUrl);
+        void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl);
     }
 
     public class EmailNotificationService : IEmailNotificationService
@@ -104,7 +104,7 @@ namespace OCPP.Core.Server.Payments
                 "IdleFeeWarning");
         }
 
-        public void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoicePdfUrl)
+        public void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl)
         {
             decimal authorizedHold = ConvertToAmount(reservation?.MaxAmountCents ?? 0);
             decimal totalCharged = ResolveTotalCharged(reservation, transaction);
@@ -126,10 +126,10 @@ namespace OCPP.Core.Server.Payments
 
             string callToActionText = "Open session";
             string callToActionUrl = statusUrl;
-            if (!string.IsNullOrWhiteSpace(invoicePdfUrl))
+            if (!string.IsNullOrWhiteSpace(invoiceUrl))
             {
-                callToActionText = "Download invoice PDF";
-                callToActionUrl = invoicePdfUrl;
+                callToActionText = "Open invoice";
+                callToActionUrl = invoiceUrl;
             }
 
             SendTemplatedEmail(
@@ -168,22 +168,23 @@ namespace OCPP.Core.Server.Payments
                 "R1InvoiceRequested");
         }
 
-        public void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoicePdfUrl)
+        public void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl)
         {
             decimal totalCharged = ResolveTotalCharged(reservation, transaction);
             var details = new List<(string Label, string Value)>
             {
                 ("Charge point", BuildChargePointLabel(reservation, chargePoint)),
                 ("Transaction", transaction?.TransactionId.ToString(CultureInfo.InvariantCulture)),
-                ("Total charged", FormatMoney(totalCharged, reservation?.Currency))
+                ("Total charged", FormatMoney(totalCharged, reservation?.Currency)),
+                ("Invoice", invoiceNumber)
             };
 
             string callToActionText = "Open session";
             string callToActionUrl = statusUrl;
-            if (!string.IsNullOrWhiteSpace(invoicePdfUrl))
+            if (!string.IsNullOrWhiteSpace(invoiceUrl))
             {
-                callToActionText = "Download R1 invoice";
-                callToActionUrl = invoicePdfUrl;
+                callToActionText = "Open R1 invoice";
+                callToActionUrl = invoiceUrl;
             }
 
             SendTemplatedEmail(
