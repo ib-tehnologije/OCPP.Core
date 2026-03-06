@@ -18,6 +18,28 @@
     if (string.Equals(Model.LastStatus, "Faulted", StringComparison.OrdinalIgnoreCase)) badgeClass = "error";
     var isFree = Model.FreeChargingEnabled || (Model.PricePerKwh <= 0 && Model.ConnectorUsageFeePerMinute <= 0 && Model.UserSessionFee <= 0);
     var mapUrl = Url.Action("Index", "Public");
+
+    string ConnectorBadgeClass(string status)
+    {
+        if (string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase))
+        {
+            return "available";
+        }
+
+        if (string.Equals(status, "Faulted", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "error";
+        }
+
+        if (string.Equals(status, "Occupied", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Charging", StringComparison.OrdinalIgnoreCase))
+        {
+            return "charging";
+        }
+
+        return "waiting";
+    }
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -58,6 +80,36 @@
                 <h1 class="charger-title">@chargePointLabel</h1>
                 <p class="charger-sub">@connectorLabel</p>
             </div>
+
+            @if (Model.ShowConnectorSelector)
+            {
+                <div class="divider"></div>
+                <div class="info-section connector-selector-section">
+                    <div class="info-section-title">Choose connector</div>
+                    <div class="connector-selector">
+                        @foreach (var connector in Model.Connectors)
+                        {
+                            var connectorUrl = Url.RouteUrl("public-start-path", new { cp = Model.ChargePointId, conn = connector.ConnectorId })
+                                ?? Url.Action("Start", "Public", new { cp = Model.ChargePointId, conn = connector.ConnectorId });
+                            var connectorBadgeClass = ConnectorBadgeClass(connector.LastStatus);
+                            <a class="connector-option @(connector.IsSelected ? "selected" : "")"
+                               href="@connectorUrl"
+                               aria-current="@(connector.IsSelected ? "page" : null)">
+                                <div class="connector-option-top">
+                                    <div class="connector-option-label">@connector.Label</div>
+                                    <div class="status-badge @connectorBadgeClass">
+                                        <span class="dot"></span>
+                                        <span>@(string.IsNullOrWhiteSpace(connector.LastStatus) ? "Unknown" : connector.LastStatus)</span>
+                                    </div>
+                                </div>
+                                <div class="connector-option-meta">
+                                    @(connector.IsSelected ? "Selected connector" : "Tap to switch")
+                                </div>
+                            </a>
+                        }
+                    </div>
+                </div>
+            }
 
             <div class="divider"></div>
 

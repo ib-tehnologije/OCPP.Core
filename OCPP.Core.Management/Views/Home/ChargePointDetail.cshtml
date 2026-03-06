@@ -26,12 +26,12 @@
         <div asp-validation-summary="All" class="alert alert-danger" role="alert"></div>
         @if (!string.IsNullOrWhiteSpace(Model.ChargePointId))
         {
-            var publicUrl = Url.RouteUrl("public-start-path", new { cp = Model.ChargePointId, conn = 1 })
-                ?? Url.Action("Start", "Public", new { cp = Model.ChargePointId, conn = 1 });
+            var publicUrl = Url.RouteUrl("public-start-charge-point", new { cp = Model.ChargePointId })
+                ?? Url.Action("Start", "Public", new { cp = Model.ChargePointId });
             <div class="alert alert-info" role="alert">
                 <strong>Public start link:</strong>
                 <a href="@publicUrl" target="_blank" rel="noopener">@publicUrl</a>
-                <div class="small text-muted">Share this for QR codes. Path format is <code>/cp/{ChargePointId}/{conn}</code> and legacy query links remain supported.</div>
+                <div class="small text-muted">Share this for QR codes. Generic links use <code>/cp/{ChargePointId}</code>; connector-specific links can still use <code>/cp/{ChargePointId}/{conn}</code>.</div>
             </div>
         }
         <br />

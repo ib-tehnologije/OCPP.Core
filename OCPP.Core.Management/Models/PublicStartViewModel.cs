@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace OCPP.Core.Management.Models
 {
@@ -25,8 +26,19 @@ namespace OCPP.Core.Management.Models
         public decimal EstimatedMaxHold { get; set; }
         public int MaxUsageFeeBillableMinutes { get; set; }
         public string CurrencySymbol { get; set; } = "€";
+        public List<PublicStartConnectorOption> Connectors { get; set; } = new List<PublicStartConnectorOption>();
+        public bool ShowConnectorSelector => Connectors.Count > 1;
         public bool HasIdleFee => ConnectorUsageFeePerMinute > 0;
         public string ErrorMessage { get; set; }
         public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
+    }
+
+    public class PublicStartConnectorOption
+    {
+        public int ConnectorId { get; set; }
+        public string Label { get; set; }
+        public string LastStatus { get; set; }
+        public DateTime? LastStatusTime { get; set; }
+        public bool IsSelected { get; set; }
     }
 }

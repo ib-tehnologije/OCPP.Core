@@ -129,6 +129,9 @@
   <data name="ConnectorNamePlaceholder" xml:space="preserve">
     <value>Override name (empty for default)</value>
   </data>
+  <data name="ConnectorNameHelp" xml:space="preserve">
+    <value>This label is shown in the public portal. Use names like Lijevi / Desni when you want drivers to choose sides explicitly.</value>
+  </data>
   <data name="EditConnector" xml:space="preserve">
     <value>Edit charge point connector</value>
   </data>

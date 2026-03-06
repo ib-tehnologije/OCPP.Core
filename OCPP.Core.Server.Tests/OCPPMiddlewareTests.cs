@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -319,15 +320,26 @@ namespace OCPP.Core.Server.Tests
             return Assert.IsType<OCPPMessage>(message);
         }
 
-        private static Dictionary<string, ChargePointStatus> ReplaceChargePointStatuses(Dictionary<string, ChargePointStatus> nextValue)
+        private static Dictionary<string, ChargePointStatus> ReplaceChargePointStatuses(IDictionary<string, ChargePointStatus> nextValue)
         {
             var field = typeof(OCPPMiddleware)
                 .GetField("_chargePointStatusDict", BindingFlags.Static | BindingFlags.NonPublic);
 
             Assert.NotNull(field);
 
-            var previous = Assert.IsType<Dictionary<string, ChargePointStatus>>(field.GetValue(null));
-            field.SetValue(null, nextValue);
+            var existing = Assert.IsType<ConcurrentDictionary<string, ChargePointStatus>>(field.GetValue(null));
+            var previous = existing.ToDictionary(entry => entry.Key, entry => entry.Value);
+
+            foreach (var key in existing.Keys.ToList())
+            {
+                existing.TryRemove(key, out _);
+            }
+
+            foreach (var entry in nextValue)
+            {
+                existing[entry.Key] = entry.Value;
+            }
+
             return previous;
         }
 
@@ -393,6 +405,7 @@ namespace OCPP.Core.Server.Tests
 
             public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
             public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) => throw new NotSupportedException();
+            public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
             public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
             public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
             public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }

@@ -34,7 +34,7 @@ namespace OCPP.Core.Management.Controllers
         }
 
         [HttpGet]
-        public IActionResult Start(string cp, int conn = 1)
+        public IActionResult Start(string cp, int? conn = null)
         {
             var model = BuildViewModel(cp, conn);
             return View(model);
@@ -44,7 +44,8 @@ namespace OCPP.Core.Management.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Start(PublicStartViewModel request)
         {
-            var model = BuildViewModel(request?.ChargePointId, request?.ConnectorId ?? 1);
+            int requestedConnectorId = request?.ConnectorId ?? 1;
+            var model = BuildViewModel(request?.ChargePointId, requestedConnectorId);
             model.ChargeTagId = request?.ChargeTagId;
             model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
             model.BuyerCompanyName = request?.BuyerCompanyName;
@@ -53,6 +54,13 @@ namespace OCPP.Core.Management.Controllers
             if (string.IsNullOrWhiteSpace(model.ChargePointId))
             {
                 model.ErrorMessage = "Charge point is missing.";
+                return View(model);
+            }
+
+            if (model.Connectors.Count > 0 &&
+                model.Connectors.All(c => c.ConnectorId != requestedConnectorId))
+            {
+                model.ErrorMessage = "Selected connector is not available for this charge point. Please choose another connector.";
                 return View(model);
             }
 
@@ -209,12 +217,12 @@ namespace OCPP.Core.Management.Controllers
             return vm;
         }
 
-        private PublicStartViewModel BuildViewModel(string chargePointId, int connectorId)
+        private PublicStartViewModel BuildViewModel(string chargePointId, int? requestedConnectorId)
         {
             var model = new PublicStartViewModel
             {
                 ChargePointId = chargePointId,
-                ConnectorId = connectorId > 0 ? connectorId : 1
+                ConnectorId = requestedConnectorId.GetValueOrDefault() > 0 ? requestedConnectorId.Value : 1
             };
 
             if (string.IsNullOrWhiteSpace(chargePointId))
@@ -248,21 +256,64 @@ namespace OCPP.Core.Management.Controllers
             decimal idleCap = model.ConnectorUsageFeePerMinute * model.MaxUsageFeeBillableMinutes;
             model.EstimatedMaxHold = Math.Max(0, energyCap) + Math.Max(0, idleCap) + Math.Max(0, model.UserSessionFee);
 
-            var connector = DbContext.ConnectorStatuses.Find(chargePointId, model.ConnectorId);
-            if (connector != null)
+            var connectors = DbContext.ConnectorStatuses
+                .Where(c => c.ChargePointId == chargePointId)
+                .OrderBy(c => c.ConnectorId)
+                .ToList();
+
+            if (connectors.Count > 0)
             {
-                model.ConnectorName = string.IsNullOrWhiteSpace(connector.ConnectorName)
-                    ? $"Connector {connector.ConnectorId}"
-                    : connector.ConnectorName;
-                model.LastStatus = connector.LastStatus;
-                model.LastStatusTime = connector.LastStatusTime;
+                int selectedConnectorId = requestedConnectorId.HasValue && requestedConnectorId.Value > 0 &&
+                    connectors.Any(c => c.ConnectorId == requestedConnectorId.Value)
+                    ? requestedConnectorId.Value
+                    : connectors.FirstOrDefault(c => IsAvailableStatus(c.LastStatus))?.ConnectorId ?? connectors.First().ConnectorId;
+
+                model.ConnectorId = selectedConnectorId;
+                model.Connectors = connectors
+                    .Select(c => new PublicStartConnectorOption
+                    {
+                        ConnectorId = c.ConnectorId,
+                        Label = BuildConnectorLabel(c),
+                        LastStatus = c.LastStatus,
+                        LastStatusTime = c.LastStatusTime,
+                        IsSelected = c.ConnectorId == selectedConnectorId
+                    })
+                    .ToList();
+
+                var selectedConnector = connectors.First(c => c.ConnectorId == selectedConnectorId);
+                model.ConnectorName = BuildConnectorLabel(selectedConnector);
+                model.LastStatus = selectedConnector.LastStatus;
+                model.LastStatusTime = selectedConnector.LastStatusTime;
             }
             else
             {
+                model.Connectors.Add(new PublicStartConnectorOption
+                {
+                    ConnectorId = model.ConnectorId,
+                    Label = $"Connector {model.ConnectorId}",
+                    IsSelected = true
+                });
                 model.ConnectorName = $"Connector {model.ConnectorId}";
             }
 
             return model;
+        }
+
+        private static string BuildConnectorLabel(ConnectorStatus connector)
+        {
+            if (connector == null)
+            {
+                return null;
+            }
+
+            return string.IsNullOrWhiteSpace(connector.ConnectorName)
+                ? $"Connector {connector.ConnectorId}"
+                : connector.ConnectorName;
+        }
+
+        private static bool IsAvailableStatus(string status)
+        {
+            return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task<(bool Success, string Payload, string ErrorMessage)> PostAsync(string relativePath, object payload)

@@ -48,6 +48,7 @@
                 <div class="col-sm-6">
                     <div class="form-group">
                         <input class="form-control" data-val="true" data-val-length="@string.Format(Localizer["FieldMaxLength"].Value, 200)" data-val-length-max="200" id="ConnectorName" maxlength="200" name="ConnectorName" placeholder="@Localizer["ConnectorNamePlaceholder"]" type="text" value="@Model.ConnectorName" />
+                        <small class="form-text text-muted">@Localizer["ConnectorNameHelp"]</small>
                     </div>
                 </div>
                 <div class="col-sm-2">

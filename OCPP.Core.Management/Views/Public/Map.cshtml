@@ -97,6 +97,12 @@
                                 statusClass = "offline";
                             }
 
+                            var startUrl = cp.HasMultipleConnectors
+                                ? Url.RouteUrl("public-start-charge-point", new { cp = cp.ChargePointId })
+                                    ?? Url.Action("Start", "Public", new { cp = cp.ChargePointId })
+                                : Url.RouteUrl("public-start-path", new { cp = cp.ChargePointId, conn = 1 })
+                                    ?? Url.Action("Start", "Public", new { cp = cp.ChargePointId, conn = 1 });
+                            var startLabel = cp.HasMultipleConnectors ? "Choose connector" : "Start session";
                             var searchText = $"{cp.Name} {cp.LocationDescription} {cp.ChargePointId}";
                             <div class="charger-card cp-card" data-search="@searchText" data-cp-id="@cp.ChargePointId">
                                 <div class="cc-top">
@@ -124,7 +130,7 @@
                                     <div class="cc-detail">Idle fee @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (grace @cp.StartUsageFeeAfterMinutes min)</div>
                                 }
                                 <div class="cc-actions">
-                                    <a href="@Url.RouteUrl("public-start-path", new { cp = cp.ChargePointId, conn = 1 })" onclick="event.stopPropagation();">Start session</a>
+                                    <a href="@startUrl" onclick="event.stopPropagation();">@startLabel</a>
                                 </div>
                             </div>
                         }
@@ -159,6 +165,7 @@
             } else {
             const map = L.map('map');
             const startUrlBase = '@Url.Action("Start", "Public")';
+            const startChargePointTemplate = '@Url.RouteUrl("public-start-charge-point", new { cp = "__cp__" })';
             const startPathTemplate = '@Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" })';
             const listEl = document.getElementById('charger-list');
             const searchInput = document.getElementById('mapSearch');
@@ -185,8 +192,16 @@
                 return Number.isFinite(num) ? num : null;
             };
 
-            const buildStartUrl = (chargePointId, connectorId) => {
+            const buildStartUrl = (chargePointId, connectorId, hasMultipleConnectors) => {
                 const safeCp = encodeURIComponent(chargePointId || '');
+                if (hasMultipleConnectors) {
+                    if (startChargePointTemplate && startChargePointTemplate.indexOf('__cp__') >= 0) {
+                        return startChargePointTemplate.replace('__cp__', safeCp);
+                    }
+
+                    return `${startUrlBase}?cp=${safeCp}`;
+                }
+
                 const safeConn = encodeURIComponent((connectorId == null ? 1 : connectorId).toString());
                 if (startPathTemplate && startPathTemplate.indexOf('__cp__') >= 0) {
                     return startPathTemplate.replace('__cp__', safeCp).replace('__conn__', safeConn);
@@ -242,11 +257,13 @@
                 const usageFee = pick(p, 'ConnectorUsageFeePerMinute', 'connectorUsageFeePerMinute');
                 const startFeeTime = pick(p, 'StartUsageFeeAfterMinutes', 'startUsageFeeAfterMinutes');
                 const afterCharge = pick(p, 'UsageFeeAfterChargingEnds', 'usageFeeAfterChargingEnds');
+                const hasMultipleConnectors = pick(p, 'HasMultipleConnectors', 'hasMultipleConnectors') === true || Number(pick(p, 'ConnectorCount', 'connectorCount')) > 1;
                 const safePrice = Number(price) > 0 ? `${Number(price).toFixed(2)} ${currencySymbol} / kWh` : 'Free energy';
                 const idleText = usageFee > 0
                     ? `Idle fee: ${Number(usageFee).toFixed(2)} ${currencySymbol}/min (${afterCharge ? 'after charge' : 'from start'}, grace ${startFeeTime} min)`
                     : null;
-                const startUrl = buildStartUrl(chargePointId, 1);
+                const startUrl = buildStartUrl(chargePointId, 1, hasMultipleConnectors);
+                const startLabel = hasMultipleConnectors ? 'Choose connector →' : 'Start session →';
 
                 const addr = (pick(p, 'LocationDescription', 'locationDescription') || '').trim();
                 const popupHtml = [
@@ -255,7 +272,7 @@
                     `<div class="popup-status">${escapeHtml(statusLabel)}</div>`,
                     `<div><span class="popup-power">${escapeHtml(safePrice)}</span></div>`,
                     idleText ? `<div class="popup-status">${escapeHtml(idleText)}</div>` : '',
-                    `<div style="margin-top: 10px;"><a class="btn-secondary" style="margin-top:0;" href="${startUrl}">Start session →</a></div>`
+                    `<div style="margin-top: 10px;"><a class="btn-secondary" style="margin-top:0;" href="${startUrl}">${startLabel}</a></div>`
                 ].filter(Boolean).join('');
                 marker.bindPopup(popupHtml);
                 markerLookup[chargePointId] = marker;

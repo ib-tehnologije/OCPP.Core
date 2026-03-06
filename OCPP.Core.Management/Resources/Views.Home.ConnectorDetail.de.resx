@@ -129,6 +129,9 @@
   <data name="ConnectorNamePlaceholder" xml:space="preserve">
     <value>Bezeichnung (leer für Standard)</value>
   </data>
+  <data name="ConnectorNameHelp" xml:space="preserve">
+    <value>Diese Bezeichnung wird im öffentlichen Portal angezeigt. Verwenden Sie Namen wie Links / Rechts, wenn Fahrer die Seite direkt auswählen sollen.</value>
+  </data>
   <data name="EditConnector" xml:space="preserve">
     <value>Anschluss bearbeiten</value>
   </data>
