@@ -138,8 +138,8 @@ namespace OCPP.Core.Management
             {
                 endpoints.MapControllerRoute(
                     name: "public-start-path",
-                    pattern: "cp/{cp}/{conn?}",
-                    defaults: new { controller = "Public", action = "Start", conn = 1 });
+                    pattern: "cp/{cp}/{conn=1}",
+                    defaults: new { controller = "Public", action = "Start" });
 
                 endpoints.MapControllerRoute(
                     name: "default",
