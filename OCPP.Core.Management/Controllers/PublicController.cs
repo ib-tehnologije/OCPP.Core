@@ -4,6 +4,8 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -11,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OCPP.Core.Database;
+using OCPP.Core.Management.Helpers;
 using OCPP.Core.Management.Models;
 
 namespace OCPP.Core.Management.Controllers
@@ -18,13 +21,17 @@ namespace OCPP.Core.Management.Controllers
     [AllowAnonymous]
     public class PublicController : BaseController
     {
+        private readonly IDataProtector _recoveryProtector;
+
         public PublicController(
             IUserManager userManager,
             ILoggerFactory loggerFactory,
             IConfiguration config,
+            IDataProtectionProvider dataProtectionProvider,
             OCPPCoreContext dbContext) : base(userManager, loggerFactory, config, dbContext)
         {
             Logger = loggerFactory.CreateLogger<PublicController>();
+            _recoveryProtector = dataProtectionProvider.CreateProtector("OCPP.Core.Management.PublicPaymentRecovery.v1");
         }
 
         [HttpGet]
@@ -34,9 +41,23 @@ namespace OCPP.Core.Management.Controllers
         }
 
         [HttpGet]
-        public IActionResult Start(string cp, int? conn = null)
+        public async Task<IActionResult> Start(string cp, int? conn = null)
         {
+            var recovery = ReadRecoveryCookie();
+            if (recovery != null &&
+                string.Equals(recovery.ChargePointId, cp, StringComparison.OrdinalIgnoreCase) &&
+                !conn.HasValue)
+            {
+                conn = recovery.ConnectorId;
+            }
+
             var model = BuildViewModel(cp, conn);
+            var redirect = await ApplyRecoveryAsync(model, recovery);
+            if (redirect != null)
+            {
+                return redirect;
+            }
+
             return View(model);
         }
 
@@ -110,6 +131,8 @@ namespace OCPP.Core.Management.Controllers
 
             string checkoutUrl = ExtractCheckoutUrl(apiResult.Payload);
             string status = ExtractStatus(apiResult.Payload);
+            string reason = ExtractReason(apiResult.Payload);
+            Guid? reservationId = ExtractReservationId(apiResult.Payload);
 
             bool isBusy = string.Equals(status, "ConnectorBusy", StringComparison.OrdinalIgnoreCase);
             bool isOffline = string.Equals(status, "ChargerOffline", StringComparison.OrdinalIgnoreCase);
@@ -118,7 +141,7 @@ namespace OCPP.Core.Management.Controllers
             {
                 if (isBusy)
                 {
-                    model.ErrorMessage = "This connector is currently in use. Please stop the active session first or choose another connector.";
+                    model.ErrorMessage = BuildBusyMessage(reason);
                 }
                 else if (isOffline)
                 {
@@ -128,17 +151,35 @@ namespace OCPP.Core.Management.Controllers
                 {
                     model.ErrorMessage = ExtractMessage(apiResult.Payload) ?? apiResult.ErrorMessage ?? "Unable to start the transaction.";
                 }
+
+                var redirect = await ApplyRecoveryAsync(model, ReadRecoveryCookie());
+                if (redirect != null)
+                {
+                    return redirect;
+                }
+
                 return View(model);
             }
 
             if (!string.IsNullOrWhiteSpace(checkoutUrl) &&
                 string.Equals(status, "Redirect", StringComparison.OrdinalIgnoreCase))
             {
+                if (reservationId.HasValue)
+                {
+                    WriteRecoveryCookie(new PublicPaymentRecoveryPayload
+                    {
+                        ReservationId = reservationId.Value,
+                        ChargePointId = model.ChargePointId,
+                        ConnectorId = model.ConnectorId,
+                        CreatedAtUtc = DateTime.UtcNow
+                    });
+                }
                 return Redirect(checkoutUrl);
             }
 
             if (string.Equals(status, "Accepted", StringComparison.OrdinalIgnoreCase))
             {
+                ClearRecoveryCookie();
                 var resultModel = new PaymentResultViewModel
                 {
                     Status = "Accepted",
@@ -161,12 +202,39 @@ namespace OCPP.Core.Management.Controllers
             return View(vm);
         }
 
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CancelRecovery(string chargePointId, int connectorId, Guid reservationId)
+        {
+            if (reservationId != Guid.Empty)
+            {
+                await PostAsync("Payments/Cancel", new
+                {
+                    reservationId,
+                    reason = "public_recovery_cancelled"
+                });
+            }
+
+            ClearRecoveryCookie();
+            return RedirectToAction(nameof(Start), new { cp = chargePointId, conn = connectorId });
+        }
+
         private PublicMapViewModel BuildMapViewModel()
         {
             var vm = new PublicMapViewModel();
 
             var chargePoints = DbContext.ChargePoints.ToList<ChargePoint>();
             var connectorStatuses = DbContext.ConnectorStatuses.ToList<ConnectorStatus>();
+            var openTransactions = DbContext.Transactions
+                .Where(t => t.StopTime == null)
+                .Select(t => new { t.ChargePointId, t.ConnectorId })
+                .Distinct()
+                .ToList();
+            var activeReservations = DbContext.ChargePaymentReservations
+                .Where(r => ChargePaymentReservationState.ConnectorLockStatuses.Contains(r.Status))
+                .Select(r => new { r.ChargePointId, r.ConnectorId })
+                .Distinct()
+                .ToList();
 
             foreach (var cp in chargePoints)
             {
@@ -179,6 +247,14 @@ namespace OCPP.Core.Management.Controllers
                     if (statuses.Any(s => string.Equals(s.LastStatus, "Faulted", StringComparison.InvariantCultureIgnoreCase)))
                     {
                         aggregatedStatus = "Faulted";
+                    }
+                    else if (openTransactions.Any(t => string.Equals(t.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        aggregatedStatus = "Occupied";
+                    }
+                    else if (activeReservations.Any(r => string.Equals(r.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        aggregatedStatus = "Reserved";
                     }
                     else if (statuses.Any(s => string.Equals(s.LastStatus, "Occupied", StringComparison.InvariantCultureIgnoreCase)))
                     {
@@ -256,6 +332,15 @@ namespace OCPP.Core.Management.Controllers
             decimal idleCap = model.ConnectorUsageFeePerMinute * model.MaxUsageFeeBillableMinutes;
             model.EstimatedMaxHold = Math.Max(0, energyCap) + Math.Max(0, idleCap) + Math.Max(0, model.UserSessionFee);
 
+            var openTransactions = DbContext.Transactions
+                .Where(t => t.ChargePointId == chargePointId && t.StopTime == null)
+                .Select(t => t.ConnectorId)
+                .Distinct()
+                .ToHashSet();
+            var activeReservations = DbContext.ChargePaymentReservations
+                .Where(r => r.ChargePointId == chargePointId && ChargePaymentReservationState.ConnectorLockStatuses.Contains(r.Status))
+                .GroupBy(r => r.ConnectorId)
+                .ToDictionary(g => g.Key, g => g.Max(r => r.UpdatedAtUtc));
             var connectors = DbContext.ConnectorStatuses
                 .Where(c => c.ChargePointId == chargePointId)
                 .OrderBy(c => c.ConnectorId)
@@ -263,27 +348,53 @@ namespace OCPP.Core.Management.Controllers
 
             if (connectors.Count > 0)
             {
-                int selectedConnectorId = requestedConnectorId.HasValue && requestedConnectorId.Value > 0 &&
-                    connectors.Any(c => c.ConnectorId == requestedConnectorId.Value)
-                    ? requestedConnectorId.Value
-                    : connectors.FirstOrDefault(c => IsAvailableStatus(c.LastStatus))?.ConnectorId ?? connectors.First().ConnectorId;
-
-                model.ConnectorId = selectedConnectorId;
-                model.Connectors = connectors
-                    .Select(c => new PublicStartConnectorOption
+                var connectorStates = connectors
+                    .Select(c =>
                     {
-                        ConnectorId = c.ConnectorId,
-                        Label = BuildConnectorLabel(c),
-                        LastStatus = c.LastStatus,
-                        LastStatusTime = c.LastStatusTime,
-                        IsSelected = c.ConnectorId == selectedConnectorId
+                        bool hasOpenTransaction = openTransactions.Contains(c.ConnectorId);
+                        bool hasActiveReservation = activeReservations.ContainsKey(c.ConnectorId);
+                        var effectiveStatus = GetEffectiveConnectorStatus(c.LastStatus, hasOpenTransaction, hasActiveReservation);
+                        var statusTime = c.LastStatusTime;
+                        if (hasActiveReservation && activeReservations.TryGetValue(c.ConnectorId, out var reservationUpdatedAt))
+                        {
+                            statusTime = statusTime.HasValue && statusTime.Value > reservationUpdatedAt
+                                ? statusTime
+                                : reservationUpdatedAt;
+                        }
+
+                        return new
+                        {
+                            Connector = c,
+                            EffectiveStatus = effectiveStatus,
+                            EffectiveStatusTime = statusTime,
+                            OccupancyReason = hasOpenTransaction ? "OpenTransaction" : (hasActiveReservation ? "ActiveReservation" : null)
+                        };
                     })
                     .ToList();
 
-                var selectedConnector = connectors.First(c => c.ConnectorId == selectedConnectorId);
-                model.ConnectorName = BuildConnectorLabel(selectedConnector);
-                model.LastStatus = selectedConnector.LastStatus;
-                model.LastStatusTime = selectedConnector.LastStatusTime;
+                int selectedConnectorId = requestedConnectorId.HasValue && requestedConnectorId.Value > 0 &&
+                    connectorStates.Any(c => c.Connector.ConnectorId == requestedConnectorId.Value)
+                    ? requestedConnectorId.Value
+                    : connectorStates.FirstOrDefault(c => IsAvailableStatus(c.EffectiveStatus))?.Connector.ConnectorId ?? connectorStates.First().Connector.ConnectorId;
+
+                model.ConnectorId = selectedConnectorId;
+                model.Connectors = connectorStates
+                    .Select(c => new PublicStartConnectorOption
+                    {
+                        ConnectorId = c.Connector.ConnectorId,
+                        Label = BuildConnectorLabel(c.Connector),
+                        LastStatus = c.EffectiveStatus,
+                        LastStatusTime = c.EffectiveStatusTime,
+                        OccupancyReason = c.OccupancyReason,
+                        IsSelected = c.Connector.ConnectorId == selectedConnectorId
+                    })
+                    .ToList();
+
+                var selectedConnector = connectorStates.First(c => c.Connector.ConnectorId == selectedConnectorId);
+                model.ConnectorName = BuildConnectorLabel(selectedConnector.Connector);
+                model.LastStatus = selectedConnector.EffectiveStatus;
+                model.LastStatusTime = selectedConnector.EffectiveStatusTime;
+                model.AvailabilityMessage = BuildAvailabilityMessage(selectedConnector.EffectiveStatus, selectedConnector.OccupancyReason);
             }
             else
             {
@@ -311,9 +422,161 @@ namespace OCPP.Core.Management.Controllers
                 : connector.ConnectorName;
         }
 
+        private static string GetEffectiveConnectorStatus(string lastStatus, bool hasOpenTransaction, bool hasActiveReservation)
+        {
+            if (string.Equals(lastStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lastStatus, "Unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                return lastStatus;
+            }
+
+            if (hasOpenTransaction)
+            {
+                return "Occupied";
+            }
+
+            if (hasActiveReservation)
+            {
+                return "Reserved";
+            }
+
+            return string.IsNullOrWhiteSpace(lastStatus) ? "Unknown" : lastStatus;
+        }
+
+        private static string BuildAvailabilityMessage(string effectiveStatus, string occupancyReason)
+        {
+            if (string.Equals(occupancyReason, "ActiveReservation", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveStatus, "Reserved", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This connector is temporarily reserved during checkout. If it is your session, continue in the same browser or choose another connector.";
+            }
+
+            if (string.Equals(occupancyReason, "OpenTransaction", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveStatus, "Occupied", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveStatus, "Charging", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This connector is currently in use. Please stop the active session first or choose another connector.";
+            }
+
+            if (string.Equals(effectiveStatus, "Unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This connector is unavailable right now. Please choose another connector.";
+            }
+
+            if (string.Equals(effectiveStatus, "Faulted", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This connector is currently faulted. Please choose another connector.";
+            }
+
+            return null;
+        }
+
         private static bool IsAvailableStatus(string status)
         {
-            return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status, "Preparing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<IActionResult> ApplyRecoveryAsync(PublicStartViewModel model, PublicPaymentRecoveryPayload recovery)
+        {
+            if (model == null || recovery == null)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(model.ChargePointId) ||
+                !string.Equals(recovery.ChargePointId, model.ChargePointId, StringComparison.OrdinalIgnoreCase) ||
+                recovery.ConnectorId != model.ConnectorId)
+            {
+                return null;
+            }
+
+            var resumeResult = await PostAsync("Payments/Resume", new
+            {
+                reservationId = recovery.ReservationId
+            });
+
+            string status = ExtractStatus(resumeResult.Payload);
+            string reservationStatus = ExtractReservationStatus(resumeResult.Payload);
+            string checkoutUrl = ExtractCheckoutUrl(resumeResult.Payload);
+            string error = ExtractMessage(resumeResult.Payload) ?? resumeResult.ErrorMessage;
+
+            if (string.Equals(status, "Status", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ChargePaymentReservationState.Completed, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, ChargePaymentReservationState.Authorized, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, ChargePaymentReservationState.StartRequested, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, ChargePaymentReservationState.Charging, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, ChargePaymentReservationState.Completed, StringComparison.OrdinalIgnoreCase))
+            {
+                return RedirectToAction("Status", "Payments", new { reservationId = recovery.ReservationId, origin = "public" });
+            }
+
+            if (string.Equals(status, "Redirect", StringComparison.OrdinalIgnoreCase))
+            {
+                model.RecoveryReservationId = recovery.ReservationId;
+                model.RecoveryReservationStatus = reservationStatus ?? ChargePaymentReservationState.Pending;
+                model.RecoveryCheckoutUrl = checkoutUrl;
+                model.RecoveryMessage = "You already have an unfinished checkout for this connector. Continue payment or cancel it before starting a new session.";
+                model.ErrorMessage = null;
+                return null;
+            }
+
+            if (string.Equals(status, "ResumeUnavailable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "MissingCheckoutSession", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "StripeError", StringComparison.OrdinalIgnoreCase))
+            {
+                model.RecoveryReservationId = recovery.ReservationId;
+                model.RecoveryReservationStatus = reservationStatus ?? ChargePaymentReservationState.Pending;
+                model.RecoveryCheckoutUrl = null;
+                model.RecoveryMessage = !string.IsNullOrWhiteSpace(error)
+                    ? $"{error} Cancel the previous attempt to unlock this connector."
+                    : "This checkout can no longer be resumed. Cancel the previous attempt to unlock this connector.";
+                model.ErrorMessage = null;
+                return null;
+            }
+
+            if (string.Equals(status, ChargePaymentReservationState.Cancelled, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ChargePaymentReservationState.Failed, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ChargePaymentReservationState.StartRejected, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ChargePaymentReservationState.StartTimeout, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ChargePaymentReservationState.Abandoned, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "NotFound", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearRecoveryCookie();
+            }
+
+            return null;
+        }
+
+        private PublicPaymentRecoveryPayload ReadRecoveryCookie()
+        {
+            if (PublicPaymentRecoveryCookie.TryRead(Request.Cookies, _recoveryProtector, out var payload))
+            {
+                return payload;
+            }
+
+            return null;
+        }
+
+        private void WriteRecoveryCookie(PublicPaymentRecoveryPayload payload)
+        {
+            var protectedValue = PublicPaymentRecoveryCookie.Protect(_recoveryProtector, payload);
+            Response.Cookies.Append(
+                PublicPaymentRecoveryCookie.CookieName,
+                protectedValue,
+                PublicPaymentRecoveryCookie.BuildCookieOptions(Request.IsHttps));
+        }
+
+        private void ClearRecoveryCookie()
+        {
+            Response.Cookies.Delete(
+                PublicPaymentRecoveryCookie.CookieName,
+                new CookieOptions
+                {
+                    Path = "/",
+                    Secure = Request.IsHttps,
+                    SameSite = SameSiteMode.Lax
+                });
         }
 
         private async Task<(bool Success, string Payload, string ErrorMessage)> PostAsync(string relativePath, object payload)
@@ -383,6 +646,49 @@ namespace OCPP.Core.Management.Controllers
             return null;
         }
 
+        private static string ExtractReservationStatus(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload)) return null;
+            try
+            {
+                var json = JObject.Parse(payload);
+                return json["reservationStatus"]?.Value<string>();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Guid? ExtractReservationId(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload)) return null;
+            try
+            {
+                var json = JObject.Parse(payload);
+                var raw = json["reservationId"]?.Value<string>();
+                return Guid.TryParse(raw, out var reservationId) ? reservationId : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string ExtractReason(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload)) return null;
+            try
+            {
+                var json = JObject.Parse(payload);
+                return json["reason"]?.Value<string>();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static string ExtractCheckoutUrl(string payload)
         {
             if (string.IsNullOrWhiteSpace(payload)) return null;
@@ -427,6 +733,28 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return null;
+        }
+
+        private static string BuildBusyMessage(string reason)
+        {
+            if (string.Equals(reason, "ActiveReservation", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This connector is temporarily reserved during checkout. If it is your session, continue in the same browser or choose another connector.";
+            }
+
+            if (string.Equals(reason, "OpenTransaction", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "LiveStatus:Occupied", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This connector is currently in use. Please stop the active session first or choose another connector.";
+            }
+
+            if (string.Equals(reason, "LiveStatus:Unavailable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "LiveStatus:Faulted", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This connector is not ready right now. Please choose another connector.";
+            }
+
+            return "This connector is currently unavailable. Please choose another connector or try again in a moment.";
         }
 
         private static string NormalizeOib(string oib)

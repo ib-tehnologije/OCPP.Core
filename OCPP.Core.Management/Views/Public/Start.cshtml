@@ -16,8 +16,18 @@
     var badgeClass = "waiting";
     if (string.Equals(Model.LastStatus, "Available", StringComparison.OrdinalIgnoreCase)) badgeClass = "available";
     if (string.Equals(Model.LastStatus, "Faulted", StringComparison.OrdinalIgnoreCase)) badgeClass = "error";
+    if (string.Equals(Model.LastStatus, "Occupied", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Model.LastStatus, "Charging", StringComparison.OrdinalIgnoreCase))
+    {
+        badgeClass = "charging";
+    }
     var isFree = Model.FreeChargingEnabled || (Model.PricePerKwh <= 0 && Model.ConnectorUsageFeePerMinute <= 0 && Model.UserSessionFee <= 0);
     var mapUrl = Url.Action("Index", "Public");
+    var statusLabel = string.IsNullOrWhiteSpace(Model.LastStatus) ? "Available" : Model.LastStatus;
+    if (isFree && string.Equals(statusLabel, "Available", StringComparison.OrdinalIgnoreCase))
+    {
+        statusLabel = "Free charging";
+    }
 
     string ConnectorBadgeClass(string status)
     {
@@ -75,7 +85,7 @@
             <div class="status-header">
                 <div class="status-badge @badgeClass">
                     <span class="dot"></span>
-                    <span>@(isFree ? "Free charging" : (string.IsNullOrWhiteSpace(Model.LastStatus) ? "Available" : Model.LastStatus))</span>
+                    <span>@statusLabel</span>
                 </div>
                 <h1 class="charger-title">@chargePointLabel</h1>
                 <p class="charger-sub">@connectorLabel</p>
@@ -204,41 +214,81 @@
 
             <div class="divider"></div>
 
-            <div class="form-section">
-                <form method="post" asp-action="Start">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="ChargePointId" value="@Model.ChargePointId" />
-                    <input type="hidden" name="ConnectorId" value="@Model.ConnectorId" />
+            @if (Model.HasAvailabilityMessage && !Model.HasRecoveryOptions)
+            {
+                <div class="alert-box warning" style="margin: 0 24px 16px;">
+                    <span class="alert-icon">⏳</span>
+                    <span>@Model.AvailabilityMessage</span>
+                </div>
+            }
 
-                    <label class="r1-checkbox">
-                        <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
-                        <div class="r1-label">
-                            <strong>Company invoice</strong>
-                            <span class="r1-hint">If you need an R1 invoice, enter your company info below or add it later from the session status page.</span>
-                        </div>
-                    </label>
-
-                    <div id="r1Fields" style="display:@(Model.RequestR1Invoice ? "block" : "none"); margin-bottom: 14px;">
-                        <label for="buyerCompanyName" class="field-label">Company name (optional)</label>
-                        <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" autocomplete="organization" />
-
-                        <label for="buyerOib" class="field-label" style="margin-top: 10px;">OIB (required for R1)</label>
-                        <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
-                        <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
+            @if (Model.HasRecoveryOptions)
+            {
+                <div class="form-section">
+                    <div class="alert-box warning" style="margin-bottom: 16px;">
+                        <span class="alert-icon">⏳</span>
+                        <span>@Model.RecoveryMessage</span>
                     </div>
 
-                    <label for="chargeTagId" class="field-label">Charge tag / RFID (optional)</label>
-                    <input type="text" class="field-input" id="chargeTagId" name="ChargeTagId" value="@Model.ChargeTagId" placeholder="Have a card? Enter it here" @(Model.HasError ? "" : "autofocus") />
-                    <div class="field-help">Leave blank to auto-generate a temporary tag for this start.</div>
+                    <div class="field-help" style="margin-bottom: 12px;">Reservation <span class="mono">@Model.RecoveryReservationId</span> · status @Model.RecoveryReservationStatus</div>
 
-                    <button type="submit" class="btn-primary">
-                        <span>@(isFree ? "Start free session" : "Start charging")</span>
-                        <span class="arrow" aria-hidden="true">→</span>
-                    </button>
+                    @if (Model.CanResumeRecovery)
+                    {
+                        <a class="btn-primary" href="@Model.RecoveryCheckoutUrl">
+                            <span>Resume payment</span>
+                            <span class="arrow" aria-hidden="true">→</span>
+                        </a>
+                    }
 
-                    <a class="btn-secondary" href="@mapUrl">Back to map</a>
-                </form>
-            </div>
+                    <form method="post" asp-action="CancelRecovery" style="margin-top: 12px;">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="chargePointId" value="@Model.ChargePointId" />
+                        <input type="hidden" name="connectorId" value="@Model.ConnectorId" />
+                        <input type="hidden" name="reservationId" value="@Model.RecoveryReservationId" />
+                        <button type="submit" class="btn-secondary">Cancel previous attempt</button>
+                    </form>
+
+                    <a class="btn-secondary" style="margin-top: 12px;" href="@mapUrl">Back to map</a>
+                </div>
+            }
+            else
+            {
+                <div class="form-section">
+                    <form method="post" asp-action="Start">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="ChargePointId" value="@Model.ChargePointId" />
+                        <input type="hidden" name="ConnectorId" value="@Model.ConnectorId" />
+
+                        <label class="r1-checkbox">
+                            <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
+                            <div class="r1-label">
+                                <strong>Company invoice</strong>
+                                <span class="r1-hint">If you need an R1 invoice, enter your company info below or add it later from the session status page.</span>
+                            </div>
+                        </label>
+
+                        <div id="r1Fields" style="display:@(Model.RequestR1Invoice ? "block" : "none"); margin-bottom: 14px;">
+                            <label for="buyerCompanyName" class="field-label">Company name (optional)</label>
+                            <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" autocomplete="organization" />
+
+                            <label for="buyerOib" class="field-label" style="margin-top: 10px;">OIB (required for R1)</label>
+                            <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
+                            <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
+                        </div>
+
+                        <label for="chargeTagId" class="field-label">Charge tag / RFID (optional)</label>
+                        <input type="text" class="field-input" id="chargeTagId" name="ChargeTagId" value="@Model.ChargeTagId" placeholder="Have a card? Enter it here" @(Model.HasError ? "" : "autofocus") />
+                        <div class="field-help">Leave blank to auto-generate a temporary tag for this start.</div>
+
+                        <button type="submit" class="btn-primary">
+                            <span>@(isFree ? "Start free session" : "Start charging")</span>
+                            <span class="arrow" aria-hidden="true">→</span>
+                        </button>
+
+                        <a class="btn-secondary" href="@mapUrl">Back to map</a>
+                    </form>
+                </div>
+            }
 
             <script>
                 (function () {
@@ -261,6 +311,13 @@
                 <div class="alert-box danger" style="margin-bottom:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
                     <span class="alert-icon">⚠️</span>
                     <span>@Model.ErrorMessage</span>
+                </div>
+            }
+            else if (Model.HasRecoveryOptions)
+            {
+                <div class="alert-box warning" style="margin-bottom:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
+                    <span class="alert-icon">⏳</span>
+                    <span>Finish or cancel the previous checkout before starting a new session on this connector.</span>
                 </div>
             }
             else

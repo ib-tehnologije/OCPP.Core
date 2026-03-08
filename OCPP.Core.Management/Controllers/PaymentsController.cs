@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,7 @@ using Microsoft.Extensions.Localization;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OCPP.Core.Database;
+using OCPP.Core.Management.Helpers;
 using OCPP.Core.Management.Models;
 
 namespace OCPP.Core.Management.Controllers
@@ -34,6 +36,8 @@ namespace OCPP.Core.Management.Controllers
 
         public async Task<IActionResult> Success(Guid reservationId, string session_id, string origin)
         {
+            ClearRecoveryCookie();
+
             if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(session_id))
             {
                 return View("Result", BuildResult("Error", L("PaymentMissingData", "Missing payment session information.")));
@@ -85,6 +89,8 @@ namespace OCPP.Core.Management.Controllers
 
         public async Task<IActionResult> Cancel(Guid reservationId, string origin)
         {
+            ClearRecoveryCookie();
+
             if (reservationId != Guid.Empty)
             {
                 await PostAsync("Payments/Cancel", new CancelPayload
@@ -115,6 +121,8 @@ namespace OCPP.Core.Management.Controllers
         [HttpGet]
         public async Task<IActionResult> Status(Guid reservationId, string origin)
         {
+            ClearRecoveryCookie();
+
             if (reservationId == Guid.Empty)
             {
                 return View(GetViewName(origin), BuildResult("Error", "Missing reservation id."));
@@ -233,6 +241,18 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return "Result";
+        }
+
+        private void ClearRecoveryCookie()
+        {
+            Response.Cookies.Delete(
+                PublicPaymentRecoveryCookie.CookieName,
+                new CookieOptions
+                {
+                    Path = "/",
+                    Secure = Request.IsHttps,
+                    SameSite = SameSiteMode.Lax
+                });
         }
 
         private async Task<(bool Success, string Payload, string ErrorMessage)> PostAsync(string relativePath, object payload)

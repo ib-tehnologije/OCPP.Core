@@ -492,6 +492,99 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void ResumeReservation_ReturnsRedirect_ForOpenPendingCheckout()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-RESUME",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-RESUME",
+                StripeCheckoutSessionId = "sess_resume_open",
+                Status = PaymentReservationStatus.Pending,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_resume_open",
+                    Status = "open",
+                    Url = "https://checkout.stripe.test/resume"
+                }
+            };
+
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+            var result = coordinator.ResumeReservation(context, reservationId);
+
+            Assert.True(result.Success);
+            Assert.Equal("Redirect", result.Status);
+            Assert.Equal("https://checkout.stripe.test/resume", result.CheckoutUrl);
+            Assert.Equal(PaymentReservationStatus.Pending, result.Reservation.Status);
+        }
+
+        [Fact]
+        public void ResumeReservation_ReturnsStatus_ForAuthorizedReservation()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-RESUME",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-AUTH",
+                StripeCheckoutSessionId = "sess_resume_auth",
+                Status = PaymentReservationStatus.Authorized,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), new FakePaymentIntentService());
+            var result = coordinator.ResumeReservation(context, reservationId);
+
+            Assert.True(result.Success);
+            Assert.Equal("Status", result.Status);
+            Assert.Null(result.CheckoutUrl);
+            Assert.Equal(PaymentReservationStatus.Authorized, result.Reservation.Status);
+        }
+
+        [Fact]
+        public void ResumeReservation_ReturnsMissingCheckoutSession_WhenPendingReservationHasNoSessionId()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-RESUME",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-MISSING",
+                Status = PaymentReservationStatus.Pending,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), new FakePaymentIntentService());
+            var result = coordinator.ResumeReservation(context, reservationId);
+
+            Assert.False(result.Success);
+            Assert.Equal("MissingCheckoutSession", result.Status);
+            Assert.Null(result.CheckoutUrl);
+            Assert.Equal(PaymentReservationStatus.Pending, result.Reservation.Status);
+        }
+
+        [Fact]
         public void ConfirmReservation_GeneratesOcppTag_AndCreatesChargeTag()
         {
             using var context = CreateContext();
@@ -1450,6 +1543,8 @@ namespace OCPP.Core.Server.Tests
             var reservation = context.ChargePaymentReservations.Single(r => r.StripeCheckoutSessionId == "sess_expired");
             Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
             Assert.Equal("Checkout session expired", reservation.LastError);
+            Assert.Equal("CheckoutExpired", reservation.FailureCode);
+            Assert.Equal("Checkout session expired", reservation.FailureMessage);
         }
 
         [Fact]

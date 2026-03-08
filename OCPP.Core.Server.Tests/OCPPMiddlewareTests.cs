@@ -181,6 +181,69 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task HandlePaymentStatusAsync_ReportsReservationLockMetadata()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-lock-{Guid.NewGuid():N}.sqlite");
+            Guid currentReservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = currentReservationId,
+                        ChargePointId = "CP-LOCK",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-CURRENT",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Completed,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20),
+                        UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-5)
+                    });
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = Guid.NewGuid(),
+                        ChargePointId = "CP-LOCK",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-PENDING",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Pending,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-2),
+                        UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-2)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.Method = "GET";
+                httpContext.Request.QueryString = new QueryString($"?reservationId={currentReservationId}");
+                httpContext.Response.Body = new MemoryStream();
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                }
+
+                httpContext.Response.Body.Position = 0;
+                using var reader = new StreamReader(httpContext.Response.Body);
+                var json = await reader.ReadToEndAsync();
+                var payload = JObject.Parse(json);
+
+                Assert.Equal("Completed", payload["status"]?.Value<string>());
+                Assert.False(payload["locksConnector"]?.Value<bool>() ?? true);
+                Assert.True(payload["otherActiveReservation"]?.Value<bool>() ?? false);
+                Assert.True(payload["activeReservation"]?.Value<bool>() ?? false);
+                Assert.Equal("ActiveReservation", payload["blockingReason"]?.Value<string>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task HandlePaymentCancelAsync_ReturnsActualStatus_WhenReservationCannotBeCancelled()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-cancel-{Guid.NewGuid():N}.sqlite");
@@ -405,6 +468,7 @@ namespace OCPP.Core.Server.Tests
 
             public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
             public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) => throw new NotSupportedException();
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) => throw new NotSupportedException();
             public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
             public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
             public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }

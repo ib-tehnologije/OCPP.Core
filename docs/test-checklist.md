@@ -48,6 +48,32 @@ Use this to reproduce and diagnose “ChargerOffline/ConnectorBusy” loops when
    where ChargePointId='Test1234' and ConnectorId=1;
    ```
 
+## Reservation recovery checks
+1) **Cancel from Stripe and retry immediately**
+   - Start a public session and reach Stripe Checkout.
+   - Click cancel in Stripe.
+   - Expected:
+     - `/Payments/Cancel` clears the recovery cookie.
+     - reservation moves to `Cancelled`.
+     - a fresh start attempt on the same connector works immediately.
+
+2) **Abandon checkout and resume in the same browser**
+   - Start a public session and reach Stripe Checkout.
+   - Close the Stripe tab or navigate back without paying.
+   - Re-open `http://localhost:8082/cp/Test1234/1` in the same browser.
+   - Expected:
+     - page shows `Resume payment` and `Cancel previous attempt`
+     - `Resume payment` takes you back to the same Stripe Checkout session while the reservation is still `Pending`
+     - connector badge/message shows a temporary reservation, not plain availability
+
+3) **Abandon checkout and wait for auto-release**
+   - Leave the same pending checkout untouched for longer than `Maintenance__PendingPaymentTimeoutMinutes` (staging default: 3 minutes).
+   - From a second browser or private window, reload the same connector page.
+   - Expected:
+     - connector becomes startable again after cleanup
+     - stale reservation becomes `Cancelled`
+     - same-browser recovery cookie is ignored/cleared once the reservation is terminal
+
 ## If “ChargerOffline” on Start and pay
 - Ensure the simulator tab is still connected and hitting the same server instance.
 - Check server log for `Payments/Create` → `ChargerOffline`. If it fires, `_chargePointStatusDict` lacks a socket; add a temporary log of its keys before that branch.
@@ -81,4 +107,6 @@ WHERE ChargePointId='Test1234' AND ConnectorId=1
 ## Logs to watch
 - WebSocket accept / BootNotification for `Test1234`.
 - `Payments/Create`: whether it logs `ChargerOffline` or `ConnectorBusy` (and reason).
+- `Payments/Resume`: whether it returns `Redirect`, `Status`, `ResumeUnavailable`, or `MissingCheckoutSession`.
+- `PaymentReservationCleanupService`: whether stale `Pending` reservations are auto-cancelled after the configured timeout.
 - StartTransaction CALLERROR details if “JSON is not accepted.”

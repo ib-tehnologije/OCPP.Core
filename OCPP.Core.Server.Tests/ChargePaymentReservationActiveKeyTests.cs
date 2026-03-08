@@ -75,8 +75,14 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
-        [Fact]
-        public void IsConnectorBusy_IgnoresCancelledReservation_WithStaleActiveConnectorKey()
+        [Theory]
+        [InlineData(PaymentReservationStatus.Cancelled)]
+        [InlineData(PaymentReservationStatus.Failed)]
+        [InlineData(PaymentReservationStatus.Completed)]
+        [InlineData(PaymentReservationStatus.Abandoned)]
+        [InlineData(PaymentReservationStatus.StartRejected)]
+        [InlineData(PaymentReservationStatus.StartTimeout)]
+        public void IsConnectorBusy_IgnoresNonLockingReservation_WithStaleActiveConnectorKey(string terminalStatus)
         {
             using var connection = CreateConnection();
             Guid reservationId;
@@ -93,7 +99,7 @@ namespace OCPP.Core.Server.Tests
             {
                 corruptContext.Database.ExecuteSqlInterpolated($@"
                     UPDATE ChargePaymentReservation
-                    SET Status = {PaymentReservationStatus.Cancelled},
+                    SET Status = {terminalStatus},
                         ActiveConnectorKey = {ChargePaymentReservationActiveKey.ActiveValue}
                     WHERE ReservationId = {reservationId}");
             }
@@ -188,6 +194,7 @@ namespace OCPP.Core.Server.Tests
 
             public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
             public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) => throw new NotSupportedException();
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) => throw new NotSupportedException();
             public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
             public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
             public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }

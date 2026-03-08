@@ -14,6 +14,7 @@ namespace OCPP.Core.Server.Payments
         bool IsEnabled { get; }
         PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request);
         PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId);
+        PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId);
         PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request);
         void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason);
         void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason);
@@ -79,47 +80,49 @@ namespace OCPP.Core.Server.Payments
         public ChargePaymentReservation Reservation { get; set; }
     }
 
+    public class PaymentResumeResult
+    {
+        public bool Success { get; set; }
+        public string Status { get; set; }
+        public string Error { get; set; }
+        public string CheckoutUrl { get; set; }
+        public ChargePaymentReservation Reservation { get; set; }
+    }
+
     public static class PaymentReservationStatus
     {
-        public const string Pending = "PendingPayment";
-        public const string Authorized = "Authorized";
-        public const string StartRequested = "StartRequested";
-        public const string StartRejected = "StartRejected";
-        public const string StartTimeout = "StartTimeout";
-        public const string Abandoned = "Abandoned";
-        public const string Charging = "Charging";
-        public const string Completed = "Completed";
-        public const string Cancelled = "Cancelled";
-        public const string Failed = "Failed";
+        public const string Pending = ChargePaymentReservationState.Pending;
+        public const string Authorized = ChargePaymentReservationState.Authorized;
+        public const string StartRequested = ChargePaymentReservationState.StartRequested;
+        public const string StartRejected = ChargePaymentReservationState.StartRejected;
+        public const string StartTimeout = ChargePaymentReservationState.StartTimeout;
+        public const string Abandoned = ChargePaymentReservationState.Abandoned;
+        public const string Charging = ChargePaymentReservationState.Charging;
+        public const string Completed = ChargePaymentReservationState.Completed;
+        public const string Cancelled = ChargePaymentReservationState.Cancelled;
+        public const string Failed = ChargePaymentReservationState.Failed;
 
-        public static readonly string[] InactiveStatuses =
-        {
-            Completed,
-            Cancelled,
-            Failed,
-            StartRejected,
-            StartTimeout,
-            Abandoned
-        };
-
-        // Keep this aligned with the database computed column for ActiveConnectorKey
-        // (Status NOT IN Completed/Cancelled/Failed/StartRejected/StartTimeout/Abandoned => active).
-        private static readonly HashSet<string> InactiveStatusSet = new HashSet<string>(InactiveStatuses, StringComparer.OrdinalIgnoreCase);
-        private static readonly HashSet<string> CancelableStatusSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            Pending,
-            Authorized,
-            StartRequested
-        };
+        public static readonly string[] InactiveStatuses = ChargePaymentReservationState.InactiveStatuses;
+        public static readonly string[] ConnectorLockStatuses = ChargePaymentReservationState.ConnectorLockStatuses;
 
         public static bool IsActive(string status)
         {
-            return !string.IsNullOrWhiteSpace(status) && !InactiveStatusSet.Contains(status);
+            return ChargePaymentReservationState.IsActive(status);
         }
 
         public static bool IsCancelable(string status)
         {
-            return !string.IsNullOrWhiteSpace(status) && CancelableStatusSet.Contains(status);
+            return ChargePaymentReservationState.IsCancelable(status);
+        }
+
+        public static bool IsTerminal(string status)
+        {
+            return ChargePaymentReservationState.IsTerminal(status);
+        }
+
+        public static bool LocksConnector(string status)
+        {
+            return ChargePaymentReservationState.LocksConnector(status);
         }
     }
 }

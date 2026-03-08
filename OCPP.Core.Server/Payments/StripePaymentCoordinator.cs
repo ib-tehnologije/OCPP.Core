@@ -499,6 +499,119 @@ namespace OCPP.Core.Server.Payments
             }
         }
 
+        public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId)
+        {
+            var result = new PaymentResumeResult
+            {
+                Success = false,
+                Status = "Invalid",
+                Error = "Reservation id is required."
+            };
+
+            if (!IsEnabled)
+            {
+                result.Status = "Disabled";
+                result.Error = "Stripe integration is disabled.";
+                return result;
+            }
+
+            if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
+            if (reservationId == Guid.Empty) return result;
+
+            var reservation = dbContext.ChargePaymentReservations.Find(reservationId);
+            if (reservation == null)
+            {
+                _logger.LogWarning("Stripe/Resume => Reservation not found reservation={ReservationId}", reservationId);
+                result.Status = "NotFound";
+                result.Error = "Reservation not found.";
+                return result;
+            }
+
+            result.Reservation = reservation;
+
+            if (PaymentReservationStatus.IsTerminal(reservation.Status))
+            {
+                _logger.LogInformation("Stripe/Resume => Reservation already terminal reservation={ReservationId} status={Status}",
+                    reservationId,
+                    reservation.Status ?? "(null)");
+                result.Success = true;
+                result.Status = reservation.Status ?? "InvalidStatus";
+                result.Error = null;
+                return result;
+            }
+
+            if (string.Equals(reservation.Status, PaymentReservationStatus.Authorized, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservation.Status, PaymentReservationStatus.StartRequested, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservation.Status, PaymentReservationStatus.Charging, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Stripe/Resume => Reservation should continue on status page reservation={ReservationId} status={Status}",
+                    reservationId,
+                    reservation.Status ?? "(null)");
+                result.Success = true;
+                result.Status = "Status";
+                result.Error = null;
+                return result;
+            }
+
+            if (!string.Equals(reservation.Status, PaymentReservationStatus.Pending, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Success = true;
+                result.Status = reservation.Status ?? "Status";
+                result.Error = null;
+                return result;
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.StripeCheckoutSessionId))
+            {
+                _logger.LogWarning("Stripe/Resume => Missing checkout session reservation={ReservationId}", reservationId);
+                result.Status = "MissingCheckoutSession";
+                result.Error = "Checkout session is missing.";
+                return result;
+            }
+
+            try
+            {
+                var session = _sessionService.Get(reservation.StripeCheckoutSessionId);
+                if (session == null)
+                {
+                    _logger.LogWarning("Stripe/Resume => Session not found reservation={ReservationId} sessionId={SessionId}",
+                        reservationId,
+                        reservation.StripeCheckoutSessionId);
+                    result.Status = "MissingCheckoutSession";
+                    result.Error = "Checkout session was not found.";
+                    return result;
+                }
+
+                if (string.Equals(session.Status, "open", StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(session.Url))
+                {
+                    _logger.LogInformation("Stripe/Resume => Resuming open checkout reservation={ReservationId} sessionId={SessionId}",
+                        reservationId,
+                        session.Id);
+                    result.Success = true;
+                    result.Status = "Redirect";
+                    result.CheckoutUrl = session.Url;
+                    result.Error = null;
+                    return result;
+                }
+
+                _logger.LogInformation("Stripe/Resume => Checkout session not resumable reservation={ReservationId} sessionId={SessionId} sessionStatus={SessionStatus}",
+                    reservationId,
+                    session.Id ?? reservation.StripeCheckoutSessionId,
+                    session.Status ?? "(null)");
+                result.Status = "ResumeUnavailable";
+                result.Error = $"Checkout session is '{session.Status ?? "unknown"}' and can no longer be resumed.";
+                return result;
+            }
+            catch (StripeException sex)
+            {
+                _logger.LogWarning(sex, "Stripe/Resume => Failed fetching checkout session reservation={ReservationId}", reservationId);
+                result.Status = "StripeError";
+                result.Error = sex.Message;
+                return result;
+            }
+        }
+
         public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request)
         {
             var result = new PaymentR1InvoiceResult
@@ -1368,6 +1481,8 @@ namespace OCPP.Core.Server.Payments
 
             reservation.Status = PaymentReservationStatus.Cancelled;
             reservation.LastError = "Checkout session expired";
+            reservation.FailureCode = "CheckoutExpired";
+            reservation.FailureMessage = reservation.LastError;
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
             return reservation.ReservationId;
@@ -1447,7 +1562,7 @@ namespace OCPP.Core.Server.Payments
 
         private static bool IsTerminalReservationStatus(string status)
         {
-            return !PaymentReservationStatus.IsActive(status);
+            return PaymentReservationStatus.IsTerminal(status);
         }
 
         private static void ClearFailureState(ChargePaymentReservation reservation)

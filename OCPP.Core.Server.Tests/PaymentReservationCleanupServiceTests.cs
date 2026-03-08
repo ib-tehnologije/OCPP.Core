@@ -255,6 +255,9 @@ namespace OCPP.Core.Server.Tests
         public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) =>
             throw new NotImplementedException();
 
+        public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) =>
+            throw new NotImplementedException();
+
         public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) =>
             throw new NotImplementedException();
 

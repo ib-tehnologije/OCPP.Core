@@ -1082,6 +1082,10 @@ namespace OCPP.Core.Server
             {
                 await HandlePaymentCreateAsync(context, dbContext);
             }
+            else if (string.Equals(action, "Resume", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePaymentResumeAsync(context, dbContext);
+            }
             else if (string.Equals(action, "Confirm", StringComparison.OrdinalIgnoreCase))
             {
                 await HandlePaymentConfirmAsync(context, dbContext);
@@ -1146,7 +1150,7 @@ namespace OCPP.Core.Server
                 status.WebSocket.State != WebSocketState.Open)
             {
                 context.Response.StatusCode = (int)HttpStatusCode.NotFound;
-                await context.Response.WriteAsync("{\"status\":\"ChargerOffline\"}");
+                await context.Response.WriteAsync("{\"status\":\"ChargerOffline\",\"reason\":\"Offline\"}");
                 return;
             }
 
@@ -1157,7 +1161,11 @@ namespace OCPP.Core.Server
                     request.ChargePointId,
                     request.ConnectorId);
                 context.Response.StatusCode = (int)HttpStatusCode.Conflict;
-                await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\"}");
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+                {
+                    status = ConnectorBusyStatus,
+                    reason = busyReason ?? "Unknown"
+                }));
                 return;
             }
 
@@ -1203,7 +1211,7 @@ namespace OCPP.Core.Server
             catch (InvalidOperationException ioe) when (string.Equals(ioe.Message, ConnectorBusyStatus, StringComparison.OrdinalIgnoreCase))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.Conflict;
-                await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\"}");
+                await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\",\"reason\":\"ActiveReservation\"}");
             }
             catch (Exception exp)
             {
@@ -1260,6 +1268,53 @@ namespace OCPP.Core.Server
             context.Response.StatusCode = (int)HttpStatusCode.OK;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(JsonConvert.SerializeObject(new { status = tryStart.Status, reason = tryStart.Reason }));
+        }
+
+        private async Task HandlePaymentResumeAsync(HttpContext context, OCPPCoreContext dbContext)
+        {
+            if (!HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                return;
+            }
+
+            PaymentCancelRequest request = null;
+            try
+            {
+                string body = await ReadRequestBodyAsync(context);
+                request = JsonConvert.DeserializeObject<PaymentCancelRequest>(body);
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(exp, "Payments/Resume => Invalid request payload");
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            _logger.LogInformation("Payments/Resume => Incoming resume reservation={ReservationId} ip={RemoteIp}",
+                request.ReservationId,
+                context.Connection.RemoteIpAddress?.ToString() ?? "(unknown)");
+
+            var resume = _paymentCoordinator.ResumeReservation(dbContext, request.ReservationId);
+            context.Response.StatusCode = string.Equals(resume.Status, "NotFound", StringComparison.OrdinalIgnoreCase)
+                ? (int)HttpStatusCode.NotFound
+                : (int)HttpStatusCode.OK;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+            {
+                status = resume.Status,
+                reservationId = resume.Reservation?.ReservationId ?? request.ReservationId,
+                reservationStatus = resume.Reservation?.Status,
+                checkoutUrl = resume.CheckoutUrl,
+                error = resume.Error,
+                locksConnector = PaymentReservationStatus.LocksConnector(resume.Reservation?.Status)
+            }));
         }
 
         private async Task HandlePaymentCancelAsync(HttpContext context, OCPPCoreContext dbContext)
@@ -1457,13 +1512,20 @@ namespace OCPP.Core.Server
                 t.ConnectorId == reservation.ConnectorId &&
                 t.StopTime == null);
 
-            activeReservation = dbContext.ChargePaymentReservations.Any(r =>
+            bool locksConnector = PaymentReservationStatus.LocksConnector(reservation.Status);
+            bool otherActiveReservation = dbContext.ChargePaymentReservations.Any(r =>
                 r.ChargePointId == reservation.ChargePointId &&
                 r.ConnectorId == reservation.ConnectorId &&
+                r.ReservationId != reservation.ReservationId &&
                 r.Status != null &&
-                !PaymentReservationStatus.InactiveStatuses.Contains(r.Status));
+                PaymentReservationStatus.ConnectorLockStatuses.Contains(r.Status));
+
+            activeReservation = locksConnector || otherActiveReservation;
 
             startability = GetConnectorStartability(dbContext, reservation.ChargePointId, reservation.ConnectorId, cpStatus, reservation.ReservationId);
+            string blockingReason = otherActiveReservation
+                ? "ActiveReservation"
+                : (startability != null && !startability.Startable ? startability.Reason : null);
 
             if (reservation.TransactionId.HasValue)
             {
@@ -1520,6 +1582,9 @@ namespace OCPP.Core.Server
                 persistedStatusTime,
                 activeTransaction = activeTx,
                 activeReservation = activeReservation,
+                locksConnector,
+                otherActiveReservation,
+                blockingReason,
                 currency = reservation.Currency,
                 transactionMeterStart = transaction?.MeterStart,
                 transactionMeterStop = transaction?.MeterStop,
@@ -1611,7 +1676,7 @@ namespace OCPP.Core.Server
                     r.ConnectorId == connectorId &&
                     (!reservationToIgnore.HasValue || r.ReservationId != reservationToIgnore.Value) &&
                     r.Status != null &&
-                    !PaymentReservationStatus.InactiveStatuses.Contains(r.Status));
+                    PaymentReservationStatus.ConnectorLockStatuses.Contains(r.Status));
             }
             catch (Exception ex)
             {
@@ -1761,10 +1826,7 @@ namespace OCPP.Core.Server
                 r.ChargePointId == chargePointId &&
                 r.ConnectorId == connectorId &&
                 (!reservationToIgnore.HasValue || r.ReservationId != reservationToIgnore.Value) &&
-                (r.Status == PaymentReservationStatus.Pending ||
-                 r.Status == PaymentReservationStatus.Authorized ||
-                 r.Status == PaymentReservationStatus.StartRequested ||
-                 r.Status == PaymentReservationStatus.Charging));
+                PaymentReservationStatus.ConnectorLockStatuses.Contains(r.Status));
             if (result.ActiveReservation)
             {
                 result.Reason = "ActiveReservation";

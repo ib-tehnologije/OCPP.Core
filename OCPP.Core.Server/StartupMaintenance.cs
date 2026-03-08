@@ -172,7 +172,7 @@ namespace OCPP.Core.Server
                         r.ChargePointId == status.ChargePointId &&
                         r.ConnectorId == status.ConnectorId &&
                         r.Status != null &&
-                        !PaymentReservationStatus.InactiveStatuses.Contains(r.Status));
+                        PaymentReservationStatus.ConnectorLockStatuses.Contains(r.Status));
                 }
                 catch
                 {

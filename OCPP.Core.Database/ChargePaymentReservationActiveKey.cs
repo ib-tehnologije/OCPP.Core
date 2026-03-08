@@ -7,15 +7,7 @@ namespace OCPP.Core.Database
     {
         public const string ActiveValue = "ACTIVE";
 
-        private static readonly HashSet<string> InactiveStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "Completed",
-            "Cancelled",
-            "Failed",
-            "StartRejected",
-            "StartTimeout",
-            "Abandoned"
-        };
+        private static readonly HashSet<string> InactiveStatuses = new HashSet<string>(ChargePaymentReservationState.InactiveStatuses, StringComparer.OrdinalIgnoreCase);
 
         public static bool RequiresManualSync(string providerName)
         {

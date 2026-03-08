@@ -29,8 +29,16 @@ namespace OCPP.Core.Management.Models
         public List<PublicStartConnectorOption> Connectors { get; set; } = new List<PublicStartConnectorOption>();
         public bool ShowConnectorSelector => Connectors.Count > 1;
         public bool HasIdleFee => ConnectorUsageFeePerMinute > 0;
+        public string AvailabilityMessage { get; set; }
+        public bool HasAvailabilityMessage => !string.IsNullOrWhiteSpace(AvailabilityMessage);
         public string ErrorMessage { get; set; }
         public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
+        public Guid? RecoveryReservationId { get; set; }
+        public string RecoveryReservationStatus { get; set; }
+        public string RecoveryCheckoutUrl { get; set; }
+        public string RecoveryMessage { get; set; }
+        public bool HasRecoveryOptions => RecoveryReservationId.HasValue;
+        public bool CanResumeRecovery => !string.IsNullOrWhiteSpace(RecoveryCheckoutUrl);
     }
 
     public class PublicStartConnectorOption
@@ -39,6 +47,7 @@ namespace OCPP.Core.Management.Models
         public string Label { get; set; }
         public string LastStatus { get; set; }
         public DateTime? LastStatusTime { get; set; }
+        public string OccupancyReason { get; set; }
         public bool IsSelected { get; set; }
     }
 }

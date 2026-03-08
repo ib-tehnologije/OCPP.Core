@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -10,6 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OCPP.Core.Database;
 using OCPP.Core.Management.Controllers;
 using OCPP.Core.Management.Models;
+using OCPP.Core.Server.Payments;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -17,7 +20,7 @@ namespace OCPP.Core.Server.Tests
     public class PublicControllerTests
     {
         [Fact]
-        public void Start_SingleConnector_KeepsCurrentSingleConnectorBehavior()
+        public async Task Start_SingleConnector_KeepsCurrentSingleConnectorBehavior()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-single-{Guid.NewGuid():N}.sqlite");
 
@@ -40,7 +43,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Start("CP-SINGLE", null);
+                var result = await controller.Start("CP-SINGLE", null);
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
@@ -57,7 +60,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Start_MultiConnector_SelectsRequestedConnectorAndUsesFriendlyLabels()
+        public async Task Start_MultiConnector_SelectsRequestedConnectorAndUsesFriendlyLabels()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-multi-{Guid.NewGuid():N}.sqlite");
 
@@ -88,7 +91,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Start("CP-MULTI", 2);
+                var result = await controller.Start("CP-MULTI", 2);
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
@@ -117,7 +120,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Start_InvalidConnector_FallsBackToFirstAvailableConnector()
+        public async Task Start_InvalidConnector_FallsBackToFirstAvailableConnector()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-fallback-{Guid.NewGuid():N}.sqlite");
 
@@ -145,7 +148,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Start("CP-FALLBACK", 99);
+                var result = await controller.Start("CP-FALLBACK", 99);
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
@@ -160,7 +163,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Start_GenericChargePointUrl_SelectsFirstAvailableConnector()
+        public async Task Start_GenericChargePointUrl_SelectsFirstAvailableConnector()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-generic-{Guid.NewGuid():N}.sqlite");
 
@@ -188,7 +191,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Start("CP-GENERIC", null);
+                var result = await controller.Start("CP-GENERIC", null);
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
@@ -203,7 +206,55 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Start_FallsBackToLowestConnector_WhenNoConnectorIsAvailable()
+        public async Task Start_PendingReservation_ShowsReservedAvailabilityMessage()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-reserved-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-RESERVED", "Reserved test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-RESERVED",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow.AddMinutes(-1)
+                    });
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = Guid.NewGuid(),
+                        ChargePointId = "CP-RESERVED",
+                        ConnectorId = 1,
+                        ChargeTagId = "WEB-RESERVED",
+                        Status = PaymentReservationStatus.Pending,
+                        Currency = "eur",
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("CP-RESERVED", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("Reserved", model.LastStatus);
+                Assert.Contains("temporarily reserved", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal("ActiveReservation", model.Connectors.Single().OccupancyReason);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_FallsBackToLowestConnector_WhenNoConnectorIsAvailable()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-no-available-{Guid.NewGuid():N}.sqlite");
 
@@ -231,7 +282,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Start("CP-NO-AVAILABLE", null);
+                var result = await controller.Start("CP-NO-AVAILABLE", null);
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
@@ -342,7 +393,18 @@ namespace OCPP.Core.Server.Tests
                 .AddInMemoryCollection(new Dictionary<string, string?>())
                 .Build();
 
-            return new PublicController(null, NullLoggerFactory.Instance, config, dbContext);
+            IDataProtectionProvider dataProtectionProvider = DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(Path.GetTempPath(), "ocpp-public-controller-tests")));
+
+            var controller = new PublicController(null, NullLoggerFactory.Instance, config, dataProtectionProvider, dbContext)
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext()
+                }
+            };
+
+            return controller;
         }
 
         private static OCPPCoreContext CreateContext(string databasePath)
