@@ -262,6 +262,10 @@ html {
   padding: 18px;
 }
 
+.public-modal-backdrop[hidden] {
+  display: none !important;
+}
+
 .public-modal-card {
   width: min(520px, 100%);
   border-radius: var(--public-radius);
