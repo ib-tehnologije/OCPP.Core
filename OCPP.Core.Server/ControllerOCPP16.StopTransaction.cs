@@ -88,10 +88,10 @@ namespace OCPP.Core.Server
                 }
                 else
                 {
-                    // Error unknown transaction id
-                    Logger.LogError("StopTransaction => Unknown or not matching transaction: id={0} / chargepoint={1} / tag={2}", stopTransactionRequest.TransactionId, ChargePointStatus?.Id, idTag);
-                    WriteMessageLog(ChargePointStatus?.Id, transaction?.ConnectorId, msgIn.Action, string.Format("UnknownTransaction:ID={0}/Meter={1}", stopTransactionRequest.TransactionId, stopTransactionRequest.MeterStop), errorCode);
-                    errorCode = ErrorCodes.PropertyConstraintViolation;
+                    // Some chargers resend stale StopTransaction messages from an offline queue after the
+                    // server has already closed the transaction. Ack them so they can clear the queue.
+                    Logger.LogWarning("StopTransaction => Acknowledging stale/unknown transaction: id={0} / chargepoint={1} / tag={2}", stopTransactionRequest.TransactionId, ChargePointStatus?.Id, idTag);
+                    stopTransactionResponse.IdTagInfo.Status = IdTagInfoStatus.Accepted;
                 }
 
 
@@ -122,7 +122,7 @@ namespace OCPP.Core.Server
                         {
                             // Update meter value in db connector status 
                             UpdateConnectorStatus(transaction.ConnectorId, null, null, (double)stopTransactionRequest.MeterStop / 1000, stopTransactionRequest.Timestamp);
-                            UpdateMemoryConnectorStatus(transaction.ConnectorId, (double)stopTransactionRequest.MeterStop / 1000, stopTransactionRequest.Timestamp, null, null);
+                            UpdateMemoryConnectorStatus(transaction.ConnectorId, (double)stopTransactionRequest.MeterStop / 1000, stopTransactionRequest.Timestamp, null, null, null);
                         }
 
                         // If a stop-tag was provided and differs from the start-tag, validate whether it is in the same group.
@@ -161,9 +161,8 @@ namespace OCPP.Core.Server
                     }
                     else
                     {
-                        Logger.LogError("StopTransaction => Unknown or not matching transaction: id={0} / chargepoint={1} / tag={2}", stopTransactionRequest.TransactionId, ChargePointStatus?.Id, idTag);
-                        WriteMessageLog(ChargePointStatus?.Id, transaction?.ConnectorId, msgIn.Action, string.Format("UnknownTransaction:ID={0}/Meter={1}", stopTransactionRequest.TransactionId, stopTransactionRequest.MeterStop), errorCode);
-                        errorCode = ErrorCodes.PropertyConstraintViolation;
+                        Logger.LogWarning("StopTransaction => Transaction already closed or stale: id={0} / chargepoint={1} / tag={2}", stopTransactionRequest.TransactionId, ChargePointStatus?.Id, idTag);
+                        stopTransactionResponse.IdTagInfo.Status = IdTagInfoStatus.Accepted;
                     }
                 }
                 catch (Exception exp)

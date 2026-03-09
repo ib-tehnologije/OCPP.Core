@@ -55,12 +55,14 @@ namespace OCPP.Core.Server
                 double currentChargeKW = -1;
                 double meterKWH = -1;
                 DateTimeOffset? meterTime = null;
+                double currentImportA = -1;
                 double stateOfCharge = -1;
                 if (transactionEventRequest.MeterValue != null)
                 {
-                    GetMeterValues(transactionEventRequest.MeterValue, out meterKWH, out currentChargeKW, out stateOfCharge, out meterTime);
+                    GetMeterValues(transactionEventRequest.MeterValue, out meterKWH, out currentChargeKW, out currentImportA, out stateOfCharge, out meterTime);
                     msgLogText = $"Meter (kWh): {meterKWH}";
                     if (currentChargeKW >= 0) msgLogText += $" | Charge (kW): {currentChargeKW}";
+                    if (currentImportA >= 0) msgLogText += $" | Current (A): {currentImportA}";
                     if (stateOfCharge >= 0) msgLogText += $" | SoC (%): {stateOfCharge}";
                 }
 
@@ -70,7 +72,7 @@ namespace OCPP.Core.Server
                 if (connectorId > 0 && meterKWH >= 0)
                 {
                     UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
-                    UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime.Value, currentChargeKW, stateOfCharge);
+                    UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime.Value, currentChargeKW, currentImportA, stateOfCharge);
                 }
 
                 if (transactionEventRequest.EventType == TransactionEventEnumType.Started)
@@ -323,10 +325,8 @@ namespace OCPP.Core.Server
                         }
                         else
                         {
-                            // Error unknown transaction id
-                            Logger.LogError("EndTransaction => Unknown or not matching transaction: id={0} / chargepoint={1} / tag={2}", transactionEventRequest.TransactionInfo.TransactionId, ChargePointStatus?.Id, idTag);
-                            WriteMessageLog(ChargePointStatus?.Id, transaction?.ConnectorId, msgIn.Action, string.Format("UnknownTransaction:ID={0}/Meter={1}", transactionEventRequest.TransactionInfo.TransactionId, transactionEventRequest.MeterValue), errorCode);
-                            errorCode = ErrorCodes.PropertyConstraintViolation;
+                            Logger.LogWarning("EndTransaction => Acknowledging stale/unknown transaction: id={0} / chargepoint={1} / tag={2}", transactionEventRequest.TransactionInfo.TransactionId, ChargePointStatus?.Id, idTag);
+                            transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
                         }
 
 
@@ -396,9 +396,8 @@ namespace OCPP.Core.Server
                                 }
                                 else
                                 {
-                                    Logger.LogError("EndTransaction => Unknown or not matching transaction: uid='{0}' / chargepoint='{1}' / tag={2}", transactionEventRequest.TransactionInfo?.TransactionId, ChargePointStatus?.Id, idTag);
-                                    WriteMessageLog(ChargePointStatus?.Id, connectorId, msgIn.Action, string.Format("UnknownTransaction:UID={0}/Meter={1}", transactionEventRequest.TransactionInfo?.TransactionId, GetMeterValue(transactionEventRequest.MeterValue)), errorCode);
-                                    errorCode = ErrorCodes.PropertyConstraintViolation;
+                                    Logger.LogWarning("EndTransaction => Transaction already closed or stale: uid='{0}' / chargepoint='{1}' / tag={2}", transactionEventRequest.TransactionInfo?.TransactionId, ChargePointStatus?.Id, idTag);
+                                    transactionEventResponse.IdTokenInfo.Status = AuthorizationStatusEnumType.Accepted;
                                 }
                             }
                             catch (Exception exp)
@@ -440,8 +439,9 @@ namespace OCPP.Core.Server
             double currentChargeKW = -1;
             double meterKWH = -1;
             DateTimeOffset? meterTime = null;
+            double currentImportA = -1;
             double stateOfCharge = -1;
-            GetMeterValues(meterValues, out meterKWH, out currentChargeKW, out stateOfCharge, out meterTime);
+            GetMeterValues(meterValues, out meterKWH, out currentChargeKW, out currentImportA, out stateOfCharge, out meterTime);
 
             return meterKWH;
         }
@@ -449,15 +449,19 @@ namespace OCPP.Core.Server
         /// <summary>
         /// Extract different meter values from collection
         /// </summary>
-        private void GetMeterValues(ICollection<MeterValueType> meterValues, out double meterKWH, out double currentChargeKW, out double stateOfCharge, out DateTimeOffset? meterTime)
+        private void GetMeterValues(ICollection<MeterValueType> meterValues, out double meterKWH, out double currentChargeKW, out double currentImportA, out double stateOfCharge, out DateTimeOffset? meterTime)
         {
             currentChargeKW = -1;
+            currentImportA = -1;
             meterKWH = -1;
             meterTime = null;
             stateOfCharge = -1;
 
             foreach (MeterValueType meterValue in meterValues)
             {
+                var powerAggregate = new PhaseAwareMeasurementAggregate();
+                var currentAggregate = new PhaseAwareMeasurementAggregate();
+
                 foreach (SampledValueType sampleValue in meterValue.SampledValue)
                 {
                     Logger.LogTrace("GetMeterValues => Context={0} / SignedMeterValue={1} / Value={2} / Unit={3} / Location={4} / Measurand={5} / Phase={6}",
@@ -465,28 +469,26 @@ namespace OCPP.Core.Server
 
                     if (sampleValue.Measurand == MeasurandEnumType.Power_Active_Import)
                     {
-                        // current charging power
-                        currentChargeKW = sampleValue.Value;
-                        if (sampleValue.UnitOfMeasure?.Unit == "W" ||
-                            sampleValue.UnitOfMeasure?.Unit == "VA" ||
-                            sampleValue.UnitOfMeasure?.Unit == "var" ||
-                            sampleValue.UnitOfMeasure?.Unit == null ||
-                            sampleValue.UnitOfMeasure == null)
+                        var normalizedPower = MeterValueAggregation.NormalizePowerToKw(sampleValue.Value, sampleValue.UnitOfMeasure?.Unit);
+                        if (normalizedPower.HasValue)
                         {
-                            Logger.LogTrace("GetMeterValues => Charging '{0:0.0}' W", currentChargeKW);
-                            // convert W => kW
-                            currentChargeKW = currentChargeKW / 1000;
-                        }
-                        else if (sampleValue.UnitOfMeasure?.Unit == "KW" ||
-                                sampleValue.UnitOfMeasure?.Unit == "kVA" ||
-                                sampleValue.UnitOfMeasure?.Unit == "kvar")
-                        {
-                            // already kW => OK
-                            Logger.LogTrace("GetMeterValues => Charging '{0:0.0}' kW", currentChargeKW);
+                            powerAggregate.Add(normalizedPower.Value, sampleValue.Phase?.ToString());
                         }
                         else
                         {
                             Logger.LogWarning("GetMeterValues => Charging: unexpected unit: '{0}' (Value={1})", sampleValue.UnitOfMeasure?.Unit, sampleValue.Value);
+                        }
+                    }
+                    else if (sampleValue.Measurand == MeasurandEnumType.Current_Import)
+                    {
+                        var normalizedCurrent = MeterValueAggregation.NormalizeCurrentToAmpere(sampleValue.Value, sampleValue.UnitOfMeasure?.Unit);
+                        if (normalizedCurrent.HasValue)
+                        {
+                            currentAggregate.Add(normalizedCurrent.Value, sampleValue.Phase?.ToString());
+                        }
+                        else
+                        {
+                            Logger.LogWarning("GetMeterValues => Current: unexpected unit: '{0}' (Value={1})", sampleValue.UnitOfMeasure?.Unit, sampleValue.Value);
                         }
                     }
                     else if (sampleValue.Measurand == MeasurandEnumType.Energy_Active_Import_Register ||
@@ -523,6 +525,9 @@ namespace OCPP.Core.Server
                         Logger.LogTrace("GetMeterValues => SoC: '{0:0.0}'%", stateOfCharge);
                     }
                 }
+
+                currentChargeKW = powerAggregate.GetValue() ?? currentChargeKW;
+                currentImportA = currentAggregate.GetValue() ?? currentImportA;
             }
         }
     }

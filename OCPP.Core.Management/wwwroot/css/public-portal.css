@@ -230,6 +230,71 @@ html {
   flex-wrap: wrap;
 }
 
+.public-brand-image,
+.public-footer-image {
+  display: block;
+  max-height: 40px;
+  max-width: 180px;
+  width: auto;
+}
+
+.company-footer--shell {
+  margin-top: 18px;
+}
+
+.public-icon-btn {
+  border: 0;
+  background: transparent;
+  color: var(--public-text);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.public-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(5, 10, 20, 0.82);
+  backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.public-modal-card {
+  width: min(520px, 100%);
+  border-radius: var(--public-radius);
+  border: 1px solid var(--public-border-2);
+  background: var(--public-surface);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
+.public-modal-head,
+.public-modal-body {
+  padding: 18px;
+}
+
+.public-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--public-border);
+}
+
+.public-qr-reader {
+  min-height: 280px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--public-border);
+  background: rgba(2, 8, 18, 0.65);
+}
+
+.public-alert--compact {
+  margin-top: 12px;
+}
+
 .public-portal-nav {
   display: flex;
   gap: 0;

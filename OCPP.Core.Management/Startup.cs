@@ -96,6 +96,7 @@ namespace OCPP.Core.Management
             services.AddScoped<IUserManager, UserManager>();
             services.AddScoped<Services.IEmailSender, Services.EmailSender>();
             services.AddScoped<Services.IOwnerReportService, Services.OwnerReportService>();
+            services.AddScoped<Services.IPublicPortalSettingsResolver, Services.PublicPortalSettingsResolver>();
             services.AddDistributedMemoryCache();
             services.Configure<EmailSettings>(Configuration.GetSection("Email"));
             services.Configure<OwnerReportScheduleSettings>(Configuration.GetSection("OwnerReportSchedule"));
@@ -128,7 +129,7 @@ namespace OCPP.Core.Management
             app.UseRouting();
             app.UseAuthorization();
 
-            var supportedCultures = new[] { "en", "de" };
+            var supportedCultures = new[] { "hr", "en", "sl", "it", "de", "fr" };
             var localizationOptions = new RequestLocalizationOptions().SetDefaultCulture(supportedCultures[0])
                 .AddSupportedCultures(supportedCultures)
                 .AddSupportedUICultures(supportedCultures);

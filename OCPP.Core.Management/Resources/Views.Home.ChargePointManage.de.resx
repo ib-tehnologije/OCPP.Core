@@ -151,4 +151,13 @@
   <data name="ErrorGeneric" xml:space="preserve">
     <value>Anfrage fehlgeschlagen</value>
   </data>
+  <data name="CancelReservation" xml:space="preserve">
+    <value>Reservierung stornieren</value>
+  </data>
+  <data name="CancelReservationConfirm" xml:space="preserve">
+    <value>Diese ausstehende Reservierung stornieren?</value>
+  </data>
+  <data name="SessionExpired" xml:space="preserve">
+    <value>Ihre Sitzung ist abgelaufen. Bitte Seite neu laden und erneut anmelden.</value>
+  </data>
 </root>

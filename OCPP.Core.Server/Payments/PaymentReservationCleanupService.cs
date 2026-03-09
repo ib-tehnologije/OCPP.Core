@@ -32,7 +32,7 @@ namespace OCPP.Core.Server.Payments
             _scopeFactory = scopeFactory;
             _logger = logger;
             _configuration = configuration;
-            _startWindowMinutes = Math.Max(1, paymentOptions?.Value?.StartWindowMinutes ?? 7);
+            _startWindowMinutes = Math.Max(1, paymentOptions?.Value?.StartWindowMinutes ?? 2);
 
             int intervalSeconds = _configuration.GetValue<int?>("Maintenance:CleanupIntervalSeconds") ?? 60;
             _interval = TimeSpan.FromSeconds(Math.Max(30, intervalSeconds));

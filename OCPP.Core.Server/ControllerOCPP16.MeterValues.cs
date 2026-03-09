@@ -76,11 +76,15 @@ namespace OCPP.Core.Server
                 {
                     // Known charge station => process meter values
                     double currentChargeKW = -1;
+                    double currentImportA = -1;
                     double meterKWH = -1;
                     DateTimeOffset meterTime = DateTime.UtcNow;
                     double stateOfCharge = -1;
                     foreach (MeterValue meterValue in meterValueRequest.MeterValue)
                     {
+                        var powerAggregate = new PhaseAwareMeasurementAggregate();
+                        var currentAggregate = new PhaseAwareMeasurementAggregate();
+
                         foreach (SampledValue sampleValue in meterValue.SampledValue)
                         {
                             Logger.LogTrace("MeterValues => Context={0} / Format={1} / Value={2} / Unit={3} / Location={4} / Measurand={5} / Phase={6}",
@@ -88,24 +92,12 @@ namespace OCPP.Core.Server
 
                             if (sampleValue.Measurand == SampledValueMeasurand.Power_Active_Import)
                             {
-                                // current charging power
-                                if (double.TryParse(sampleValue.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out currentChargeKW))
+                                if (double.TryParse(sampleValue.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedPower))
                                 {
-                                    if (sampleValue.Unit == SampledValueUnit.W ||
-                                        sampleValue.Unit == SampledValueUnit.VA ||
-                                        sampleValue.Unit == SampledValueUnit.Var ||
-                                        sampleValue.Unit == null)
+                                    var normalizedPower = MeterValueAggregation.NormalizePowerToKw(parsedPower, sampleValue.Unit?.ToString());
+                                    if (normalizedPower.HasValue)
                                     {
-                                        Logger.LogTrace("MeterValues => Charging '{0:0.0}' W", currentChargeKW);
-                                        // convert W => kW
-                                        currentChargeKW = currentChargeKW / 1000;
-                                    }
-                                    else if (sampleValue.Unit == SampledValueUnit.KW ||
-                                            sampleValue.Unit == SampledValueUnit.KVA ||
-                                            sampleValue.Unit == SampledValueUnit.Kvar)
-                                    {
-                                        // already kW => OK
-                                        Logger.LogTrace("MeterValues => Charging '{0:0.0}' kW", currentChargeKW);
+                                        powerAggregate.Add(normalizedPower.Value, sampleValue.Phase?.ToString());
                                     }
                                     else
                                     {
@@ -115,6 +107,25 @@ namespace OCPP.Core.Server
                                 else
                                 {
                                     Logger.LogError("MeterValues => Charging: invalid value '{0}' (Unit={1})", sampleValue.Value, sampleValue.Unit);
+                                }
+                            }
+                            else if (sampleValue.Measurand == SampledValueMeasurand.Current_Import)
+                            {
+                                if (double.TryParse(sampleValue.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedCurrent))
+                                {
+                                    var normalizedCurrent = MeterValueAggregation.NormalizeCurrentToAmpere(parsedCurrent, sampleValue.Unit?.ToString());
+                                    if (normalizedCurrent.HasValue)
+                                    {
+                                        currentAggregate.Add(normalizedCurrent.Value, sampleValue.Phase?.ToString());
+                                    }
+                                    else
+                                    {
+                                        Logger.LogWarning("MeterValues => Current: unexpected unit: '{0}' (Value={1})", sampleValue.Unit, sampleValue.Value);
+                                    }
+                                }
+                                else
+                                {
+                                    Logger.LogError("MeterValues => Current: invalid value '{0}' (Unit={1})", sampleValue.Value, sampleValue.Unit);
                                 }
                             }
                             else if (sampleValue.Measurand == SampledValueMeasurand.Energy_Active_Import_Register ||
@@ -161,17 +172,20 @@ namespace OCPP.Core.Server
                                 }
                             }
                         }
+
+                        currentChargeKW = powerAggregate.GetValue() ?? currentChargeKW;
+                        currentImportA = currentAggregate.GetValue() ?? currentImportA;
                     }
 
                     // write charging/meter data in chargepoint status
                     if (connectorId > 0)
                     {
-                        msgMeterValue = $"Meter (kWh): {meterKWH} | Charge (kW): {currentChargeKW} | SoC (%): {stateOfCharge}";
+                        msgMeterValue = $"Meter (kWh): {meterKWH} | Charge (kW): {currentChargeKW} | Current (A): {currentImportA} | SoC (%): {stateOfCharge}";
 
                         if (meterKWH >= 0)
                         {
                             UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
-                            UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime, currentChargeKW, stateOfCharge);
+                            UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime, currentChargeKW, currentImportA, stateOfCharge);
                         }
                     }
                 }

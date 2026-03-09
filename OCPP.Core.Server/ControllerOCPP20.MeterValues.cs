@@ -55,8 +55,9 @@ namespace OCPP.Core.Server
                     double currentChargeKW = -1;
                     double meterKWH = -1;
                     DateTimeOffset? meterTime = null;
+                    double currentImportA = -1;
                     double stateOfCharge = -1;
-                    GetMeterValues(meterValueRequest.MeterValue, out meterKWH, out currentChargeKW, out stateOfCharge, out meterTime);
+                    GetMeterValues(meterValueRequest.MeterValue, out meterKWH, out currentChargeKW, out currentImportA, out stateOfCharge, out meterTime);
 
                     // If msg contains no time stamp => use current time
                     if (!meterTime.HasValue) meterTime = DateTime.UtcNow;
@@ -65,11 +66,14 @@ namespace OCPP.Core.Server
                     if (connectorId > 0)
                     {
                         msgMeterValue = $"Meter (kWh): {meterKWH}";
+                        if (currentChargeKW >= 0) msgMeterValue += $" | Charge (kW): {currentChargeKW}";
+                        if (currentImportA >= 0) msgMeterValue += $" | Current (A): {currentImportA}";
+                        if (stateOfCharge >= 0) msgMeterValue += $" | SoC (%): {stateOfCharge}";
 
                         if (meterKWH >= 0)
                         {
                             UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
-                            UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime.Value, null, null);
+                            UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime.Value, currentChargeKW, currentImportA, stateOfCharge);
                         }
                     }
                 }

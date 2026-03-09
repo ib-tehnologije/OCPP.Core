@@ -47,6 +47,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<ConnectorStatus> ConnectorStatuses { get; set; }
         public virtual DbSet<InvoiceSubmissionLog> InvoiceSubmissionLogs { get; set; }
         public virtual DbSet<MessageLog> MessageLogs { get; set; }
+        public virtual DbSet<PublicPortalSettings> PublicPortalSettings { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
         public virtual DbSet<ChargePaymentReservation> ChargePaymentReservations { get; set; }
         public virtual DbSet<StripeWebhookEvent> StripeWebhookEvents { get; set; }
@@ -185,6 +186,29 @@ namespace OCPP.Core.Database
                     .IsRequired();
 
                 entity.HasIndex(e => e.ProcessedAtUtc);
+            });
+
+            modelBuilder.Entity<PublicPortalSettings>(entity =>
+            {
+                entity.ToTable("PublicPortalSettings");
+
+                entity.HasKey(e => e.PublicPortalSettingsId);
+
+                entity.Property(e => e.BrandName).HasMaxLength(200);
+                entity.Property(e => e.Tagline).HasMaxLength(300);
+                entity.Property(e => e.SupportEmail).HasMaxLength(200);
+                entity.Property(e => e.SupportPhone).HasMaxLength(100);
+                entity.Property(e => e.HelpUrl).HasMaxLength(500);
+                entity.Property(e => e.FooterCompanyLine).HasMaxLength(300);
+                entity.Property(e => e.FooterAddressLine).HasMaxLength(300);
+                entity.Property(e => e.FooterLegalLine).HasMaxLength(300);
+                entity.Property(e => e.CanonicalBaseUrl).HasMaxLength(500);
+                entity.Property(e => e.SeoTitle).HasMaxLength(300);
+                entity.Property(e => e.SeoDescription).HasMaxLength(500);
+                entity.Property(e => e.HeaderLogoUrl).HasMaxLength(500);
+                entity.Property(e => e.FooterLogoUrl).HasMaxLength(500);
+                entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("getutcdate()");
+                entity.Property(e => e.UpdatedAtUtc).HasDefaultValueSql("getutcdate()");
             });
 
             modelBuilder.Entity<InvoiceSubmissionLog>(entity =>

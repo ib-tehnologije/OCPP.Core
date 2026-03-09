@@ -168,4 +168,13 @@
   <data name="StartTransactionError" xml:space="preserve">
     <value>An error has occurred.</value>
   </data>
+  <data name="CancelReservationApplied" xml:space="preserve">
+    <value>The reservation has been cancelled.</value>
+  </data>
+  <data name="CancelReservationStatus" xml:space="preserve">
+    <value>Reservation status is now '{0}'.</value>
+  </data>
+  <data name="CancelReservationError" xml:space="preserve">
+    <value>The reservation could not be cancelled.</value>
+  </data>
 </root>

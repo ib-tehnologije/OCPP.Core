@@ -1,0 +1,179 @@
+@inject OCPP.Core.Management.Services.IPublicPortalSettingsResolver PortalResolver
+@{
+    var portal = PortalResolver.Resolve();
+    var pageTitle = (ViewData["PublicPageTitle"] as string) ?? portal.SeoTitle ?? portal.BrandName;
+    var pageDescription = (ViewData["PublicPageDescription"] as string) ?? portal.SeoDescription ?? portal.Tagline;
+    var canonicalOverride = ViewData["PublicCanonical"] as string;
+    var canonicalUrl = !string.IsNullOrWhiteSpace(canonicalOverride)
+        ? canonicalOverride
+        : (!string.IsNullOrWhiteSpace(portal.CanonicalBaseUrl)
+            ? $"{portal.CanonicalBaseUrl}{Context.Request.Path}{Context.Request.QueryString}"
+            : null);
+    var activeNav = (ViewData["PublicNav"] as string) ?? string.Empty;
+    var helpUrl = string.IsNullOrWhiteSpace(portal.HelpUrl) ? null : portal.HelpUrl;
+    var supportMailTo = string.IsNullOrWhiteSpace(portal.SupportEmail) ? null : $"mailto:{portal.SupportEmail}";
+    var supportTel = string.IsNullOrWhiteSpace(portal.SupportPhone) ? null : $"tel:{portal.SupportPhone}";
+    var mapUrl = Url.Action("Map", "Public");
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@pageTitle</title>
+    @if (!string.IsNullOrWhiteSpace(pageDescription))
+    {
+        <meta name="description" content="@pageDescription" />
+        <meta property="og:description" content="@pageDescription" />
+        <meta name="twitter:description" content="@pageDescription" />
+    }
+    <meta property="og:title" content="@pageTitle" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    @if (!string.IsNullOrWhiteSpace(canonicalUrl))
+    {
+        <link rel="canonical" href="@canonicalUrl" />
+        <meta property="og:url" content="@canonicalUrl" />
+        <link rel="alternate" hreflang="hr" href="@($"{canonicalUrl}{(canonicalUrl.Contains('?') ? "&" : "?")}lang=hr")" />
+        <link rel="alternate" hreflang="en" href="@($"{canonicalUrl}{(canonicalUrl.Contains('?') ? "&" : "?")}lang=en")" />
+        <link rel="alternate" hreflang="sl" href="@($"{canonicalUrl}{(canonicalUrl.Contains('?') ? "&" : "?")}lang=sl")" />
+        <link rel="alternate" hreflang="it" href="@($"{canonicalUrl}{(canonicalUrl.Contains('?') ? "&" : "?")}lang=it")" />
+        <link rel="alternate" hreflang="de" href="@($"{canonicalUrl}{(canonicalUrl.Contains('?') ? "&" : "?")}lang=de")" />
+        <link rel="alternate" hreflang="fr" href="@($"{canonicalUrl}{(canonicalUrl.Contains('?') ? "&" : "?")}lang=fr")" />
+    }
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="~/css/public-portal.css" asp-append-version="true" />
+    @RenderSection("Head", required: false)
+</head>
+<body class="public-portal"
+      data-portal-brand="@portal.BrandName"
+      data-portal-support-email="@portal.SupportEmail"
+      data-portal-support-phone="@portal.SupportPhone"
+      data-portal-help-url="@portal.HelpUrl">
+    <div class="public-shell">
+        <header class="public-header">
+            <div class="public-branding">
+                @if (!string.IsNullOrWhiteSpace(portal.HeaderLogoUrl))
+                {
+                    <img src="@portal.HeaderLogoUrl" alt="@portal.BrandName" class="public-brand-image" />
+                }
+                else
+                {
+                    <div class="public-badge">⚡</div>
+                }
+                <div>
+                    <h1 class="public-brand-title">@portal.BrandName</h1>
+                    @if (!string.IsNullOrWhiteSpace(portal.Tagline))
+                    {
+                        <p class="public-brand-sub">@portal.Tagline</p>
+                    }
+                </div>
+            </div>
+
+            <div class="public-topbar-actions">
+                @if (!string.IsNullOrWhiteSpace(helpUrl))
+                {
+                    <a class="public-btn ghost" href="@helpUrl" target="_blank" rel="noopener" data-i18n="header.help">Help</a>
+                }
+                @if (!string.IsNullOrWhiteSpace(supportTel))
+                {
+                    <a class="public-btn ghost" href="@supportTel">@portal.SupportPhone</a>
+                }
+                else if (!string.IsNullOrWhiteSpace(supportMailTo))
+                {
+                    <a class="public-btn ghost" href="@supportMailTo" data-i18n="header.support">Support</a>
+                }
+                @if (portal.QrScannerEnabled)
+                {
+                    <button type="button" class="public-btn" id="publicQrOpen" data-i18n="header.scanQr">Scan QR</button>
+                }
+            </div>
+        </header>
+
+        <nav class="public-portal-nav">
+            <a class="public-nav-link @(activeNav == "map" ? "active" : string.Empty)" href="@mapUrl" data-i18n="nav.map">Map</a>
+            @if (!string.IsNullOrWhiteSpace(helpUrl))
+            {
+                <a class="public-nav-link @(activeNav == "help" ? "active" : string.Empty)" href="@helpUrl" target="_blank" rel="noopener" data-i18n="nav.help">How it works</a>
+            }
+            else if (!string.IsNullOrWhiteSpace(supportMailTo))
+            {
+                <a class="public-nav-link" href="@supportMailTo" data-i18n="nav.help">How it works</a>
+            }
+            @if (!string.IsNullOrWhiteSpace(supportMailTo))
+            {
+                <a class="public-nav-link" href="@supportMailTo" data-i18n="nav.contact">Contact</a>
+            }
+            else if (!string.IsNullOrWhiteSpace(supportTel))
+            {
+                <a class="public-nav-link" href="@supportTel" data-i18n="nav.contact">Contact</a>
+            }
+        </nav>
+
+        <div class="public-lang-bar" aria-label="Language selector">
+            <span class="public-lang-label" data-i18n="lang.label">Language</span>
+            <button type="button" class="public-lang-btn" data-public-lang="hr">HR</button>
+            <button type="button" class="public-lang-btn" data-public-lang="en">EN</button>
+            <button type="button" class="public-lang-btn" data-public-lang="sl">SL</button>
+            <button type="button" class="public-lang-btn" data-public-lang="it">IT</button>
+            <button type="button" class="public-lang-btn" data-public-lang="de">DE</button>
+            <button type="button" class="public-lang-btn" data-public-lang="fr">FR</button>
+        </div>
+
+        @RenderBody()
+
+        <footer class="company-footer company-footer--shell">
+            @if (!string.IsNullOrWhiteSpace(portal.FooterLogoUrl))
+            {
+                <img src="@portal.FooterLogoUrl" alt="@portal.BrandName" class="public-footer-image" />
+            }
+            <div class="company-footer-brand">@(!string.IsNullOrWhiteSpace(portal.FooterCompanyLine) ? portal.FooterCompanyLine : portal.BrandName)</div>
+            @if (!string.IsNullOrWhiteSpace(portal.FooterAddressLine))
+            {
+                <div class="company-footer-info">@portal.FooterAddressLine</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(portal.FooterLegalLine))
+            {
+                <div class="company-footer-info">@portal.FooterLegalLine</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(portal.SupportEmail) || !string.IsNullOrWhiteSpace(portal.SupportPhone))
+            {
+                <div class="company-footer-links">
+                    @if (!string.IsNullOrWhiteSpace(portal.SupportEmail))
+                    {
+                        <a href="mailto:@portal.SupportEmail">@portal.SupportEmail</a>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(portal.SupportPhone))
+                    {
+                        <a href="tel:@portal.SupportPhone">@portal.SupportPhone</a>
+                    }
+                </div>
+            }
+        </footer>
+    </div>
+
+    @if (portal.QrScannerEnabled)
+    {
+        <div class="public-modal-backdrop" id="publicQrModal" hidden>
+            <div class="public-modal-card" role="dialog" aria-modal="true" aria-labelledby="publicQrTitle">
+                <div class="public-modal-head">
+                    <div>
+                        <div class="public-section-title" id="publicQrTitle" data-i18n="qr.title">Scan charger QR code</div>
+                        <div class="public-section-sub" data-i18n="qr.subtitle">Use the QR code printed on the charger sticker to open its start page.</div>
+                    </div>
+                    <button type="button" class="public-icon-btn" id="publicQrClose" aria-label="Close">×</button>
+                </div>
+                <div class="public-modal-body">
+                    <div id="publicQrReader" class="public-qr-reader"></div>
+                    <div class="public-alert public-alert--compact" id="publicQrError" hidden></div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="~/js/public-portal.js" asp-append-version="true"></script>
+    @RenderSection("Scripts", required: false)
+</body>
+</html>

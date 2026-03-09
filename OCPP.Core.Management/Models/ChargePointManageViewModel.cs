@@ -17,6 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
 using OCPP.Core.Database;
 
@@ -33,5 +34,25 @@ namespace OCPP.Core.Management.Models
         public Dictionary<string, ChargePointStatus> OnlineConnectorStatuses { get; set; }
 
         public List<AlfenConfigOption> ConfigOptions { get; set; }
+
+        public List<ChargePointManageLiveConnectorViewModel> LiveConnectors { get; set; } = new List<ChargePointManageLiveConnectorViewModel>();
+    }
+
+    public class ChargePointManageLiveConnectorViewModel
+    {
+        public int ConnectorId { get; set; }
+        public string ConnectorName { get; set; }
+        public string LiveStatus { get; set; }
+        public double? ChargeRateKw { get; set; }
+        public double? CurrentImportA { get; set; }
+        public double? MeterKwh { get; set; }
+        public double? SessionEnergyKwh { get; set; }
+        public double? SoC { get; set; }
+        public int? ActiveTransactionId { get; set; }
+        public string ActiveTagId { get; set; }
+        public System.DateTime? StartedAtUtc { get; set; }
+        public Guid? ActiveReservationId { get; set; }
+        public string ActiveReservationStatus { get; set; }
+        public bool CanCancelReservation { get; set; }
     }
 }

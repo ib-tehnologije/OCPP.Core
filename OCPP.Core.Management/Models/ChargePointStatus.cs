@@ -82,6 +82,11 @@ namespace OCPP.Core.Management.Models
         public double? MeterKWH { get; set; }
 
         /// <summary>
+        /// Instantaneous current in ampere
+        /// </summary>
+        public double? CurrentImportA { get; set; }
+
+        /// <summary>
         /// StateOfCharges in percent
         /// </summary>
         public double? SoC { get; set; }

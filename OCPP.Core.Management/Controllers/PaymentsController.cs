@@ -226,7 +226,7 @@ namespace OCPP.Core.Management.Controllers
             if (!string.IsNullOrWhiteSpace(origin) &&
                 string.Equals(origin, "public", StringComparison.OrdinalIgnoreCase))
             {
-                return Url.Action("Start", "Public");
+                return Url.Action("Map", "Public");
             }
 
             return Url.Action("Index", "Home");

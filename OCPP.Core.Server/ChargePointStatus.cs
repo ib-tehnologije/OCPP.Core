@@ -113,6 +113,11 @@ namespace OCPP.Core.Server
         public double? MeterKWH { get; set; }
 
         /// <summary>
+        /// Instantaneous current in ampere
+        /// </summary>
+        public double? CurrentImportA { get; set; }
+
+        /// <summary>
         /// Timestamp from meter value
         /// </summary>
         public DateTimeOffset MeterValueDate { get; set; }

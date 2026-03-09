@@ -1472,6 +1472,7 @@ namespace OCPP.Core.Server
             string persistedStatus = null;
             DateTime? persistedStatusTime = null;
             double? liveChargeRateKw = null;
+            double? liveCurrentImportA = null;
             double? liveMeterKwh = null;
             double? liveSoC = null;
             DateTime? liveMeterValueAtUtc = null;
@@ -1492,6 +1493,7 @@ namespace OCPP.Core.Server
             {
                 liveStatus = online.Status.ToString();
                 liveChargeRateKw = online.ChargeRateKW;
+                liveCurrentImportA = online.CurrentImportA;
                 liveMeterKwh = online.MeterKWH;
                 liveSoC = online.SoC;
                 if (online.MeterValueDate != default)
@@ -1575,6 +1577,7 @@ namespace OCPP.Core.Server
                 actualEnergyKwh = reservation.ActualEnergyKwh,
                 liveStatus,
                 liveChargeRateKw,
+                liveCurrentImportA,
                 liveMeterKwh,
                 liveSoC,
                 liveMeterValueAtUtc,

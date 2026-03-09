@@ -38,16 +38,19 @@ namespace OCPP.Core.Management.Controllers
     {
         private readonly IStringLocalizer<HomeController> _localizer;
         private readonly Services.IOwnerReportService _ownerReportService;
+        private readonly Services.IPublicPortalSettingsResolver _publicPortalSettingsResolver;
 
         public HomeController(
             IUserManager userManager,
             IStringLocalizer<HomeController> localizer,
+            Services.IPublicPortalSettingsResolver publicPortalSettingsResolver,
             Services.IOwnerReportService ownerReportService,
             ILoggerFactory loggerFactory,
             IConfiguration config,
             OCPPCoreContext dbContext) : base(userManager, loggerFactory, config, dbContext)
         {
             _localizer = localizer;
+            _publicPortalSettingsResolver = publicPortalSettingsResolver;
             _ownerReportService = ownerReportService;
             Logger = loggerFactory.CreateLogger<HomeController>();
         }

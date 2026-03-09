@@ -67,7 +67,6 @@ namespace OCPP.Core.Management.Controllers
         {
             int requestedConnectorId = request?.ConnectorId ?? 1;
             var model = BuildViewModel(request?.ChargePointId, requestedConnectorId);
-            model.ChargeTagId = request?.ChargeTagId;
             model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
             model.BuyerCompanyName = request?.BuyerCompanyName;
             model.BuyerOib = request?.BuyerOib;
@@ -110,12 +109,8 @@ namespace OCPP.Core.Management.Controllers
                 model.BuyerCompanyName = null;
             }
 
-            var chargeTagId = model.ChargeTagId;
-            if (string.IsNullOrWhiteSpace(chargeTagId))
-            {
-                chargeTagId = $"WEB-{Guid.NewGuid():N}";
-                model.ChargeTagId = chargeTagId;
-            }
+            var chargeTagId = $"WEB-{Guid.NewGuid():N}";
+            model.ChargeTagId = chargeTagId;
 
             var apiResult = await PostAsync("Payments/Create", new
             {

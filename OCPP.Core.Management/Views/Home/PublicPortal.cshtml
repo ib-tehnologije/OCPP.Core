@@ -1,0 +1,114 @@
+@model OCPP.Core.Management.Models.PublicPortalSettingsEditViewModel
+@{
+    ViewData["Title"] = "Public Portal";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3 class="mb-1">Public portal settings</h3>
+        <div class="text-muted">These values update the public charging pages live without editing files on the server.</div>
+    </div>
+    <a class="btn btn-outline-primary" href="~/Public/Map" target="_blank" rel="noopener">Open public map</a>
+</div>
+
+@if (TempData["InfoMessage"] != null)
+{
+    <div class="alert alert-success">@TempData["InfoMessage"]</div>
+}
+
+<div class="card">
+    <div class="card-body">
+        <form method="post">
+            @Html.AntiForgeryToken()
+            <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+            <div class="form-row">
+                <div class="form-group col-md-6">
+                    <label asp-for="BrandName"></label>
+                    <input asp-for="BrandName" class="form-control" />
+                    <span asp-validation-for="BrandName" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-6">
+                    <label asp-for="Tagline"></label>
+                    <input asp-for="Tagline" class="form-control" />
+                    <span asp-validation-for="Tagline" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label asp-for="SupportEmail"></label>
+                    <input asp-for="SupportEmail" class="form-control" />
+                    <span asp-validation-for="SupportEmail" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-4">
+                    <label asp-for="SupportPhone"></label>
+                    <input asp-for="SupportPhone" class="form-control" />
+                    <span asp-validation-for="SupportPhone" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-4">
+                    <label asp-for="HelpUrl"></label>
+                    <input asp-for="HelpUrl" class="form-control" />
+                    <span asp-validation-for="HelpUrl" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label asp-for="CanonicalBaseUrl"></label>
+                    <input asp-for="CanonicalBaseUrl" class="form-control" />
+                    <small class="form-text text-muted">Example: https://evcharge.hr</small>
+                    <span asp-validation-for="CanonicalBaseUrl" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-4">
+                    <label asp-for="HeaderLogoUrl"></label>
+                    <input asp-for="HeaderLogoUrl" class="form-control" />
+                    <span asp-validation-for="HeaderLogoUrl" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-4">
+                    <label asp-for="FooterLogoUrl"></label>
+                    <input asp-for="FooterLogoUrl" class="form-control" />
+                    <span asp-validation-for="FooterLogoUrl" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-md-6">
+                    <label asp-for="SeoTitle"></label>
+                    <input asp-for="SeoTitle" class="form-control" />
+                    <span asp-validation-for="SeoTitle" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-6">
+                    <label asp-for="SeoDescription"></label>
+                    <textarea asp-for="SeoDescription" class="form-control" rows="2"></textarea>
+                    <span asp-validation-for="SeoDescription" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label asp-for="FooterCompanyLine"></label>
+                    <input asp-for="FooterCompanyLine" class="form-control" />
+                    <span asp-validation-for="FooterCompanyLine" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-4">
+                    <label asp-for="FooterAddressLine"></label>
+                    <input asp-for="FooterAddressLine" class="form-control" />
+                    <span asp-validation-for="FooterAddressLine" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-4">
+                    <label asp-for="FooterLegalLine"></label>
+                    <input asp-for="FooterLegalLine" class="form-control" />
+                    <span asp-validation-for="FooterLegalLine" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-check mb-3">
+                <input asp-for="QrScannerEnabled" class="form-check-input" />
+                <label asp-for="QrScannerEnabled" class="form-check-label"></label>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save settings</button>
+        </form>
+    </div>
+</div>

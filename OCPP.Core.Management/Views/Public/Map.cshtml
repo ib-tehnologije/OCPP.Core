@@ -1,34 +1,21 @@
 @model OCPP.Core.Management.Models.PublicMapViewModel
-@inject Microsoft.Extensions.Configuration.IConfiguration Config
 @{
-    Layout = null;
+    Layout = "_PublicPortalLayout";
     ViewData["Title"] = "Charging map";
+    ViewData["PublicPageTitle"] = "Charging map";
+    ViewData["PublicPageDescription"] = "Find the nearest charger, scan a QR code, and start charging.";
+    ViewData["PublicNav"] = "map";
     var hasCoords = Model.ChargePoints?.Any(cp => cp.Latitude.HasValue && cp.Longitude.HasValue) == true;
-    var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
-    var brandTagline = Config["PublicPortal:Tagline"] ?? "Fast charging locations for your EV.";
-    var supportEmail = Config["PublicPortal:SupportEmail"] ?? Config["Email:ReplyToAddress"] ?? Config["Email:FromAddress"];
 }
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Charging map</title>
+@section Head {
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="~/css/public-portal.css" />
-</head>
-<body class="public-portal">
+}
     <div class="page-wrap" style="align-items: flex-start; padding-top: 20px;">
         <div class="map-container">
             <div class="card" style="width: 100%; max-width: none;">
-                <div class="brand-bar">
-                    <div class="brand-logo">⚡</div>
-                    <div class="brand-name">@brandName</div>
-                </div>
-
                 <div class="map-header">
-                    <h2>Charging map</h2>
-                    <div class="charger-count"><span>@Model.ChargePoints.Count</span> station(s)</div>
+                    <h2 data-i18n="map.title">Charging map</h2>
+                    <div class="charger-count"><span>@Model.ChargePoints.Count</span> <span data-i18n="map.stations">station(s)</span></div>
                 </div>
 
                 <div style="padding: 0 24px;">
@@ -37,11 +24,11 @@
                         <div style="position: relative;">
                             <button id="gpsBtn" type="button" title="Center on your location"
                                     style="position:absolute;right:10px;top:10px;z-index:999;padding:7px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent);font:500 0.82rem var(--font);cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
-                                📍 GPS
+                                <span data-i18n="map.gps">GPS</span>
                             </button>
                             <button id="mapExpandBtn" type="button" title="Expand map"
                                     style="position:absolute;right:10px;top:48px;z-index:999;padding:7px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent);font:500 0.82rem var(--font);cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
-                                🗺 Expand
+                                <span data-i18n="map.expand">Expand</span>
                             </button>
                             <div id="map"></div>
                         </div>
@@ -50,21 +37,21 @@
                     {
                         <div class="alert-box warning" style="margin: 0 0 16px;">
                             <span class="alert-icon">🗺️</span>
-                            <span>No map data available (missing coordinates).</span>
+                            <span data-i18n="map.noCoords">No map data available (missing coordinates).</span>
                         </div>
                     }
                 </div>
 
                 <div class="map-legend">
-                    <div class="legend-item"><div class="legend-dot online"></div><span>Available</span></div>
-                    <div class="legend-item"><div class="legend-dot busy"></div><span>Busy</span></div>
-                    <div class="legend-item"><div class="legend-dot offline"></div><span>Offline</span></div>
+                    <div class="legend-item"><div class="legend-dot online"></div><span data-i18n="map.available">Available</span></div>
+                    <div class="legend-item"><div class="legend-dot busy"></div><span data-i18n="map.busy">Busy</span></div>
+                    <div class="legend-item"><div class="legend-dot offline"></div><span data-i18n="map.offline">Offline</span></div>
                 </div>
 
                 <div class="map-search-wrap">
                     <div class="map-search">
                         <span class="map-search-icon">🔍</span>
-                        <input type="text" id="mapSearch" placeholder="Search by name, location, or charge point id..." autocomplete="off" />
+                        <input type="text" id="mapSearch" placeholder="Search by name, location, or charge point id..." data-i18n-placeholder="map.search" autocomplete="off" />
                         <button type="button" class="map-search-clear" id="mapSearchClear" aria-label="Clear search">&times;</button>
                     </div>
                 </div>
@@ -72,14 +59,14 @@
                 <div class="divider"></div>
 
                 <div style="padding: 16px 24px 8px;">
-                    <div class="info-section-title">Stations on map</div>
+                    <div class="info-section-title" data-i18n="map.stationsOnMap">Stations on map</div>
                 </div>
 
                 <div class="charger-list" id="charger-list">
                     @if (Model.ChargePoints.Count == 0)
                     {
                         <div class="tile full" style="grid-column: 1 / -1;">
-                            <div class="label">No stations configured yet.</div>
+                            <div class="label" data-i18n="map.noStations">No stations configured yet.</div>
                         </div>
                     }
                     else
@@ -110,7 +97,7 @@
                                     <div class="cc-status @statusClass">@cp.Status</div>
                                 </div>
                                 <div class="cc-detail">@cp.LocationDescription</div>
-                                <div class="cc-detail">@cp.ConnectorCount connector(s)</div>
+                                <div class="cc-detail">@cp.ConnectorCount <span data-i18n="map.connectors">connector(s)</span></div>
                                 <div class="cc-detail">
                                     @if (cp.PricePerKwh > 0)
                                     {
@@ -118,36 +105,22 @@
                                     }
                                     else
                                     {
-                                        <span class="cc-power">Free energy</span>
+                                        <span class="cc-power" data-i18n="map.freeEnergy">Free energy</span>
                                     }
                                     @if (cp.UserSessionFee > 0)
                                     {
-                                        <span> · Session fee @cp.UserSessionFee.ToString("0.##") @Model.CurrencySymbol</span>
+                                        <span> · <span data-i18n="map.sessionFee">Session fee</span> @cp.UserSessionFee.ToString("0.##") @Model.CurrencySymbol</span>
                                     }
                                 </div>
                                 @if (cp.ConnectorUsageFeePerMinute > 0)
                                 {
-                                    <div class="cc-detail">Idle fee @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (grace @cp.StartUsageFeeAfterMinutes min)</div>
+                                    <div class="cc-detail"><span data-i18n="map.idleFee">Idle fee</span> @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (<span data-i18n="map.grace">grace</span> @cp.StartUsageFeeAfterMinutes <span data-i18n="map.minutes">min</span>)</div>
                                 }
                                 <div class="cc-actions">
-                                    <a href="@startUrl" onclick="event.stopPropagation();">@startLabel</a>
+                                    <a href="@startUrl" onclick="event.stopPropagation();" data-i18n="@(cp.HasMultipleConnectors ? "map.chooseConnector" : "map.startSession")">@startLabel</a>
                                 </div>
                             </div>
                         }
-                    }
-                </div>
-
-                <div class="company-footer">
-                    <div class="company-footer-brand">@brandName</div>
-                    @if (!string.IsNullOrWhiteSpace(brandTagline))
-                    {
-                        <div class="company-footer-info">@brandTagline</div>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(supportEmail))
-                    {
-                        <div class="company-footer-links">
-                            <a href="mailto:@supportEmail">@supportEmail</a>
-                        </div>
                     }
                 </div>
             </div>
@@ -425,5 +398,3 @@
             }
         </script>
     }
-</body>
-</html>

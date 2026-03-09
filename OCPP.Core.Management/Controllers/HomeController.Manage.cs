@@ -74,6 +74,7 @@ namespace OCPP.Core.Management.Controllers
                 };
 
                 LoadOnlineStatus(vm);
+                LoadLiveConnectorData(vm);
 
                 return View("ChargePointManage", vm);
             }
@@ -143,6 +144,58 @@ namespace OCPP.Core.Management.Controllers
             }
 
             vm.OnlineConnectorStatuses = dictOnlineStatus;
+        }
+
+        private void LoadLiveConnectorData(ChargePointManageViewModel vm)
+        {
+            vm.LiveConnectors = new List<ChargePointManageLiveConnectorViewModel>();
+
+            var openTransactions = DbContext.Transactions
+                .Where(t => t.ChargePointId == vm.ChargePoint.ChargePointId && t.StopTime == null)
+                .OrderByDescending(t => t.TransactionId)
+                .ToList()
+                .GroupBy(t => t.ConnectorId)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var activeReservations = DbContext.ChargePaymentReservations
+                .Where(r => r.ChargePointId == vm.ChargePoint.ChargePointId && ChargePaymentReservationState.ConnectorLockStatuses.Contains(r.Status))
+                .OrderByDescending(r => r.UpdatedAtUtc)
+                .ToList()
+                .GroupBy(r => r.ConnectorId)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            vm.OnlineConnectorStatuses ??= new Dictionary<string, ChargePointStatus>();
+            vm.OnlineConnectorStatuses.TryGetValue(vm.ChargePoint.ChargePointId, out var onlineStatus);
+
+            foreach (var connector in vm.ConnectorStatuses.OrderBy(c => c.ConnectorId))
+            {
+                OnlineConnectorStatus live = null;
+                onlineStatus?.OnlineConnectors?.TryGetValue(connector.ConnectorId, out live);
+                openTransactions.TryGetValue(connector.ConnectorId, out var openTransaction);
+                activeReservations.TryGetValue(connector.ConnectorId, out var activeReservation);
+
+                vm.LiveConnectors.Add(new ChargePointManageLiveConnectorViewModel
+                {
+                    ConnectorId = connector.ConnectorId,
+                    ConnectorName = string.IsNullOrWhiteSpace(connector.ConnectorName) ? $"Connector {connector.ConnectorId}" : connector.ConnectorName,
+                    LiveStatus = live?.Status.ToString() ?? connector.LastStatus ?? "Unknown",
+                    ChargeRateKw = live?.ChargeRateKW,
+                    CurrentImportA = live?.CurrentImportA,
+                    MeterKwh = live?.MeterKWH,
+                    SoC = live?.SoC,
+                    ActiveTransactionId = openTransaction?.TransactionId,
+                    ActiveTagId = openTransaction?.StartTagId,
+                    StartedAtUtc = openTransaction?.StartTime,
+                    SessionEnergyKwh = openTransaction != null && live?.MeterKWH != null
+                        ? System.Math.Max(0, live.MeterKWH.Value - openTransaction.MeterStart)
+                        : null,
+                    ActiveReservationId = activeReservation?.ReservationId,
+                    ActiveReservationStatus = activeReservation?.Status,
+                    CanCancelReservation = activeReservation != null &&
+                        openTransaction == null &&
+                        ChargePaymentReservationState.IsCancelable(activeReservation.Status)
+                });
+            }
         }
 
     }

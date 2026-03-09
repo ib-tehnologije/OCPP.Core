@@ -1,26 +1,20 @@
 @model OCPP.Core.Management.Models.PaymentStatusViewModel
-@inject Microsoft.Extensions.Configuration.IConfiguration Config
+@inject OCPP.Core.Management.Services.IPublicPortalSettingsResolver PortalResolver
 @{
-    Layout = null;
+    Layout = "_PublicPortalLayout";
+    var portal = PortalResolver.Resolve();
     var apiUrl = Url.Action("StatusData", "Payments", new { reservationId = Model.ReservationId });
-    var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
-    var brandTagline = Config["PublicPortal:Tagline"] ?? "Fast charging locations for your EV.";
-    var supportEmail = Config["PublicPortal:SupportEmail"] ?? Config["Email:ReplyToAddress"] ?? Config["Email:FromAddress"];
+    var brandName = portal.BrandName;
+    var supportEmail = portal.SupportEmail;
     var cancelUrl = Url.Action("Cancel", "Payments", new { reservationId = Model.ReservationId, origin = "public" });
     var mapUrl = Url.Action("Index", "Public");
     var startUrlBase = Url.Action("Start", "Public");
     var startPathTemplate = Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" }) ?? string.Empty;
     var requestR1InvoiceUrl = Url.Action("RequestR1Invoice", "Payments");
+    ViewData["PublicPageTitle"] = "Charging status";
+    ViewData["PublicPageDescription"] = "Track charger start, live charging, totals, and invoice details.";
+    ViewData["PublicNav"] = "map";
 }
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Charging status</title>
-    <link rel="stylesheet" href="~/css/public-portal.css" />
-</head>
-<body class="public-portal">
     <nav class="public-session-nav" aria-label="Charging session states">
         <button type="button" data-step="start" class="active" disabled>① Start</button>
         <button type="button" data-step="waiting" disabled>② Wait</button>
@@ -28,21 +22,9 @@
         <button type="button" data-step="done" disabled>④ Done</button>
         <button type="button" data-step="error" disabled>⑤ Error</button>
     </nav>
-    <div class="lang-bar">
-        <span class="lbl">🌐</span>
-        <button type="button" class="lang-btn active">EN</button>
-        <button type="button" class="lang-btn">HR</button>
-        <button type="button" class="lang-btn">DE</button>
-        <button type="button" class="lang-btn">IT</button>
-    </div>
 
     <div class="page-wrap">
         <div class="card">
-            <div class="brand-bar">
-                <div class="brand-logo">⚡</div>
-                <div class="brand-name">@brandName</div>
-            </div>
-
             <div class="status-header">
                 <div class="status-badge waiting" id="status-badge">
                     <span class="dot"></span>
@@ -320,19 +302,6 @@
                 </div>
             </div>
 
-            <div class="company-footer">
-                <div class="company-footer-brand">@brandName</div>
-                @if (!string.IsNullOrWhiteSpace(brandTagline))
-                {
-                    <div class="company-footer-info">@brandTagline</div>
-                }
-                @if (!string.IsNullOrWhiteSpace(supportEmail))
-                {
-                    <div class="company-footer-links">
-                        <a href="mailto:@supportEmail">@supportEmail</a>
-                    </div>
-                }
-            </div>
         </div>
     </div>
 
@@ -745,5 +714,3 @@
         loadStatus();
         setInterval(loadStatus, 5000);
     </script>
-</body>
-</html>

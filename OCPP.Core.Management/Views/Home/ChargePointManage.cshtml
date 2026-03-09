@@ -22,6 +22,54 @@
     </div>
 </div>
 
+@if (Model.LiveConnectors != null && Model.LiveConnectors.Count > 0)
+{
+    <div class="card mb-3">
+        <div class="card-header">Live session status</div>
+        <div class="card-body">
+            <div class="row">
+                @foreach (var connector in Model.LiveConnectors)
+                {
+                    var badgeClass = "badge-secondary";
+                    if (string.Equals(connector.LiveStatus, "Available", StringComparison.OrdinalIgnoreCase)) badgeClass = "badge-success";
+                    if (string.Equals(connector.LiveStatus, "Occupied", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(connector.LiveStatus, "Preparing", StringComparison.OrdinalIgnoreCase)) badgeClass = "badge-warning";
+                    if (string.Equals(connector.LiveStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(connector.LiveStatus, "Unavailable", StringComparison.OrdinalIgnoreCase)) badgeClass = "badge-danger";
+                    <div class="col-lg-4 col-md-6 mb-3">
+                        <div class="border rounded h-100 p-3 bg-light">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <strong>@connector.ConnectorName</strong>
+                                <span class="badge @badgeClass">@connector.LiveStatus</span>
+                            </div>
+                            <div class="small text-muted">Connector @connector.ConnectorId</div>
+                            <hr />
+                            <div><strong>Power:</strong> @(connector.ChargeRateKw?.ToString("0.0") ?? "-") kW</div>
+                            <div><strong>Current:</strong> @(connector.CurrentImportA?.ToString("0.0") ?? "-") A</div>
+                            <div><strong>Meter:</strong> @(connector.MeterKwh?.ToString("0.000") ?? "-") kWh</div>
+                            <div><strong>Session:</strong> @(connector.SessionEnergyKwh?.ToString("0.000") ?? "-") kWh</div>
+                            <div><strong>SoC:</strong> @(connector.SoC?.ToString("0") ?? "-") %</div>
+                            <div><strong>Open tx:</strong> @(connector.ActiveTransactionId?.ToString() ?? "-")</div>
+                            <div><strong>Tag:</strong> @(string.IsNullOrWhiteSpace(connector.ActiveTagId) ? "-" : connector.ActiveTagId)</div>
+                            <div><strong>Started:</strong> @(connector.StartedAtUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-") UTC</div>
+                            <div><strong>Reservation:</strong> @(connector.ActiveReservationId?.ToString() ?? "-")</div>
+                            <div><strong>Reservation status:</strong> @(string.IsNullOrWhiteSpace(connector.ActiveReservationStatus) ? "-" : connector.ActiveReservationStatus)</div>
+                            @if (connector.CanCancelReservation && connector.ActiveReservationId.HasValue)
+                            {
+                                <div class="mt-2">
+                                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="cancelReservation('@connector.ActiveReservationId.Value')">
+                                        <i class="fas fa-ban"></i> @Localizer["CancelReservation"]
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
 <div class="card mb-3">
     <div class="card-header">@Localizer["RemoteControl"]</div>
     <div class="card-body">
@@ -240,10 +288,18 @@
             xhr.open('GET', path, true);
             xhr.onreadystatechange = function () {
                 if (xhr.readyState === XMLHttpRequest.DONE) {
-                    if (xhr.status === 200) {
+                    const redirectedToLogin = xhr.responseURL && xhr.responseURL.indexOf('/Account/Login') !== -1;
+                    const contentType = (xhr.getResponseHeader('Content-Type') || '').toLowerCase();
+                    const unexpectedHtml = contentType.indexOf('text/html') !== -1;
+                    if (xhr.status === 200 && !redirectedToLogin && !unexpectedHtml) {
                         onSuccess(xhr.responseText);
+                    } else if (redirectedToLogin || unexpectedHtml) {
+                        setActionMessage('@Localizer["SessionExpired"]');
                     } else {
-                        setActionMessage('@Localizer["ErrorGeneric"]' + ' (' + xhr.status + ')');
+                        const detail = xhr.responseText && xhr.responseText.trim().length
+                            ? (' ' + xhr.responseText.trim())
+                            : '';
+                        setActionMessage('@Localizer["ErrorGeneric"]' + ' (' + xhr.status + ')' + detail);
                     }
                 }
             };
@@ -290,6 +346,22 @@
             setActionMessage('@Localizer["Working"]');
             callApi('@Html.Raw(Url.Content("~/API/StopTransaction/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()), function (resp) {
                 setActionMessage(resp);
+            });
+        }
+
+        function cancelReservation(reservationId) {
+            if (!reservationId) {
+                return;
+            }
+            if (!window.confirm('@Localizer["CancelReservationConfirm"]')) {
+                return;
+            }
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/CancelReservation/"))' + encodeURIComponent(reservationId), function (resp) {
+                setActionMessage(resp);
+                window.setTimeout(function () {
+                    window.location.reload();
+                }, 1200);
             });
         }
 

@@ -182,10 +182,11 @@ namespace OCPP.Core.Server
         /// <summary>
         /// Set/Update in memory connector status with meter (and more) values
         /// </summary>
-        protected void UpdateMemoryConnectorStatus(int connectorId, double meterKWH, DateTimeOffset meterTime, double? currentChargeKW, double? stateOfCharge)
+        protected void UpdateMemoryConnectorStatus(int connectorId, double meterKWH, DateTimeOffset meterTime, double? currentChargeKW, double? currentImportA, double? stateOfCharge)
         {
             // Values <1 have no meaning => null
             if (currentChargeKW.HasValue && currentChargeKW < 0) currentChargeKW = null;
+            if (currentImportA.HasValue && currentImportA < 0) currentImportA = null;
             if (stateOfCharge.HasValue && stateOfCharge < 0) stateOfCharge = null;
 
             OnlineConnectorStatus ocs = null;
@@ -220,6 +221,7 @@ namespace OCPP.Core.Server
             }
             ocs.MeterKWH = meterKWH;
             ocs.MeterValueDate = meterTime;
+            ocs.CurrentImportA = currentImportA;
             ocs.SoC = stateOfCharge;
 
             if (previousChargeKW.HasValue && previousChargeKW.Value > 0.1 &&

@@ -1,12 +1,10 @@
 @model OCPP.Core.Management.Models.PublicStartViewModel
-@inject Microsoft.Extensions.Configuration.IConfiguration Config
-
 @{
-    Layout = null;
+    Layout = "_PublicPortalLayout";
     ViewData["Title"] = "Start charging";
-    var brandName = Config["PublicPortal:BrandName"] ?? "OCPP Core";
-    var brandTagline = Config["PublicPortal:Tagline"] ?? "Start your EV session in one step.";
-    var supportEmail = Config["PublicPortal:SupportEmail"] ?? Config["Email:ReplyToAddress"] ?? Config["Email:FromAddress"];
+    ViewData["PublicPageTitle"] = $"Start charging - {Model.ChargePointName ?? Model.ChargePointId}";
+    ViewData["PublicPageDescription"] = "Start charging, review pricing, and continue to secure payment.";
+    ViewData["PublicNav"] = "map";
     var chargePointLabel = string.IsNullOrWhiteSpace(Model.ChargePointName)
         ? Model.ChargePointId
         : Model.ChargePointName;
@@ -51,15 +49,7 @@
         return "waiting";
     }
 }
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Start charging - @chargePointLabel</title>
-    <link rel="stylesheet" href="~/css/public-portal.css" />
-</head>
-<body class="public-portal">
+
     <nav class="public-session-nav" aria-label="Charging session states">
         <button type="button" class="active" disabled>① Start</button>
         <button type="button" disabled>② Wait</button>
@@ -67,21 +57,9 @@
         <button type="button" disabled>④ Done</button>
         <button type="button" disabled>⑤ Error</button>
     </nav>
-    <div class="lang-bar">
-        <span class="lbl">🌐</span>
-        <button type="button" class="lang-btn active">EN</button>
-        <button type="button" class="lang-btn">HR</button>
-        <button type="button" class="lang-btn">DE</button>
-        <button type="button" class="lang-btn">IT</button>
-    </div>
 
     <div class="page-wrap">
         <div class="card">
-            <div class="brand-bar">
-                <div class="brand-logo">⚡</div>
-                <div class="brand-name">@brandName</div>
-            </div>
-
             <div class="status-header">
                 <div class="status-badge @badgeClass">
                     <span class="dot"></span>
@@ -95,7 +73,7 @@
             {
                 <div class="divider"></div>
                 <div class="info-section connector-selector-section">
-                    <div class="info-section-title">Choose connector</div>
+                            <div class="info-section-title" data-i18n="start.chooseConnector">Choose connector</div>
                     <div class="connector-selector">
                         @foreach (var connector in Model.Connectors)
                         {
@@ -124,7 +102,7 @@
             <div class="divider"></div>
 
             <div class="info-section">
-                <div class="info-section-title">Prices & fees</div>
+                <div class="info-section-title" data-i18n="start.prices">Prices & fees</div>
                 <div class="info-row">
                     <div class="tile featured">
                         <div class="label">Energy</div>
@@ -262,30 +240,26 @@
                         <label class="r1-checkbox">
                             <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
                             <div class="r1-label">
-                                <strong>Company invoice</strong>
+                                <strong data-i18n="start.companyInvoice">Company invoice</strong>
                                 <span class="r1-hint">If you need an R1 invoice, enter your company info below or add it later from the session status page.</span>
                             </div>
                         </label>
 
                         <div id="r1Fields" style="display:@(Model.RequestR1Invoice ? "block" : "none"); margin-bottom: 14px;">
-                            <label for="buyerCompanyName" class="field-label">Company name (optional)</label>
-                            <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" autocomplete="organization" />
+                        <label for="buyerCompanyName" class="field-label" data-i18n="start.companyName">Company name (optional)</label>
+                        <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" data-i18n-placeholder="start.companyNamePlaceholder" autocomplete="organization" />
 
-                            <label for="buyerOib" class="field-label" style="margin-top: 10px;">OIB (required for R1)</label>
-                            <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
-                            <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
-                        </div>
-
-                        <label for="chargeTagId" class="field-label">Charge tag / RFID (optional)</label>
-                        <input type="text" class="field-input" id="chargeTagId" name="ChargeTagId" value="@Model.ChargeTagId" placeholder="Have a card? Enter it here" @(Model.HasError ? "" : "autofocus") />
-                        <div class="field-help">Leave blank to auto-generate a temporary tag for this start.</div>
+                        <label for="buyerOib" class="field-label" style="margin-top: 10px;" data-i18n="start.oib">OIB (required for R1)</label>
+                        <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" data-i18n-placeholder="start.oibPlaceholder" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
+                        <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
+                    </div>
 
                         <button type="submit" class="btn-primary">
-                            <span>@(isFree ? "Start free session" : "Start charging")</span>
+                            <span data-i18n="@(isFree ? "start.startFree" : "start.startCharging")">@(isFree ? "Start free session" : "Start charging")</span>
                             <span class="arrow" aria-hidden="true">→</span>
                         </button>
 
-                        <a class="btn-secondary" href="@mapUrl">Back to map</a>
+                        <a class="btn-secondary" href="@mapUrl" data-i18n="start.backToMap">Back to map</a>
                     </form>
                 </div>
             }
@@ -317,31 +291,15 @@
             {
                 <div class="alert-box warning" style="margin-bottom:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
                     <span class="alert-icon">⏳</span>
-                    <span>Finish or cancel the previous checkout before starting a new session on this connector.</span>
+                    <span data-i18n="start.finishPreviousCheckout">Finish or cancel the previous checkout before starting a new session on this connector.</span>
                 </div>
             }
             else
             {
                 <div class="alert-box info" style="margin-bottom:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
                     <span class="alert-icon">🔒</span>
-                    <span>@(Model.FreeChargingEnabled ? "Free charging enabled. No payment will be charged." : "Secure payment via Stripe. Only the actual cost is charged.")</span>
+                    <span data-i18n="@(Model.FreeChargingEnabled ? "start.freeInfo" : "start.secureInfo")">@(Model.FreeChargingEnabled ? "Free charging enabled. No payment will be charged." : "Secure payment via Stripe. Only the actual cost is charged.")</span>
                 </div>
             }
-
-            <div class="company-footer">
-                <div class="company-footer-brand">@brandName</div>
-                @if (!string.IsNullOrWhiteSpace(brandTagline))
-                {
-                    <div class="company-footer-info">@brandTagline</div>
-                }
-                @if (!string.IsNullOrWhiteSpace(supportEmail))
-                {
-                    <div class="company-footer-links">
-                        <a href="mailto:@supportEmail">@supportEmail</a>
-                    </div>
-                }
-            </div>
         </div>
     </div>
-</body>
-</html>
