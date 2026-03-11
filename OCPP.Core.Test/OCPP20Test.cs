@@ -10,6 +10,11 @@ namespace OCPP.Core.Test
 {
     class OCPP20Test
     {
+        private static readonly JsonSerializer _jsonSerializer = JsonSerializer.Create(new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore
+        });
+
         /*
          * Configure valid data for database and installation here
          */
@@ -731,7 +736,7 @@ namespace OCPP.Core.Test
             {
                 3, // CallResult
                 uniqueId,
-                JObject.FromObject(payload)
+                JObject.FromObject(payload, _jsonSerializer)
             };
             string json = JsonConvert.SerializeObject(message);
             Console.WriteLine($"Sende Result: {json}");
@@ -749,7 +754,7 @@ namespace OCPP.Core.Test
                 2, // Call
                 uniqueId,
                 action,
-                JObject.FromObject(payload)
+                JObject.FromObject(payload, _jsonSerializer)
             };
 
             string json = JsonConvert.SerializeObject(message);
