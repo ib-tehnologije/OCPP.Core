@@ -23,6 +23,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Schema;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -189,19 +190,7 @@ namespace OCPP.Core.Server
             if (currentImportA.HasValue && currentImportA < 0) currentImportA = null;
             if (stateOfCharge.HasValue && stateOfCharge < 0) stateOfCharge = null;
 
-            OnlineConnectorStatus ocs = null;
-            bool isNew = false;
-            if (ChargePointStatus.OnlineConnectors.ContainsKey(connectorId))
-            {
-                ocs = ChargePointStatus.OnlineConnectors[connectorId];
-            }
-            else
-            {
-                ocs = new OnlineConnectorStatus();
-                isNew = true; // append later when all values are correct
-            }
-
-            double? previousChargeKW = ocs?.ChargeRateKW;
+            OnlineConnectorStatus ocs = GetOrCreateOnlineConnectorStatus(connectorId, out bool isNew);
             ocs.ChargeRateKW = currentChargeKW;
             if (meterKWH >= 0 && !currentChargeKW.HasValue &&
                 ocs.MeterKWH.HasValue && ocs.MeterKWH <= meterKWH &&
@@ -224,24 +213,34 @@ namespace OCPP.Core.Server
             ocs.CurrentImportA = currentImportA;
             ocs.SoC = stateOfCharge;
 
-            if (previousChargeKW.HasValue && previousChargeKW.Value > 0.1 &&
-                ocs.ChargeRateKW.HasValue && ocs.ChargeRateKW.Value <= 0.1)
+            if (isNew)
             {
-                // Charging just dropped to ~0kW => mark charging end
-                MarkChargingEnded(connectorId, meterTime);
+                TryAddOnlineConnectorStatus(connectorId, ocs, "MeterValues");
             }
+        }
+
+        protected void UpdateMemoryConnectorStatus(int connectorId, string rawStatus, DateTimeOffset? statusTime)
+        {
+            OnlineConnectorStatus ocs = GetOrCreateOnlineConnectorStatus(connectorId, out bool isNew);
+
+            string normalizedStatus = OcppConnectorStatus.Normalize(rawStatus);
+            ocs.Status = OcppConnectorStatus.ToConnectorStatusEnum(normalizedStatus);
+            ocs.OcppStatus = normalizedStatus;
+            ocs.OcppStatusAtUtc = statusTime ?? DateTimeOffset.UtcNow;
 
             if (isNew)
             {
-                if (ChargePointStatus.OnlineConnectors.TryAdd(connectorId, ocs))
-                {
-                    Logger.LogTrace("MeterValues => Set OnlineConnectorStatus for ChargePoint={0} / Connector={1} / meterKWH: {2}", ChargePointStatus?.Id, connectorId, meterKWH);
-                }
-                else
-                {
-                    Logger.LogError("MeterValues => Error adding new OnlineConnectorStatus for ChargePoint={0} / Connector={1} / meterKWH: {2}", ChargePointStatus?.Id, connectorId, meterKWH);
-                }
+                TryAddOnlineConnectorStatus(connectorId, ocs, "StatusNotification");
             }
+        }
+
+        protected void ApplyConnectorStatusTransition(int connectorId, string rawStatus, DateTimeOffset? statusTime)
+        {
+            string previousRawStatus = GetConnectorRawStatus(connectorId);
+            string normalizedStatus = OcppConnectorStatus.Normalize(rawStatus);
+
+            UpdateMemoryConnectorStatus(connectorId, normalizedStatus, statusTime);
+            UpdateIdleTrackingForStatusTransition(connectorId, previousRawStatus, normalizedStatus, statusTime);
         }
 
         /// <summary>
@@ -300,6 +299,207 @@ namespace OCPP.Core.Server
             {
                 Logger.LogError(exp, "MarkChargingEnded => Error setting charging end for ChargePoint={0} Connector={1}", ChargePointStatus?.Id, connectorId);
             }
+        }
+
+        protected void FinalizeIdleTracking(Transaction transaction, DateTime asOfUtc)
+        {
+            if (transaction == null || !transaction.ChargingEndedAtUtc.HasValue)
+            {
+                return;
+            }
+
+            try
+            {
+                var reservation = FindReservationForTransaction(transaction);
+                if (reservation != null && IdleFeeCalculator.IsIdleFeeEnabled(reservation))
+                {
+                    var snapshot = IdleFeeCalculator.CalculateSnapshot(
+                        transaction,
+                        reservation,
+                        GetPaymentFlowOptions(),
+                        asOfUtc,
+                        Logger);
+
+                    transaction.IdleUsageFeeMinutes = snapshot.TotalMinutes;
+                    transaction.IdleUsageFeeAmount = snapshot.TotalAmount;
+                }
+
+                Logger.LogInformation(
+                    "FinalizeIdleTracking => ChargePoint={ChargePointId} Connector={ConnectorId} Tx={TransactionId} IdleMinutes={IdleMinutes} IdleAmount={IdleAmount}",
+                    transaction.ChargePointId,
+                    transaction.ConnectorId,
+                    transaction.TransactionId,
+                    transaction.IdleUsageFeeMinutes,
+                    transaction.IdleUsageFeeAmount);
+
+                transaction.ChargingEndedAtUtc = null;
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp, "FinalizeIdleTracking => Error finalizing idle totals for tx={TransactionId}", transaction?.TransactionId);
+            }
+        }
+
+        protected ChargePaymentReservation FindReservationForTransaction(Transaction transaction)
+        {
+            if (transaction == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                IQueryable<ChargePaymentReservation> baseQuery = DbContext.ChargePaymentReservations
+                    .Where(r => r.ChargePointId == transaction.ChargePointId && r.ConnectorId == transaction.ConnectorId);
+
+                if (transaction.TransactionId > 0)
+                {
+                    var byTransactionId = baseQuery
+                        .Where(r => r.TransactionId == transaction.TransactionId || r.StartTransactionId == transaction.TransactionId)
+                        .OrderByDescending(r => r.CreatedAtUtc)
+                        .FirstOrDefault();
+                    if (byTransactionId != null)
+                    {
+                        return byTransactionId;
+                    }
+                }
+
+                string normalizedTag = CleanChargeTagId(transaction.StartTagId, Logger);
+                if (!string.IsNullOrWhiteSpace(normalizedTag))
+                {
+                    var byTag = baseQuery
+                        .Where(r => r.OcppIdTag == normalizedTag || r.ChargeTagId == normalizedTag)
+                        .OrderByDescending(r => r.CreatedAtUtc)
+                        .FirstOrDefault();
+                    if (byTag != null)
+                    {
+                        return byTag;
+                    }
+                }
+
+                DateTime txTime = transaction.StopTime ?? transaction.StartTime;
+                return baseQuery
+                    .Where(r => r.CreatedAtUtc <= txTime.AddHours(6))
+                    .OrderByDescending(r => r.CreatedAtUtc)
+                    .FirstOrDefault();
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp, "FindReservationForTransaction => Error resolving reservation for tx={TransactionId}", transaction.TransactionId);
+                return null;
+            }
+        }
+
+        private OnlineConnectorStatus GetOrCreateOnlineConnectorStatus(int connectorId, out bool isNew)
+        {
+            if (ChargePointStatus.OnlineConnectors.TryGetValue(connectorId, out OnlineConnectorStatus existingStatus))
+            {
+                isNew = false;
+                return existingStatus;
+            }
+
+            isNew = true;
+            return new OnlineConnectorStatus();
+        }
+
+        private void TryAddOnlineConnectorStatus(int connectorId, OnlineConnectorStatus connectorStatus, string source)
+        {
+            if (ChargePointStatus.OnlineConnectors.TryAdd(connectorId, connectorStatus))
+            {
+                Logger.LogTrace("{Source} => Set OnlineConnectorStatus for ChargePoint={ChargePointId} / Connector={ConnectorId}",
+                    source,
+                    ChargePointStatus?.Id,
+                    connectorId);
+            }
+            else
+            {
+                Logger.LogError("{Source} => Error adding new OnlineConnectorStatus for ChargePoint={ChargePointId} / Connector={ConnectorId}",
+                    source,
+                    ChargePointStatus?.Id,
+                    connectorId);
+            }
+        }
+
+        private string GetConnectorRawStatus(int connectorId)
+        {
+            if (ChargePointStatus?.OnlineConnectors != null &&
+                ChargePointStatus.OnlineConnectors.TryGetValue(connectorId, out OnlineConnectorStatus onlineConnectorStatus))
+            {
+                return OcppConnectorStatus.Normalize(onlineConnectorStatus.OcppStatus) ?? onlineConnectorStatus.Status.ToString();
+            }
+
+            return null;
+        }
+
+        private void UpdateIdleTrackingForStatusTransition(int connectorId, string previousRawStatus, string newRawStatus, DateTimeOffset? timestamp)
+        {
+            bool wasSuspendedEv = OcppConnectorStatus.IsSuspendedEv(previousRawStatus);
+            bool isSuspendedEv = OcppConnectorStatus.IsSuspendedEv(newRawStatus);
+            DateTime effectiveUtc = (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime;
+
+            if (wasSuspendedEv == isSuspendedEv)
+            {
+                return;
+            }
+
+            try
+            {
+                var transaction = DbContext.Transactions
+                    .Where(t => t.ChargePointId == ChargePointStatus.Id &&
+                                t.ConnectorId == connectorId &&
+                                !t.StopTime.HasValue)
+                    .OrderByDescending(t => t.TransactionId)
+                    .FirstOrDefault();
+
+                if (transaction == null)
+                {
+                    return;
+                }
+
+                if (isSuspendedEv)
+                {
+                    if (!transaction.ChargingEndedAtUtc.HasValue)
+                    {
+                        transaction.ChargingEndedAtUtc = effectiveUtc;
+                        DbContext.SaveChanges();
+                        Logger.LogInformation(
+                            "UpdateIdleTrackingForStatusTransition => Opened idle interval cp={ChargePointId} connector={ConnectorId} tx={TransactionId} at={Timestamp:u}",
+                            transaction.ChargePointId,
+                            transaction.ConnectorId,
+                            transaction.TransactionId,
+                            transaction.ChargingEndedAtUtc);
+                    }
+
+                    return;
+                }
+
+                if (transaction.ChargingEndedAtUtc.HasValue)
+                {
+                    FinalizeIdleTracking(transaction, effectiveUtc);
+                    DbContext.SaveChanges();
+                }
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp,
+                    "UpdateIdleTrackingForStatusTransition => Error updating idle state for ChargePoint={ChargePointId} Connector={ConnectorId} {PreviousStatus} -> {NewStatus}",
+                    ChargePointStatus?.Id,
+                    connectorId,
+                    previousRawStatus ?? "(none)",
+                    newRawStatus ?? "(none)");
+            }
+        }
+
+        private PaymentFlowOptions GetPaymentFlowOptions()
+        {
+            return new PaymentFlowOptions
+            {
+                StartWindowMinutes = Configuration.GetValue<int?>("Payments:StartWindowMinutes") ?? 2,
+                EnableReservationProfile = Configuration.GetValue<bool?>("Payments:EnableReservationProfile") ?? false,
+                IdleFeeExcludedWindow = Configuration.GetValue<string>("Payments:IdleFeeExcludedWindow"),
+                IdleFeeExcludedTimeZoneId = Configuration.GetValue<string>("Payments:IdleFeeExcludedTimeZoneId"),
+                IdleAutoStopMinutes = Configuration.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0
+            };
         }
     }
 }

@@ -171,6 +171,47 @@ namespace OCPP.Core.Management.Controllers
 
         [HttpPost]
         [AllowAnonymous]
+        public async Task<IActionResult> Stop([FromBody] StopPayload request)
+        {
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
+                return Content("{\"status\":\"Error\",\"message\":\"reservationId required\"}", "application/json");
+            }
+
+            var stopResult = await PostAsync("Payments/Stop", new
+            {
+                reservationId = request.ReservationId
+            });
+
+            if (stopResult.Success)
+            {
+                if (!IsJsonObjectPayload(stopResult.Payload))
+                {
+                    Response.StatusCode = (int)System.Net.HttpStatusCode.BadGateway;
+                    return Content("{\"status\":\"Error\",\"message\":\"Unexpected upstream stop response.\"}", "application/json");
+                }
+
+                return Content(stopResult.Payload ?? "{}", "application/json");
+            }
+
+            if (IsJsonObjectPayload(stopResult.Payload))
+            {
+                Response.StatusCode = ExtractStatus(stopResult.Payload) == "NotFound"
+                    ? (int)System.Net.HttpStatusCode.NotFound
+                    : (int)System.Net.HttpStatusCode.BadGateway;
+                return Content(stopResult.Payload, "application/json");
+            }
+
+            Response.StatusCode = (int)System.Net.HttpStatusCode.BadGateway;
+            var safeMessage = string.IsNullOrWhiteSpace(stopResult.ErrorMessage)
+                ? "Upstream stop unavailable."
+                : stopResult.ErrorMessage;
+            return Content($"{{\"status\":\"Error\",\"message\":\"{safeMessage}\"}}", "application/json");
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
         public async Task<IActionResult> RequestR1Invoice([FromBody] R1InvoicePayload request)
         {
             if (request == null || request.ReservationId == Guid.Empty)
@@ -352,6 +393,23 @@ namespace OCPP.Core.Management.Controllers
             }
         }
 
+        private static bool IsJsonObjectPayload(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return false;
+            }
+
+            try
+            {
+                return JToken.Parse(payload) is JObject;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static string ExtractStatus(string payload)
         {
             if (string.IsNullOrWhiteSpace(payload)) return null;
@@ -475,6 +533,11 @@ namespace OCPP.Core.Management.Controllers
         {
             public Guid ReservationId { get; set; }
             public string Reason { get; set; }
+        }
+
+        public class StopPayload
+        {
+            public Guid ReservationId { get; set; }
         }
 
         public class R1InvoicePayload

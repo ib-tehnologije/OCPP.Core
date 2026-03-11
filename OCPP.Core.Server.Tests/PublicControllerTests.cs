@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -254,6 +255,92 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task Start_SuspendedEv_ShowsInUseAvailabilityMessage()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-suspendedev-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-SUSPENDED-EV", "Suspended EV test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-SUSPENDED-EV",
+                        ConnectorId = 1,
+                        LastStatus = "SuspendedEV",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("CP-SUSPENDED-EV", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("SuspendedEV", model.LastStatus);
+                Assert.Contains("currently in use", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_SuspendedEvse_ShowsInUseAvailabilityMessage()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-suspendedevse-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-SUSPENDED-EVSE", "Suspended EVSE test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-SUSPENDED-EVSE",
+                        ConnectorId = 1,
+                        LastStatus = "SuspendedEVSE",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("CP-SUSPENDED-EVSE", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("SuspendedEVSE", model.LastStatus);
+                Assert.Contains("currently in use", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("LiveStatus:SuspendedEV")]
+        [InlineData("LiveStatus:SuspendedEVSE")]
+        [InlineData("PersistedStatus:SuspendedEV")]
+        [InlineData("PersistedStatus:SuspendedEVSE")]
+        [InlineData("LiveStatus:Finishing")]
+        [InlineData("PersistedStatus:Finishing")]
+        public void BuildBusyMessage_MapsPausedAndFinishingReasonsToInUseMessage(string reason)
+        {
+            string message = InvokeBuildBusyMessage(reason);
+
+            Assert.Contains("currently in use", message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task Start_FallsBackToLowestConnector_WhenNoConnectorIsAvailable()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-no-available-{Guid.NewGuid():N}.sqlite");
@@ -446,6 +533,14 @@ namespace OCPP.Core.Server.Tests
             {
                 // Best effort cleanup for temp test DBs.
             }
+        }
+
+        private static string InvokeBuildBusyMessage(string reason)
+        {
+            MethodInfo? method = typeof(PublicController).GetMethod("BuildBusyMessage", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(method);
+
+            return Assert.IsType<string>(method!.Invoke(null, new object[] { reason }));
         }
     }
 }

@@ -43,6 +43,7 @@ namespace OCPP.Core.Management.Models
         public int ConnectorId { get; set; }
         public string ConnectorName { get; set; }
         public string LiveStatus { get; set; }
+        public string LiveOcppStatus { get; set; }
         public double? ChargeRateKw { get; set; }
         public double? CurrentImportA { get; set; }
         public double? MeterKwh { get; set; }

@@ -111,7 +111,7 @@ namespace OCPP.Core.Server.Tests
                     Assert.Equal("test-management-key", request.Headers["x-api-key"]);
 
                     return TestHttpResponse.Json(
-                        "[{\"id\":\"CP-LIVE\",\"onlineConnectors\":{\"1\":{\"status\":\"Occupied\",\"chargeRateKW\":22.5,\"meterKWH\":18.75,\"currentImportA\":31.2,\"soC\":66},\"2\":{\"status\":\"Available\",\"chargeRateKW\":0.0,\"meterKWH\":2.2,\"currentImportA\":0.0,\"soC\":null}}}]");
+                        "[{\"id\":\"CP-LIVE\",\"onlineConnectors\":{\"1\":{\"status\":\"Occupied\",\"ocppStatus\":\"SuspendedEV\",\"chargeRateKW\":22.5,\"meterKWH\":18.75,\"currentImportA\":31.2,\"soC\":66},\"2\":{\"status\":\"Available\",\"ocppStatus\":\"Available\",\"chargeRateKW\":0.0,\"meterKWH\":2.2,\"currentImportA\":0.0,\"soC\":null}}}]");
                 });
 
                 using var actionContext = CreateContext(databasePath);
@@ -134,6 +134,7 @@ namespace OCPP.Core.Server.Tests
                 var connector1 = model.LiveConnectors.Single(c => c.ConnectorId == 1);
                 Assert.Equal("Main cable", connector1.ConnectorName);
                 Assert.Equal("Occupied", connector1.LiveStatus);
+                Assert.Equal("SuspendedEV", connector1.LiveOcppStatus);
                 Assert.Equal(22.5, connector1.ChargeRateKw);
                 Assert.Equal(31.2, connector1.CurrentImportA);
                 Assert.Equal(18.75, connector1.MeterKwh);
@@ -147,6 +148,7 @@ namespace OCPP.Core.Server.Tests
                 var connector2 = model.LiveConnectors.Single(c => c.ConnectorId == 2);
                 Assert.Equal("Connector 2", connector2.ConnectorName);
                 Assert.Equal("Available", connector2.LiveStatus);
+                Assert.Equal("Available", connector2.LiveOcppStatus);
                 Assert.Equal(2.2, connector2.MeterKwh);
                 Assert.Null(connector2.ActiveTransactionId);
                 Assert.NotNull(connector2.ActiveReservationId);
@@ -305,6 +307,132 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task Index_BuildsOverviewRowsWithRawOcppStatus()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"overview-live-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-INDEX",
+                        Name = "Overview test"
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-INDEX",
+                        ConnectorId = 1,
+                        LastStatus = "SuspendedEV",
+                        LastStatusTime = DateTime.UtcNow.AddMinutes(-2)
+                    });
+                    setupContext.Transactions.Add(new Transaction
+                    {
+                        TransactionId = 18,
+                        ChargePointId = "CP-INDEX",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-INDEX",
+                        StartTime = DateTime.UtcNow.AddMinutes(-20),
+                        MeterStart = 10.0
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var server = TestHttpServer.Start(request =>
+                {
+                    Assert.Equal("GET", request.Method);
+                    Assert.Equal("/Status", request.Path);
+
+                    return TestHttpResponse.Json(
+                        "[{\"id\":\"CP-INDEX\",\"onlineConnectors\":{\"1\":{\"status\":\"Occupied\",\"ocppStatus\":\"SuspendedEV\",\"meterKWH\":14.25,\"chargeRateKW\":0.0,\"currentImportA\":0.0,\"soC\":77}}}]");
+                });
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateHomeController(
+                    actionContext,
+                    new Dictionary<string, string?>
+                    {
+                        ["ServerApiUrl"] = server.BaseUri.ToString()
+                    });
+
+                var result = await controller.Index();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<OverviewViewModel>(viewResult.Model);
+                var connector = Assert.Single(model.ChargePoints);
+
+                Assert.True(model.ServerConnection);
+                Assert.Equal("CP-INDEX", connector.ChargePointId);
+                Assert.Equal(OCPP.Core.Management.Models.ConnectorStatusEnum.Occupied, connector.ConnectorStatus);
+                Assert.Equal("SuspendedEV", connector.OcppStatus);
+                Assert.Contains("4.3kWh", connector.CurrentChargeData, StringComparison.Ordinal);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task PaymentsStop_ProxiesSuccessfulJsonPayload()
+        {
+            Guid reservationId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+            using var server = TestHttpServer.Start(request =>
+            {
+                Assert.Equal("POST", request.Method);
+                Assert.Equal("/Payments/Stop", request.Path);
+                Assert.Equal("test-payments-key", request.Headers["x-api-key"]);
+                Assert.Contains($"\"reservationId\":\"{reservationId}\"", request.Body, StringComparison.OrdinalIgnoreCase);
+
+                return TestHttpResponse.Json("{\"status\":\"Accepted\",\"reservationId\":\"33333333-3333-3333-3333-333333333333\"}");
+            });
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-stop-success-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(
+                context,
+                new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = server.BaseUri.ToString(),
+                    ["ApiKey"] = "test-payments-key"
+                });
+
+            var result = await controller.Stop(new PaymentsController.StopPayload
+            {
+                ReservationId = reservationId
+            });
+            var contentResult = Assert.IsType<ContentResult>(result);
+
+            Assert.Equal("application/json", contentResult.ContentType);
+            Assert.Equal("{\"status\":\"Accepted\",\"reservationId\":\"33333333-3333-3333-3333-333333333333\"}", contentResult.Content);
+        }
+
+        [Fact]
+        public async Task PaymentsStop_ReturnsBadGatewayJson_WhenBackendReturnsMalformedBody()
+        {
+            using var server = TestHttpServer.Start(_ =>
+                TestHttpResponse.Html("<html><body>sign in</body></html>"));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-stop-malformed-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(
+                context,
+                new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = server.BaseUri.ToString()
+                });
+
+            var result = await controller.Stop(new PaymentsController.StopPayload
+            {
+                ReservationId = Guid.NewGuid()
+            });
+            var contentResult = Assert.IsType<ContentResult>(result);
+
+            Assert.Equal(StatusCodes.Status502BadGateway, controller.Response.StatusCode);
+            Assert.Equal("application/json", contentResult.ContentType);
+            Assert.Contains("\"status\":\"Error\"", contentResult.Content, StringComparison.Ordinal);
+        }
+
         private static HomeController CreateHomeController(OCPPCoreContext dbContext, IDictionary<string, string?> configValues)
         {
             IConfiguration configuration = new ConfigurationBuilder()
@@ -354,6 +482,26 @@ namespace OCPP.Core.Server.Tests
                 ControllerContext = new ControllerContext
                 {
                     HttpContext = CreateAdminHttpContext()
+                }
+            };
+        }
+
+        private static PaymentsController CreatePaymentsController(OCPPCoreContext dbContext, IDictionary<string, string?> configValues)
+        {
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(configValues)
+                .Build();
+
+            return new PaymentsController(
+                null!,
+                new DictionaryStringLocalizer<PaymentsController>(),
+                NullLoggerFactory.Instance,
+                configuration,
+                dbContext)
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext()
                 }
             };
         }

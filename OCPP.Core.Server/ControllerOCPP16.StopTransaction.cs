@@ -155,6 +155,7 @@ namespace OCPP.Core.Server
                         transaction.MeterStop = (double)stopTransactionRequest.MeterStop / 1000; // Meter value here is always Wh
                         transaction.StopReason = stopTransactionRequest.Reason.ToString();
                         transaction.StopTime = stopTransactionRequest.Timestamp.UtcDateTime;
+                        FinalizeIdleTracking(transaction, transaction.StopTime.Value);
                         DbContext.SaveChanges();
 
                         ocppMiddleware?.NotifyTransactionCompleted(DbContext, transaction);

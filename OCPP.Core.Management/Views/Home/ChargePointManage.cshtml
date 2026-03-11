@@ -44,6 +44,7 @@
                             </div>
                             <div class="small text-muted">Connector @connector.ConnectorId</div>
                             <hr />
+                            <div><strong>OCPP:</strong> @(string.IsNullOrWhiteSpace(connector.LiveOcppStatus) ? "-" : connector.LiveOcppStatus)</div>
                             <div><strong>Power:</strong> @(connector.ChargeRateKw?.ToString("0.0") ?? "-") kW</div>
                             <div><strong>Current:</strong> @(connector.CurrentImportA?.ToString("0.0") ?? "-") A</div>
                             <div><strong>Meter:</strong> @(connector.MeterKwh?.ToString("0.000") ?? "-") kWh</div>

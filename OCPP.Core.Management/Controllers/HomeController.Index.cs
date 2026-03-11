@@ -251,6 +251,7 @@ namespace OCPP.Core.Management.Controllers
                                     {
                                         onlineConnectorStatus = cpOnlineStatus.OnlineConnectors[connStatus.ConnectorId];
                                         cpovm.ConnectorStatus = onlineConnectorStatus.Status;
+                                        cpovm.OcppStatus = onlineConnectorStatus.OcppStatus ?? onlineConnectorStatus.Status.ToString();
                                         Logger.LogTrace("Index: Found online status for CP='{0}' / Connector='{1}' / Status='{2}'", cpovm.ChargePointId, cpovm.ConnectorId, cpovm.ConnectorStatus);
                                     }
 
@@ -312,6 +313,11 @@ namespace OCPP.Core.Management.Controllers
                                         {
                                             cpovm.CurrentChargeData = currentCharge;
                                         }
+                                    }
+
+                                    if (string.IsNullOrWhiteSpace(cpovm.OcppStatus))
+                                    {
+                                        cpovm.OcppStatus = connStatus.LastStatus;
                                     }
 
                                     overviewModel.ChargePoints.Add(cpovm);

@@ -179,6 +179,7 @@ namespace OCPP.Core.Management.Controllers
                     ConnectorId = connector.ConnectorId,
                     ConnectorName = string.IsNullOrWhiteSpace(connector.ConnectorName) ? $"Connector {connector.ConnectorId}" : connector.ConnectorName,
                     LiveStatus = live?.Status.ToString() ?? connector.LastStatus ?? "Unknown",
+                    LiveOcppStatus = live?.OcppStatus ?? connector.LastStatus,
                     ChargeRateKw = live?.ChargeRateKW,
                     CurrentImportA = live?.CurrentImportA,
                     MeterKwh = live?.MeterKWH,

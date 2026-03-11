@@ -107,6 +107,15 @@ namespace OCPP.Core.Test
                         SendAndVerifyMeterValues(1, transactionId).Wait();
 
                         SendAndVerifyStatusNotification(1, "Charging").Wait();
+                        ReadServerStatus();
+
+                        SendAndVerifyStatusNotification(1, "SuspendedEV").Wait();
+                        ReadServerStatus();
+
+                        SendAndVerifyStatusNotification(1, "Charging").Wait();
+                        ReadServerStatus();
+
+                        SendAndVerifyStatusNotification(1, "SuspendedEV").Wait();
 
                         /* 8.  Check chargepoint status in/from server  */
                         ReadServerStatus();

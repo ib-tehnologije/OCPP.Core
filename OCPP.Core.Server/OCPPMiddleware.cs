@@ -70,6 +70,7 @@ namespace OCPP.Core.Server
         private const string ConnectorBusyStatus = "ConnectorBusy";
         // Reservation profile disabled: Remove charger-side ReserveNow/CancelReservation to avoid flaky stations.
         private bool ReservationProfileEnabled => false;
+        private readonly ConcurrentDictionary<int, DateTime> _idleAutoStopTransactions = new ConcurrentDictionary<int, DateTime>();
 
         // Dictionary with status objects for each charge point
         private static readonly ConcurrentDictionary<string, ChargePointStatus> _chargePointStatusDict = new ConcurrentDictionary<string, ChargePointStatus>();
@@ -111,9 +112,102 @@ namespace OCPP.Core.Server
             return _configuration.GetValue<bool?>("Payments:RequirePreparingBeforeRemoteStart") ?? true;
         }
 
+        private PaymentFlowOptions GetPaymentFlowOptions()
+        {
+            return new PaymentFlowOptions
+            {
+                StartWindowMinutes = _configuration.GetValue<int?>("Payments:StartWindowMinutes") ?? 2,
+                EnableReservationProfile = _configuration.GetValue<bool?>("Payments:EnableReservationProfile") ?? false,
+                IdleFeeExcludedWindow = _configuration.GetValue<string>("Payments:IdleFeeExcludedWindow"),
+                IdleFeeExcludedTimeZoneId = _configuration.GetValue<string>("Payments:IdleFeeExcludedTimeZoneId"),
+                IdleAutoStopMinutes = _configuration.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0
+            };
+        }
+
         private static bool IsStatus(string value, string expected) =>
             !string.IsNullOrWhiteSpace(value) &&
             string.Equals(value.Trim(), expected, StringComparison.OrdinalIgnoreCase);
+
+        private static string NormalizeChargeTag(string tag)
+        {
+            if (string.IsNullOrWhiteSpace(tag)) return tag;
+            int separatorIndex = tag.IndexOf('_');
+            return separatorIndex >= 0 ? tag.Substring(0, separatorIndex) : tag;
+        }
+
+        private static string GetLiveConnectorRawStatus(OnlineConnectorStatus connectorStatus)
+        {
+            if (connectorStatus == null)
+            {
+                return null;
+            }
+
+            return OcppConnectorStatus.Normalize(connectorStatus.OcppStatus) ?? connectorStatus.Status.ToString();
+        }
+
+        private static string GetLiveConnectorRawStatus(ChargePointStatus chargePointStatus, int connectorId)
+        {
+            if (chargePointStatus?.OnlineConnectors != null &&
+                chargePointStatus.OnlineConnectors.TryGetValue(connectorId, out var connectorStatus))
+            {
+                return GetLiveConnectorRawStatus(connectorStatus);
+            }
+
+            return null;
+        }
+
+        private Transaction ResolveReservationTransaction(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
+        {
+            if (dbContext == null || reservation == null)
+            {
+                return null;
+            }
+
+            if (reservation.TransactionId.HasValue)
+            {
+                var linkedTransaction = dbContext.Transactions.Find(reservation.TransactionId.Value);
+                if (linkedTransaction != null)
+                {
+                    return linkedTransaction;
+                }
+            }
+
+            IQueryable<Transaction> openTransactions = dbContext.Transactions
+                .Where(t =>
+                    t.ChargePointId == reservation.ChargePointId &&
+                    t.ConnectorId == reservation.ConnectorId &&
+                    !t.StopTime.HasValue);
+
+            string normalizedOcppIdTag = NormalizeChargeTag(reservation.OcppIdTag);
+            string normalizedChargeTag = NormalizeChargeTag(reservation.ChargeTagId);
+            if (!string.IsNullOrWhiteSpace(normalizedOcppIdTag) || !string.IsNullOrWhiteSpace(normalizedChargeTag))
+            {
+                var tagMatches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(normalizedOcppIdTag))
+                {
+                    tagMatches.Add(normalizedOcppIdTag);
+                }
+
+                if (!string.IsNullOrWhiteSpace(normalizedChargeTag))
+                {
+                    tagMatches.Add(normalizedChargeTag);
+                }
+
+                var byTag = openTransactions
+                    .Where(t => t.StartTagId != null && tagMatches.Contains(t.StartTagId))
+                    .OrderByDescending(t => t.TransactionId)
+                    .FirstOrDefault();
+                if (byTag != null)
+                {
+                    return byTag;
+                }
+            }
+
+            return openTransactions
+                .Where(t => t.StartTime >= reservation.CreatedAtUtc)
+                .OrderByDescending(t => t.TransactionId)
+                .FirstOrDefault();
+        }
 
         private static string NormalizeOibDigits(string input)
         {
@@ -325,6 +419,111 @@ namespace OCPP.Core.Server
                     _logger.LogWarning(ex, "NotifyConnectorPreparing => Failed to auto-start for cp={ChargePointId} connector={ConnectorId}", chargePointId, connectorId);
                 }
             });
+        }
+
+        public void NotifyConnectorOcppStatus(OCPPCoreContext dbContext, ChargePointStatus chargePointStatus, int connectorId, string rawStatus)
+        {
+            if (dbContext == null || chargePointStatus == null || connectorId <= 0)
+            {
+                return;
+            }
+
+            var transaction = dbContext.Transactions
+                .Where(t =>
+                    t.ChargePointId == chargePointStatus.Id &&
+                    t.ConnectorId == connectorId &&
+                    !t.StopTime.HasValue)
+                .OrderByDescending(t => t.TransactionId)
+                .FirstOrDefault();
+
+            if (transaction == null)
+            {
+                return;
+            }
+
+            if (!OcppConnectorStatus.IsSuspendedEv(rawStatus))
+            {
+                _idleAutoStopTransactions.TryRemove(transaction.TransactionId, out _);
+                return;
+            }
+
+            int idleAutoStopMinutes = GetPaymentFlowOptions().IdleAutoStopMinutes;
+            if (idleAutoStopMinutes <= 0 || _scopeFactory == null)
+            {
+                return;
+            }
+
+            if (!_idleAutoStopTransactions.TryAdd(transaction.TransactionId, _utcNow()))
+            {
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(idleAutoStopMinutes));
+                    await TryAutoStopIdleTransactionAsync(chargePointStatus.Id, connectorId, transaction.TransactionId, idleAutoStopMinutes);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "NotifyConnectorOcppStatus => Idle auto-stop scheduling failed cp={ChargePointId} connector={ConnectorId} tx={TransactionId}",
+                        chargePointStatus.Id,
+                        connectorId,
+                        transaction.TransactionId);
+                }
+            });
+        }
+
+        private async Task TryAutoStopIdleTransactionAsync(string chargePointId, int connectorId, int transactionId, int idleAutoStopMinutes)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+
+                var transaction = await dbContext.Transactions.FindAsync(transactionId);
+                if (transaction == null || transaction.StopTime.HasValue || !transaction.ChargingEndedAtUtc.HasValue)
+                {
+                    return;
+                }
+
+                if ((_utcNow() - transaction.ChargingEndedAtUtc.Value) < TimeSpan.FromMinutes(idleAutoStopMinutes))
+                {
+                    return;
+                }
+
+                if (!_chargePointStatusDict.TryGetValue(chargePointId, out var chargePointStatus) ||
+                    chargePointStatus.WebSocket == null ||
+                    chargePointStatus.WebSocket.State != WebSocketState.Open)
+                {
+                    _logger.LogInformation(
+                        "TryAutoStopIdleTransaction => Skipping because charger is offline cp={ChargePointId} connector={ConnectorId} tx={TransactionId}",
+                        chargePointId,
+                        connectorId,
+                        transactionId);
+                    return;
+                }
+
+                string liveRawStatus = GetLiveConnectorRawStatus(chargePointStatus, connectorId);
+                if (!OcppConnectorStatus.IsSuspendedEv(liveRawStatus))
+                {
+                    return;
+                }
+
+                string apiResult = await ExecuteRemoteStopAsync(chargePointStatus, dbContext, transaction);
+                _logger.LogInformation(
+                    "TryAutoStopIdleTransaction => Auto-stop attempted cp={ChargePointId} connector={ConnectorId} tx={TransactionId} result={Result}",
+                    chargePointId,
+                    connectorId,
+                    transactionId,
+                    ExtractStatusFromApiResult(apiResult) ?? apiResult ?? "(null)");
+            }
+            finally
+            {
+                _idleAutoStopTransactions.TryRemove(transactionId, out _);
+            }
         }
 
         public async Task Invoke(HttpContext context, OCPPCoreContext dbContext)
@@ -969,22 +1168,10 @@ namespace OCPP.Core.Server
 
                                         if (transaction != null && !transaction.StopTime.HasValue)
                                         {
-                                            // Send message to chargepoint
-                                            if (status.Protocol == Protocol_OCPP21)
-                                            {
-                                                // OCPP V2.1
-                                                await RequestStopTransaction21(status, context, dbContext, urlConnectorId, transaction.Uid);
-                                            }
-                                            else if (status.Protocol == Protocol_OCPP201)
-                                            {
-                                                // OCPP V2.0
-                                                await RequestStopTransaction20(status, context, dbContext, urlConnectorId, transaction.Uid);
-                                            }
-                                            else
-                                            {
-                                                // OCPP V1.6
-                                                await RemoteStopTransaction16(status, context, dbContext, urlConnectorId, transaction.TransactionId);
-                                            }
+                                            string apiResult = await ExecuteRemoteStopAsync(status, dbContext, transaction);
+                                            context.Response.StatusCode = (int)HttpStatusCode.OK;
+                                            context.Response.ContentType = "application/json";
+                                            await context.Response.WriteAsync(apiResult);
                                         }
                                         else
                                         {
@@ -1093,6 +1280,10 @@ namespace OCPP.Core.Server
             else if (string.Equals(action, "Cancel", StringComparison.OrdinalIgnoreCase))
             {
                 await HandlePaymentCancelAsync(context, dbContext);
+            }
+            else if (string.Equals(action, "Stop", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePaymentStopAsync(context, dbContext);
             }
             else if (string.Equals(action, "RequestR1", StringComparison.OrdinalIgnoreCase))
             {
@@ -1370,6 +1561,118 @@ namespace OCPP.Core.Server
             }));
         }
 
+        private async Task HandlePaymentStopAsync(HttpContext context, OCPPCoreContext dbContext)
+        {
+            if (!HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                return;
+            }
+
+            PaymentStopRequest request = null;
+            try
+            {
+                string body = await ReadRequestBodyAsync(context);
+                request = JsonConvert.DeserializeObject<PaymentStopRequest>(body);
+            }
+            catch (Exception exp)
+            {
+                _logger.LogError(exp, "Payments/Stop => Invalid request payload");
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            if (request == null || request.ReservationId == Guid.Empty)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                return;
+            }
+
+            var reservation = await dbContext.ChargePaymentReservations.FindAsync(request.ReservationId);
+            if (reservation == null)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"NotFound\"}");
+                return;
+            }
+
+            if (PaymentReservationStatus.IsTerminal(reservation.Status))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+                {
+                    status = "AlreadyStopped",
+                    reservationId = reservation.ReservationId,
+                    reservationStatus = reservation.Status
+                }));
+                return;
+            }
+
+            var transaction = ResolveReservationTransaction(dbContext, reservation);
+            bool hasActiveTransaction = transaction != null && !transaction.StopTime.HasValue;
+            bool canCancelReservationOnly =
+                !hasActiveTransaction &&
+                (string.Equals(reservation.Status, PaymentReservationStatus.Authorized, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(reservation.Status, PaymentReservationStatus.StartRequested, StringComparison.OrdinalIgnoreCase));
+
+            if (canCancelReservationOnly)
+            {
+                _paymentCoordinator.CancelReservation(dbContext, reservation.ReservationId, "Stopped by user before charging started.");
+                var updatedReservation = await dbContext.ChargePaymentReservations.FindAsync(reservation.ReservationId);
+
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+                {
+                    status = "Cancelled",
+                    reservationId = updatedReservation?.ReservationId ?? reservation.ReservationId,
+                    reservationStatus = updatedReservation?.Status ?? reservation.Status
+                }));
+                return;
+            }
+
+            if (!hasActiveTransaction)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+                {
+                    status = "NoOpenTransaction",
+                    reservationId = reservation.ReservationId,
+                    reservationStatus = reservation.Status
+                }));
+                return;
+            }
+
+            if (!_chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var chargePointStatus) ||
+                chargePointStatus.WebSocket == null ||
+                chargePointStatus.WebSocket.State != WebSocketState.Open)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+                {
+                    status = "ChargerOffline",
+                    reservationId = reservation.ReservationId,
+                    reservationStatus = reservation.Status,
+                    transactionId = transaction.TransactionId
+                }));
+                return;
+            }
+
+            string apiResult = await ExecuteRemoteStopAsync(chargePointStatus, dbContext, transaction);
+            if (string.IsNullOrWhiteSpace(apiResult))
+            {
+                apiResult = "{\"status\":\"Error\"}";
+            }
+
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(apiResult);
+        }
+
         private async Task HandlePaymentRequestR1Async(HttpContext context, OCPPCoreContext dbContext)
         {
             if (!HttpMethods.IsPost(context.Request.Method))
@@ -1469,6 +1772,7 @@ namespace OCPP.Core.Server
             }
 
             string liveStatus = null;
+            string liveOcppStatus = null;
             string persistedStatus = null;
             DateTime? persistedStatusTime = null;
             double? liveChargeRateKw = null;
@@ -1480,6 +1784,7 @@ namespace OCPP.Core.Server
             bool activeReservation = false;
             StartabilityResult startability = null;
             Transaction transaction = null;
+            IdleFeeSnapshot idleFeeSnapshot = null;
             var latestInvoiceLog = InvoiceSubmissionLogLookup.TryGetLatest(
                 dbContext,
                 reservation.ReservationId,
@@ -1492,6 +1797,7 @@ namespace OCPP.Core.Server
                 cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
             {
                 liveStatus = online.Status.ToString();
+                liveOcppStatus = GetLiveConnectorRawStatus(online);
                 liveChargeRateKw = online.ChargeRateKW;
                 liveCurrentImportA = online.CurrentImportA;
                 liveMeterKwh = online.MeterKWH;
@@ -1509,10 +1815,15 @@ namespace OCPP.Core.Server
                 persistedStatusTime = persisted.LastStatusTime;
             }
 
-            activeTx = dbContext.Transactions.Any(t =>
-                t.ChargePointId == reservation.ChargePointId &&
-                t.ConnectorId == reservation.ConnectorId &&
-                t.StopTime == null);
+            transaction = ResolveReservationTransaction(dbContext, reservation);
+            activeTx = transaction != null && !transaction.StopTime.HasValue;
+            if (!activeTx)
+            {
+                activeTx = dbContext.Transactions.Any(t =>
+                    t.ChargePointId == reservation.ChargePointId &&
+                    t.ConnectorId == reservation.ConnectorId &&
+                    t.StopTime == null);
+            }
 
             bool locksConnector = PaymentReservationStatus.LocksConnector(reservation.Status);
             bool otherActiveReservation = dbContext.ChargePaymentReservations.Any(r =>
@@ -1529,7 +1840,7 @@ namespace OCPP.Core.Server
                 ? "ActiveReservation"
                 : (startability != null && !startability.Startable ? startability.Reason : null);
 
-            if (reservation.TransactionId.HasValue)
+            if (transaction == null && reservation.TransactionId.HasValue)
             {
                 try
                 {
@@ -1541,13 +1852,23 @@ namespace OCPP.Core.Server
                 }
             }
 
+            if (transaction != null)
+            {
+                idleFeeSnapshot = IdleFeeCalculator.CalculateSnapshot(
+                    transaction,
+                    reservation,
+                    GetPaymentFlowOptions(),
+                    _utcNow(),
+                    _logger);
+            }
+
             var payload = new
             {
                 status = reservation.Status,
                 reservationId = reservation.ReservationId,
                 chargePointId = reservation.ChargePointId,
                 connectorId = reservation.ConnectorId,
-                transactionId = reservation.TransactionId,
+                transactionId = transaction?.TransactionId ?? reservation.TransactionId,
                 startTransactionId = reservation.StartTransactionId,
                 lastError = reservation.LastError,
                 failureCode = reservation.FailureCode,
@@ -1576,6 +1897,7 @@ namespace OCPP.Core.Server
                 capturedAmountCents = reservation.CapturedAmountCents,
                 actualEnergyKwh = reservation.ActualEnergyKwh,
                 liveStatus,
+                liveOcppStatus,
                 liveChargeRateKw,
                 liveCurrentImportA,
                 liveMeterKwh,
@@ -1598,6 +1920,10 @@ namespace OCPP.Core.Server
                 transactionIdleFeeMinutes = transaction?.IdleUsageFeeMinutes,
                 transactionIdleFeeAmount = transaction?.IdleUsageFeeAmount,
                 transactionSessionFeeAmount = transaction?.UserSessionFeeAmount,
+                suspendedEvSinceUtc = idleFeeSnapshot?.SuspendedSinceUtc,
+                idleFeeStartsAtUtc = idleFeeSnapshot?.IdleFeeStartAtUtc,
+                liveIdleFeeMinutes = idleFeeSnapshot?.TotalMinutes,
+                liveIdleFeeAmount = idleFeeSnapshot?.TotalAmount,
                 startable = startability?.Startable ?? false,
                 startableReason = startability?.Reason,
                 startableReasons = startability?.Reasons,
@@ -1645,12 +1971,12 @@ namespace OCPP.Core.Server
                 status.OnlineConnectors != null &&
                 status.OnlineConnectors.TryGetValue(connectorId, out liveConnectorStatus))
             {
-                busyReason = $"LiveStatus:{liveConnectorStatus.Status}";
+                string liveRawStatus = GetLiveConnectorRawStatus(liveConnectorStatus) ?? liveConnectorStatus.Status.ToString();
+                busyReason = $"LiveStatus:{liveRawStatus}";
             }
 
-            bool busy = liveConnectorStatus != null &&
-                        liveConnectorStatus.Status != ConnectorStatusEnum.Available &&
-                        liveConnectorStatus.Status != ConnectorStatusEnum.Preparing;
+            string currentLiveStatus = GetLiveConnectorRawStatus(liveConnectorStatus) ?? liveConnectorStatus?.Status.ToString();
+            bool busy = liveConnectorStatus != null && !OcppConnectorStatus.IsStartable(currentLiveStatus);
 
             int activeTransactionCount = 0;
             try
@@ -1709,8 +2035,7 @@ namespace OCPP.Core.Server
                         persistedStatusAgeMinutes = (_utcNow() - persistedStatus.LastStatusTime.Value).TotalMinutes;
                     }
 
-                    if (!string.Equals(persistedStatus.LastStatus, "Available", StringComparison.InvariantCultureIgnoreCase) &&
-                        !string.Equals(persistedStatus.LastStatus, "Preparing", StringComparison.InvariantCultureIgnoreCase))
+                    if (!OcppConnectorStatus.IsStartable(persistedStatus.LastStatus))
                     {
                         bool isStale = persistedStatusAgeMinutes.HasValue &&
                                        TimeSpan.FromMinutes(persistedStatusAgeMinutes.Value) > PersistedStatusStaleAfter;
@@ -1738,7 +2063,7 @@ namespace OCPP.Core.Server
                     busy ? "Busy" : "Available",
                     busyReason,
                     status?.WebSocket?.State.ToString() ?? "(none)",
-                    liveConnectorStatus?.Status.ToString() ?? "(none)",
+                    currentLiveStatus ?? "(none)",
                     liveConnectorStatus?.MeterValueDate,
                     activeTransactionCount,
                     activeReservationCount,
@@ -1790,21 +2115,15 @@ namespace OCPP.Core.Server
             if (status.OnlineConnectors != null &&
                 status.OnlineConnectors.TryGetValue(connectorId, out liveConnectorStatus))
             {
-                result.LiveStatus = liveConnectorStatus.Status.ToString();
-                if (liveConnectorStatus.Status == ConnectorStatusEnum.Unavailable || liveConnectorStatus.Status == ConnectorStatusEnum.Faulted)
+                result.LiveStatus = GetLiveConnectorRawStatus(liveConnectorStatus) ?? liveConnectorStatus.Status.ToString();
+                if (!OcppConnectorStatus.IsStartable(result.LiveStatus))
                 {
-                    result.Reason = $"Status:{liveConnectorStatus.Status}";
+                    result.Reason = $"Status:{result.LiveStatus}";
                     result.Reasons.Add(result.Reason);
                     return result;
                 }
-                if (liveConnectorStatus.Status == ConnectorStatusEnum.Occupied)
-                {
-                    result.Reason = "Status:Occupied";
-                    result.Reasons.Add(result.Reason);
-                    return result;
-                }
-                // Treat Preparing as startable (spec requirement)
-                if (liveConnectorStatus.Status == ConnectorStatusEnum.Preparing)
+
+                if (string.Equals(result.LiveStatus, OcppConnectorStatus.Preparing, StringComparison.OrdinalIgnoreCase))
                 {
                     result.Reasons.Add("Status:Preparing");
                 }
@@ -1852,8 +2171,7 @@ namespace OCPP.Core.Server
                         result.PersistedStatusAgeMinutes = (_utcNow() - persistedStatus.LastStatusTime.Value).TotalMinutes;
                     }
 
-                    if (!string.Equals(persistedStatus.LastStatus, "Available", StringComparison.InvariantCultureIgnoreCase) &&
-                        !string.Equals(persistedStatus.LastStatus, "Preparing", StringComparison.InvariantCultureIgnoreCase))
+                    if (!OcppConnectorStatus.IsStartable(persistedStatus.LastStatus))
                     {
                         bool isStale = result.PersistedStatusAgeMinutes.HasValue &&
                                        result.PersistedStatusAgeMinutes.Value > PersistedStatusStaleAfter.TotalMinutes;
@@ -2090,6 +2408,30 @@ namespace OCPP.Core.Server
             }
         }
 
+        private async Task<string> ExecuteRemoteStopAsync(ChargePointStatus chargePointStatus, OCPPCoreContext dbContext, Transaction transaction)
+        {
+            if (chargePointStatus == null || transaction == null || transaction.StopTime.HasValue)
+            {
+                return "{\"status\":\"NoOpenTransaction\"}";
+            }
+
+            string connectorId = transaction.ConnectorId.ToString();
+            if (chargePointStatus.Protocol == Protocol_OCPP21)
+            {
+                string transactionUid = !string.IsNullOrWhiteSpace(transaction.Uid) ? transaction.Uid : transaction.TransactionId.ToString();
+                return await ExecuteRequestStopTransaction21(chargePointStatus, dbContext, connectorId, transactionUid);
+            }
+            else if (chargePointStatus.Protocol == Protocol_OCPP201)
+            {
+                string transactionUid = !string.IsNullOrWhiteSpace(transaction.Uid) ? transaction.Uid : transaction.TransactionId.ToString();
+                return await ExecuteRequestStopTransaction20(chargePointStatus, dbContext, connectorId, transactionUid);
+            }
+            else
+            {
+                return await ExecuteRemoteStopTransaction16(chargePointStatus, dbContext, connectorId, transaction.TransactionId);
+            }
+        }
+
         private static string ExtractStatusFromApiResult(string apiResult)
         {
             if (string.IsNullOrWhiteSpace(apiResult)) return null;
@@ -2199,6 +2541,7 @@ namespace OCPP.Core.Server
         public void NotifyTransactionStarted(OCPPCoreContext dbContext, ChargePointStatus chargePointStatus, int connectorId, string chargeTagId, int transactionId)
         {
             if (chargePointStatus == null) return;
+            _idleAutoStopTransactions.TryRemove(transactionId, out _);
             _paymentCoordinator?.MarkTransactionStarted(dbContext, chargePointStatus.Id, connectorId, chargeTagId, transactionId);
             LinkReservationToTransaction(dbContext, chargePointStatus.Id, connectorId, chargeTagId, transactionId, _utcNow());
         }
@@ -2211,26 +2554,9 @@ namespace OCPP.Core.Server
         public void NotifyTransactionCompleted(OCPPCoreContext dbContext, Transaction transaction)
         {
             _paymentCoordinator?.CompleteReservation(dbContext, transaction);
-
-            // Mark connector available locally and in the database so future starts are not blocked
             if (transaction != null)
             {
-                if (_chargePointStatusDict.TryGetValue(transaction.ChargePointId, out var status))
-                {
-                    if (status.OnlineConnectors.TryGetValue(transaction.ConnectorId, out var connector))
-                    {
-                        connector.Status = ConnectorStatusEnum.Available;
-                    }
-                    else
-                    {
-                        status.OnlineConnectors[transaction.ConnectorId] = new OnlineConnectorStatus
-                        {
-                            Status = ConnectorStatusEnum.Available
-                        };
-                    }
-                }
-
-                SetConnectorStatus(dbContext, transaction.ChargePointId, transaction.ConnectorId, "Available");
+                _idleAutoStopTransactions.TryRemove(transaction.TransactionId, out _);
             }
         }
 

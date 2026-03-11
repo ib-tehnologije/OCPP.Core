@@ -52,6 +52,23 @@ namespace OCPP.Core.Server.Tests
                 invoiceIntegrationService: invoiceIntegrationService);
         }
 
+        private static TimeZoneInfo ResolveZagrebTimeZone()
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("Europe/Zagreb");
+            }
+            catch
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("Central European Standard Time");
+            }
+        }
+
+        private static DateTime LocalToUtc(TimeZoneInfo timeZone, DateTime localTime)
+        {
+            return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified), timeZone);
+        }
+
         [Theory]
         [InlineData(5.0, 0.35, 175)]
         [InlineData(0.123, 0.50, 6)]
@@ -216,6 +233,96 @@ namespace OCPP.Core.Server.Tests
 
             var minutes = StripePaymentCoordinator.TestCalculateUsageFeeMinutes(transaction, reservation, stop);
             Assert.Equal(expectedMinutes, minutes);
+        }
+
+        [Fact]
+        public void IdleFeeCalculator_CalculatesAccumulatedTotalsAcrossSuspendedEvResumeCycles()
+        {
+            var now = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                UsageFeeAnchorMinutes = 1,
+                UsageFeePerMinute = 0.25m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 120
+            };
+            var transaction = new Transaction
+            {
+                IdleUsageFeeMinutes = 3,
+                ChargingEndedAtUtc = now.AddMinutes(-4)
+            };
+
+            var snapshot = IdleFeeCalculator.CalculateSnapshot(
+                transaction,
+                reservation,
+                new PaymentFlowOptions(),
+                now,
+                NullLogger.Instance);
+
+            Assert.Equal(3, snapshot.AccumulatedMinutes);
+            Assert.Equal(4, snapshot.CurrentIntervalMinutes);
+            Assert.Equal(7, snapshot.TotalMinutes);
+            Assert.Equal(1.75m, snapshot.TotalAmount);
+            Assert.Equal(now.AddMinutes(-4), snapshot.SuspendedSinceUtc);
+        }
+
+        [Fact]
+        public void IdleFeeCalculator_ShiftsGraceStartPastExcludedWindowAcrossMidnight()
+        {
+            TimeZoneInfo zagreb = ResolveZagrebTimeZone();
+            DateTime suspendedSinceUtc = LocalToUtc(zagreb, new DateTime(2025, 1, 1, 21, 50, 0));
+            DateTime expectedIdleFeeStartUtc = LocalToUtc(zagreb, new DateTime(2025, 1, 2, 6, 0, 0));
+
+            var reservation = new ChargePaymentReservation
+            {
+                UsageFeeAnchorMinutes = 1,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 20,
+                MaxUsageFeeMinutes = 120
+            };
+            var flowOptions = new PaymentFlowOptions
+            {
+                IdleFeeExcludedWindow = "22:00-06:00",
+                IdleFeeExcludedTimeZoneId = "Europe/Zagreb"
+            };
+
+            DateTime? actualIdleFeeStartUtc = IdleFeeCalculator.CalculateIdleFeeStartAtUtc(
+                suspendedSinceUtc,
+                reservation,
+                flowOptions,
+                NullLogger.Instance);
+
+            Assert.Equal(expectedIdleFeeStartUtc, actualIdleFeeStartUtc);
+        }
+
+        [Fact]
+        public void IdleFeeCalculator_ExcludesCrossMidnightWindowFromBillableMinutes()
+        {
+            TimeZoneInfo zagreb = ResolveZagrebTimeZone();
+            DateTime intervalStartUtc = LocalToUtc(zagreb, new DateTime(2025, 1, 1, 21, 50, 0));
+            DateTime intervalEndUtc = LocalToUtc(zagreb, new DateTime(2025, 1, 2, 6, 10, 0));
+
+            var reservation = new ChargePaymentReservation
+            {
+                UsageFeeAnchorMinutes = 1,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 120
+            };
+            var flowOptions = new PaymentFlowOptions
+            {
+                IdleFeeExcludedWindow = "22:00-06:00",
+                IdleFeeExcludedTimeZoneId = "Europe/Zagreb"
+            };
+
+            int minutes = IdleFeeCalculator.CalculateIntervalBillableMinutes(
+                intervalStartUtc,
+                intervalEndUtc,
+                reservation,
+                flowOptions,
+                NullLogger.Instance);
+
+            Assert.Equal(20, minutes);
         }
 
         [Fact]
@@ -1895,6 +2002,110 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task IdleWarningService_UsesSharedCalculatorForIdleFeeStartTiming()
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Maintenance:IdleWarningSweepSeconds"] = "30",
+                    ["Payments:IdleFeeExcludedWindow"] = "22:00-06:00",
+                    ["Payments:IdleFeeExcludedTimeZoneId"] = "Europe/Zagreb"
+                } as IEnumerable<KeyValuePair<string, string?>>)
+                .Build());
+
+            var dbName = Guid.NewGuid().ToString();
+            services.AddDbContext<OCPPCoreContext>(options => options.UseInMemoryDatabase(dbName));
+
+            var fakeEmailService = new FakeEmailNotificationService();
+            services.AddSingleton<IEmailNotificationService>(fakeEmailService);
+
+            var provider = services.BuildServiceProvider();
+            var ctx = provider.GetRequiredService<OCPPCoreContext>();
+            TimeZoneInfo zagreb = ResolveZagrebTimeZone();
+            DateTime now = LocalToUtc(zagreb, new DateTime(2025, 1, 2, 5, 50, 0));
+            DateTime chargingEndedAtUtc = LocalToUtc(zagreb, new DateTime(2025, 1, 1, 21, 50, 0));
+
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_idle_timing",
+                Status = PaymentReservationStatus.Charging,
+                UsageFeeAnchorMinutes = 1,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 20,
+                MaxUsageFeeMinutes = 120,
+                Currency = "eur",
+                TransactionId = 992,
+                CreatedAtUtc = now.AddHours(-10),
+                UpdatedAtUtc = now.AddMinutes(-5)
+            };
+            ctx.ChargePaymentReservations.Add(reservation);
+
+            ctx.Transactions.Add(new Transaction
+            {
+                TransactionId = 992,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = now.AddHours(-12),
+                ChargingEndedAtUtc = chargingEndedAtUtc,
+                StopTime = null
+            });
+            ctx.SaveChanges();
+
+            var expectedIdleFeeStartUtc = IdleFeeCalculator.CalculateIdleFeeStartAtUtc(
+                chargingEndedAtUtc,
+                reservation,
+                new PaymentFlowOptions
+                {
+                    IdleFeeExcludedWindow = "22:00-06:00",
+                    IdleFeeExcludedTimeZoneId = "Europe/Zagreb"
+                },
+                NullLogger.Instance);
+
+            var svc = new TestIdleWarningEmailService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<ILogger<IdleFeeWarningEmailService>>(),
+                provider.GetRequiredService<IConfiguration>(),
+                Options.Create(new NotificationOptions
+                {
+                    EnableCustomerEmails = true,
+                    IdleWarningLeadMinutes = 15
+                }),
+                Options.Create(new StripeOptions
+                {
+                    Enabled = true,
+                    ApiKey = "test",
+                    ReturnBaseUrl = "https://return"
+                }),
+                Options.Create(new PaymentFlowOptions
+                {
+                    IdleFeeExcludedWindow = "22:00-06:00",
+                    IdleFeeExcludedTimeZoneId = "Europe/Zagreb"
+                }),
+                () => now);
+            svc.SessionToReturn = new Session
+            {
+                Id = "sess_idle_timing",
+                CustomerDetails = new SessionCustomerDetails
+                {
+                    Email = "idle-timing@example.com"
+                }
+            };
+
+            await svc.RunOnce();
+
+            Assert.Equal(1, fakeEmailService.IdleFeeWarningCount);
+            Assert.Equal(expectedIdleFeeStartUtc, fakeEmailService.LastIdleFeeStartsAtUtc);
+            Assert.Equal("idle-timing@example.com", fakeEmailService.LastToEmail);
+        }
+
+        [Fact]
         public async Task CleanupService_CancelsStaleReservations()
         {
             var services = new ServiceCollection();
@@ -1949,6 +2160,8 @@ namespace OCPP.Core.Server.Tests
         public string? LastToEmail { get; private set; }
         public string? LastBuyerCompanyName { get; private set; }
         public string? LastBuyerOib { get; private set; }
+        public DateTime? LastIdleFeeStartsAtUtc { get; private set; }
+        public TimeSpan? LastIdleFeeRemaining { get; private set; }
         public string? LastSessionReceiptInvoiceNumber { get; private set; }
         public string? LastSessionReceiptInvoiceUrl { get; private set; }
         public string? LastR1InvoiceNumber { get; private set; }
@@ -1970,6 +2183,8 @@ namespace OCPP.Core.Server.Tests
         {
             IdleFeeWarningCount++;
             LastToEmail = toEmail;
+            LastIdleFeeStartsAtUtc = idleFeeStartsAtUtc;
+            LastIdleFeeRemaining = remainingUntilIdleFee;
         }
 
         public void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl)
@@ -2140,6 +2355,18 @@ namespace OCPP.Core.Server.Tests
             IOptions<StripeOptions> stripeOptions,
             Func<DateTime> utcNow)
             : base(scopeFactory, logger, configuration, notificationOptions, stripeOptions, utcNow)
+        {
+        }
+
+        public TestIdleWarningEmailService(
+            IServiceScopeFactory scopeFactory,
+            ILogger<IdleFeeWarningEmailService> logger,
+            IConfiguration configuration,
+            IOptions<NotificationOptions> notificationOptions,
+            IOptions<StripeOptions> stripeOptions,
+            IOptions<PaymentFlowOptions> flowOptions,
+            Func<DateTime> utcNow)
+            : base(scopeFactory, logger, configuration, notificationOptions, stripeOptions, flowOptions, utcNow)
         {
         }
 

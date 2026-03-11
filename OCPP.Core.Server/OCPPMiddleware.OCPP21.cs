@@ -457,6 +457,15 @@ namespace OCPP.Core.Server
         /// </summary>
         private async Task RequestStopTransaction21(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, string urlConnectorId, string transactionId)
         {
+            string apiResult = await ExecuteRequestStopTransaction21(chargePointStatus, dbContext, urlConnectorId, transactionId);
+
+            apiCallerContext.Response.StatusCode = 200;
+            apiCallerContext.Response.ContentType = "application/json";
+            await apiCallerContext.Response.WriteAsync(apiResult);
+        }
+
+        private async Task<string> ExecuteRequestStopTransaction21(ChargePointStatus chargePointStatus, OCPPCoreContext dbContext, string urlConnectorId, string transactionId)
+        {
             ILogger logger = _logFactory.CreateLogger("OCPPMiddleware.OCPP21");
             ControllerOCPP21 controller21 = new ControllerOCPP21(_configuration, _logFactory, chargePointStatus, dbContext);
 
@@ -498,9 +507,7 @@ namespace OCPP.Core.Server
                 logger.LogInformation("OCPPMiddleware.OCPP21 => RequestStopTransaction21: Timeout (ChargePoint='{0}' / ConnectorId={1} / TransactionId='{2}')", chargePointStatus.Id, connectorId, transactionId);
             }
 
-            apiCallerContext.Response.StatusCode = 200;
-            apiCallerContext.Response.ContentType = "application/json";
-            await apiCallerContext.Response.WriteAsync(apiResult);
+            return apiResult;
         }
 
         // ReserveNow disabled

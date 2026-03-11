@@ -427,7 +427,7 @@ namespace OCPP.Core.Management.Controllers
 
             if (hasOpenTransaction)
             {
-                return "Occupied";
+                return string.IsNullOrWhiteSpace(lastStatus) ? "Occupied" : lastStatus;
             }
 
             if (hasActiveReservation)
@@ -448,7 +448,10 @@ namespace OCPP.Core.Management.Controllers
 
             if (string.Equals(occupancyReason, "OpenTransaction", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(effectiveStatus, "Occupied", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveStatus, "Charging", StringComparison.OrdinalIgnoreCase))
+                string.Equals(effectiveStatus, "Charging", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveStatus, "SuspendedEV", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveStatus, "SuspendedEVSE", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveStatus, "Finishing", StringComparison.OrdinalIgnoreCase))
             {
                 return "This connector is currently in use. Please stop the active session first or choose another connector.";
             }
@@ -738,13 +741,24 @@ namespace OCPP.Core.Management.Controllers
             }
 
             if (string.Equals(reason, "OpenTransaction", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(reason, "LiveStatus:Occupied", StringComparison.OrdinalIgnoreCase))
+                string.Equals(reason, "LiveStatus:Occupied", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "LiveStatus:Charging", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "LiveStatus:SuspendedEV", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "LiveStatus:SuspendedEVSE", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "LiveStatus:Finishing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:Occupied", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:Charging", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:SuspendedEV", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:SuspendedEVSE", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:Finishing", StringComparison.OrdinalIgnoreCase))
             {
                 return "This connector is currently in use. Please stop the active session first or choose another connector.";
             }
 
             if (string.Equals(reason, "LiveStatus:Unavailable", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(reason, "LiveStatus:Faulted", StringComparison.OrdinalIgnoreCase))
+                string.Equals(reason, "LiveStatus:Faulted", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:Unavailable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:Faulted", StringComparison.OrdinalIgnoreCase))
             {
                 return "This connector is not ready right now. Please choose another connector.";
             }

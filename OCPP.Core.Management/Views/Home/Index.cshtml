@@ -61,6 +61,7 @@
                         {
                             <p class="card-text">&nbsp;</p>
                         }
+                        <p class="card-text mb-0"><small class="text-muted">OCPP: @(string.IsNullOrWhiteSpace(cpvm.OcppStatus) ? "-" : cpvm.OcppStatus)</small></p>
                     </div>
                     @if (Model.ServerConnection)
                     {
@@ -88,4 +89,3 @@
         </div>
     }
 }
-

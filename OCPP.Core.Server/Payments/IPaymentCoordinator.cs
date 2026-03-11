@@ -72,6 +72,11 @@ namespace OCPP.Core.Server.Payments
         public string Reason { get; set; }
     }
 
+    public class PaymentStopRequest
+    {
+        public Guid ReservationId { get; set; }
+    }
+
     public class PaymentConfirmationResult
     {
         public bool Success { get; set; }

@@ -103,6 +103,16 @@ namespace OCPP.Core.Server
         public ConnectorStatusEnum Status { get; set; }
 
         /// <summary>
+        /// Raw OCPP status or charging state as reported by the charger.
+        /// </summary>
+        public string OcppStatus { get; set; }
+
+        /// <summary>
+        /// Timestamp of the raw OCPP status or charging state.
+        /// </summary>
+        public DateTimeOffset? OcppStatusAtUtc { get; set; }
+
+        /// <summary>
         /// Current charge rate in kW
         /// </summary>
         public double? ChargeRateKW { get; set; }

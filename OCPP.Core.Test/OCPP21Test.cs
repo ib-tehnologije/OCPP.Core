@@ -102,7 +102,13 @@ namespace OCPP.Core.Test
                     string transactionId = Guid.NewGuid().ToString();
                     if (SendAndVerifyStartTransaction(1, _chargeTagId, transactionId).Result)
                     {
-                        SendAndVerifyUpdateTransaction(1, _chargeTagId, transactionId).Wait();
+                        SendAndVerifyChargingStateUpdate(1, _chargeTagId, transactionId, "SuspendedEV", "ChargingStateChanged").Wait();
+                        ReadServerStatus();
+
+                        SendAndVerifyChargingStateUpdate(1, _chargeTagId, transactionId, "Charging", "ChargingStateChanged").Wait();
+                        ReadServerStatus();
+
+                        SendAndVerifyChargingStateUpdate(1, _chargeTagId, transactionId, "SuspendedEV", "ChargingStateChanged").Wait();
 
                         SendAndVerifyStatusNotification(1, "Occupied").Wait();
 
@@ -161,6 +167,7 @@ namespace OCPP.Core.Test
                     string transactionId = Guid.NewGuid().ToString();
                     if (SendAndVerifyStartTransaction(1, _chargeTagId, transactionId).Result)
                     {
+                        SendAndVerifyChargingStateUpdate(1, _chargeTagId, transactionId, "Charging", "MeterValuePeriodic").Wait();
                         if (RemoteStopTransaction(_chargePointId, 1))
                         {
                             SendAndVerifyStopTransaction(1, _chargeTagId, transactionId).Wait();
@@ -275,7 +282,7 @@ namespace OCPP.Core.Test
                 transactionInfo = new
                 {
                     transactionId = transactionId,
-                    chargingState = "SuspendedEV"
+                    chargingState = "Charging"
                 },
                 evse = new
                 {
@@ -301,7 +308,7 @@ namespace OCPP.Core.Test
             return true;
         }
 
-        private static async Task<bool> SendAndVerifyUpdateTransaction(int connectorId, string chargeTagId, string transactionId)
+        private static async Task<bool> SendAndVerifyChargingStateUpdate(int connectorId, string chargeTagId, string transactionId, string chargingState, string triggerReason, string? stoppedReason = null)
         {
             var payload = new
             {
@@ -329,14 +336,14 @@ namespace OCPP.Core.Test
                     }
                 },
                 timestamp = DateTime.UtcNow.ToString("o"),
-                triggerReason = "MeterValuePeriodic",
+                triggerReason = triggerReason,
                 seqNo = _seqNo++,
                 offline = false,
                 transactionInfo = new
                 {
                     transactionId = transactionId,
-                    chargingState = "Idle",
-                    stoppedReason = "EVDisconnected"
+                    chargingState = chargingState,
+                    stoppedReason = stoppedReason
                 },
                 evse = new
                 {
@@ -352,7 +359,7 @@ namespace OCPP.Core.Test
 
             var response = await SendMessage("TransactionEvent", payload);
             var responsePayload = response[2].ToObject<JObject>();
-            Console.WriteLine("UpdateTransaction successful");
+            Console.WriteLine($"UpdateTransaction successful: chargingState={chargingState}");
             Console.WriteLine();
             return true;
         }

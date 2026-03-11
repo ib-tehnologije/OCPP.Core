@@ -11,6 +11,7 @@
     var startUrlBase = Url.Action("Start", "Public");
     var startPathTemplate = Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" }) ?? string.Empty;
     var requestR1InvoiceUrl = Url.Action("RequestR1Invoice", "Payments");
+    var stopUrl = Url.Action("Stop", "Payments");
     ViewData["PublicPageTitle"] = "Charging status";
     ViewData["PublicPageDescription"] = "Track charger start, live charging, totals, and invoice details.";
     ViewData["PublicNav"] = "map";
@@ -127,7 +128,7 @@
                 </div>
 
                 <div class="form-section" style="padding-top: 0;">
-                    <button type="button" class="btn-secondary" disabled style="border-color: var(--danger-border); color: var(--danger); opacity: 0.65;">
+                    <button type="button" id="stop-charging" class="btn-secondary" disabled style="border-color: var(--danger-border); color: var(--danger); opacity: 0.65;">
                         ⏹ Stop charging
                     </button>
                 </div>
@@ -311,6 +312,7 @@
         const startUrlBase = "@startUrlBase";
         const startPathTemplate = "@startPathTemplate";
         const requestR1InvoiceUrl = "@requestR1InvoiceUrl";
+        const stopUrl = "@stopUrl";
         const reservationId = "@Model.ReservationId";
 
         const navButtons = Array.from(document.querySelectorAll(".public-session-nav [data-step]"));
@@ -342,6 +344,7 @@
         const bdIdleSub = document.getElementById("bd-idle-sub");
         const bdAuthorized = document.getElementById("bd-authorized");
         const bdStartTime = document.getElementById("bd-start-time");
+        const stopChargingButton = document.getElementById("stop-charging");
 
         const doneEnergy = document.getElementById("done-energy");
         const doneTotal = document.getElementById("done-total");
@@ -430,6 +433,7 @@
         const resolveState = (data) => {
             const status = toLower(data?.status);
             const live = toLower(data?.liveStatus);
+            const liveOcpp = toLower(data?.liveOcppStatus || data?.liveStatus);
             const persisted = toLower(data?.persistedStatus);
 
             const hasErrorDetails = hasValue(data?.failureCode) || hasValue(data?.failureMessage) || hasValue(data?.lastError);
@@ -447,7 +451,14 @@
             const hasStop = !!parseDate(data?.stopTransactionAtUtc) || !!parseDate(data?.capturedAtUtc) || data?.capturedAmountCents != null;
             if (hasStop) return "done";
 
-            const hasStart = !!parseDate(data?.startTransactionAtUtc) || data?.activeTransaction === true || live === "occupied";
+            const hasChargingViewStatus =
+                liveOcpp === "charging" ||
+                liveOcpp === "suspendedev" ||
+                liveOcpp === "suspendedevse" ||
+                liveOcpp === "finishing" ||
+                liveOcpp === "evconnected" ||
+                liveOcpp === "idle";
+            const hasStart = !!parseDate(data?.startTransactionAtUtc) || data?.activeTransaction === true || live === "occupied" || hasChargingViewStatus;
             if (hasStart) return "charging";
 
             const hasAuthorized = !!parseDate(data?.authorizedAtUtc) || data?.activeReservation === true || status === "authorized" || status === "startrequested" || status === "accepted";
@@ -472,14 +483,23 @@
         const setHeader = (state, data) => {
             const cp = data?.chargePointId || "-";
             const conn = data?.connectorId != null ? String(data.connectorId) : "-";
-            const liveStatus = data?.liveStatus || data?.persistedStatus || "-";
+            const liveStatus = data?.liveOcppStatus || data?.liveStatus || data?.persistedStatus || "-";
+            const liveOcpp = toLower(data?.liveOcppStatus || data?.liveStatus);
             title.textContent = cp;
             sub.textContent = `Connector ${conn} · ${liveStatus}`;
 
             badge.className = "status-badge";
             if (state === "charging") {
                 badge.classList.add("charging");
-                badgeText.textContent = "Charging in progress";
+                if (liveOcpp === "suspendedev") {
+                    badgeText.textContent = "Paused by vehicle / idle";
+                } else if (liveOcpp === "suspendedevse") {
+                    badgeText.textContent = "Paused by charger";
+                } else if (liveOcpp === "finishing") {
+                    badgeText.textContent = "Finishing session";
+                } else {
+                    badgeText.textContent = "Charging in progress";
+                }
             } else if (state === "done") {
                 badge.classList.add("available");
                 badgeText.textContent = "Charging complete";
@@ -528,11 +548,18 @@
             const capturedText = fmtMoney(data?.capturedAmountCents, currency);
 
             const status = toLower(data?.status);
+            const liveOcpp = toLower(data?.liveOcppStatus || data?.liveStatus);
             const awaitingPlug = data?.awaitingPlug === true;
             const deadline = parseDate(data?.startDeadlineAtUtc);
             const secondsRemaining = deadline ? Math.max(0, Math.floor((deadline.getTime() - Date.now()) / 1000)) : null;
 
-            if (awaitingPlug) {
+            if (liveOcpp === "suspendedev") {
+                waitStatus.textContent = "Paused by vehicle / idle";
+                if (waitHint) waitHint.textContent = "Charging has paused because the vehicle stopped drawing power. Idle fees may continue after the grace period.";
+            } else if (liveOcpp === "suspendedevse") {
+                waitStatus.textContent = "Paused by charger";
+                if (waitHint) waitHint.textContent = "Charging is paused by the charger or station controls. You can wait or stop the session.";
+            } else if (awaitingPlug) {
                 waitStatus.textContent = "Plug in your cable";
                 if (waitHint) {
                     waitHint.textContent = secondsRemaining != null
@@ -588,12 +615,13 @@
 
             const energyCost = data?.transactionEnergyCost;
             const sessionFeeAmount = data?.transactionSessionFeeAmount;
-            const idleFeeAmount = data?.transactionIdleFeeAmount;
+            const idleFeeAmount = data?.liveIdleFeeAmount != null ? data.liveIdleFeeAmount : data?.transactionIdleFeeAmount;
+            const idleFeeMinutes = data?.liveIdleFeeMinutes != null ? data.liveIdleFeeMinutes : data?.transactionIdleFeeMinutes;
             bdEnergy.textContent = energyCost != null ? `${Number(energyCost).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
             bdEnergySub.textContent = Number.isFinite(sessionEnergy) ? `${fmtNumber(sessionEnergy, 1)} kWh` : "-";
             bdSessionFee.textContent = sessionFeeAmount != null ? `${Number(sessionFeeAmount).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
             bdIdleFee.textContent = idleFeeAmount != null ? `${Number(idleFeeAmount).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
-            bdIdleSub.textContent = data?.transactionIdleFeeMinutes != null ? `${data.transactionIdleFeeMinutes} min` : "-";
+            bdIdleSub.textContent = idleFeeMinutes != null ? `${idleFeeMinutes} min` : "-";
             bdAuthorized.textContent = authorizedText;
             bdStartTime.textContent = fmtLocal(startAt);
 
@@ -619,13 +647,19 @@
             renderInvoice(data?.invoice);
 
             errorPaymentStatus.textContent = data?.status || "-";
-            errorLastStatus.textContent = data?.liveStatus || data?.persistedStatus || "-";
+            errorLastStatus.textContent = data?.liveOcppStatus || data?.liveStatus || data?.persistedStatus || "-";
             if (hasValue(data?.failureMessage)) {
                 errorDesc.textContent = data.failureMessage;
             } else if (hasValue(data?.lastError)) {
                 errorDesc.textContent = data.lastError;
             } else {
                 errorDesc.textContent = "The charger is currently offline or occupied. Check the cable and try again.";
+            }
+
+            if (stopChargingButton) {
+                const stopEnabled = state === "charging" || state === "waiting";
+                stopChargingButton.disabled = !stopEnabled;
+                stopChargingButton.style.opacity = stopEnabled ? "1" : "0.65";
             }
 
             if (r1Panel) {
@@ -689,6 +723,51 @@
 
         if (r1Submit) {
             r1Submit.addEventListener("click", submitR1Details);
+        }
+
+        async function submitStop() {
+            if (!stopChargingButton || stopChargingButton.disabled) {
+                return;
+            }
+
+            const originalText = stopChargingButton.textContent;
+            stopChargingButton.disabled = true;
+            stopChargingButton.textContent = "Stopping...";
+
+            try {
+                const res = await fetch(stopUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ reservationId })
+                });
+
+                let data = null;
+                try {
+                    data = await res.json();
+                } catch (_) {
+                    data = null;
+                }
+
+                if (!res.ok) {
+                    throw new Error(data?.message || data?.status || String(res.status));
+                }
+
+                await loadStatus();
+            } catch (err) {
+                badge.className = "status-badge waiting";
+                badgeText.textContent = "Unable to stop session";
+                if (waitHint) {
+                    waitHint.textContent = "The charger did not confirm the stop request yet. Please wait a moment and try again.";
+                }
+            } finally {
+                stopChargingButton.textContent = originalText;
+            }
+        }
+
+        if (stopChargingButton) {
+            stopChargingButton.addEventListener("click", submitStop);
         }
 
         async function loadStatus() {

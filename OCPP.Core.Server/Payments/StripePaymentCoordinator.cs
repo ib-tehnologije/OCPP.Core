@@ -1182,30 +1182,25 @@ namespace OCPP.Core.Server.Payments
             }
 
             bool usageAfterChargingEnds = reservation.UsageFeeAnchorMinutes == 1;
-            var stopTimeUtc = transaction.StopTime ?? nowUtc ?? DateTime.UtcNow;
-            DateTime? anchorStartUtc = transaction.StartTime;
-
             if (usageAfterChargingEnds)
             {
-                anchorStartUtc = transaction.ChargingEndedAtUtc;
+                return IdleFeeCalculator.CalculateSnapshot(
+                    transaction,
+                    reservation,
+                    _flowOptions,
+                    transaction.StopTime ?? nowUtc ?? DateTime.UtcNow,
+                    _logger).TotalMinutes;
             }
 
+            var stopTimeUtc = transaction.StopTime ?? nowUtc ?? DateTime.UtcNow;
+            DateTime? anchorStartUtc = transaction.StartTime;
             if (!anchorStartUtc.HasValue || stopTimeUtc <= anchorStartUtc.Value)
             {
                 return 0;
             }
 
             int totalMinutes = 0;
-            if (usageAfterChargingEnds &&
-                TryParseDailyWindow(_flowOptions?.IdleFeeExcludedWindow, out var excludedStart, out var excludedEnd) &&
-                TryResolveTimeZone(_flowOptions?.IdleFeeExcludedTimeZoneId, out var tz))
-            {
-                totalMinutes = CalculateChargeableMinutesExcludingWindow(anchorStartUtc.Value, stopTimeUtc, tz, excludedStart, excludedEnd);
-            }
-            else
-            {
-                totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTimeUtc - anchorStartUtc.Value).TotalMinutes));
-            }
+            totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTimeUtc - anchorStartUtc.Value).TotalMinutes));
 
             return Math.Min(
                 Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),

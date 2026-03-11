@@ -24,6 +24,7 @@ namespace OCPP.Core.Server.Payments
         private readonly ILogger<IdleFeeWarningEmailService> _logger;
         private readonly NotificationOptions _notificationOptions;
         private readonly StripeOptions _stripeOptions;
+        private readonly PaymentFlowOptions _flowOptions;
         private readonly TimeSpan _interval;
         private readonly int _warningLeadMinutes;
         private readonly IStripeSessionService _sessionService;
@@ -36,7 +37,18 @@ namespace OCPP.Core.Server.Payments
             IConfiguration configuration,
             IOptions<NotificationOptions> notificationOptions,
             IOptions<StripeOptions> stripeOptions)
-            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, null)
+            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, null, null)
+        {
+        }
+
+        public IdleFeeWarningEmailService(
+            IServiceScopeFactory scopeFactory,
+            ILogger<IdleFeeWarningEmailService> logger,
+            IConfiguration configuration,
+            IOptions<NotificationOptions> notificationOptions,
+            IOptions<StripeOptions> stripeOptions,
+            IOptions<PaymentFlowOptions> flowOptions)
+            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, flowOptions, null)
         {
         }
 
@@ -47,11 +59,24 @@ namespace OCPP.Core.Server.Payments
             IOptions<NotificationOptions> notificationOptions,
             IOptions<StripeOptions> stripeOptions,
             Func<DateTime> utcNow)
+            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, null, utcNow)
+        {
+        }
+
+        public IdleFeeWarningEmailService(
+            IServiceScopeFactory scopeFactory,
+            ILogger<IdleFeeWarningEmailService> logger,
+            IConfiguration configuration,
+            IOptions<NotificationOptions> notificationOptions,
+            IOptions<StripeOptions> stripeOptions,
+            IOptions<PaymentFlowOptions> flowOptions,
+            Func<DateTime> utcNow)
         {
             _scopeFactory = scopeFactory;
             _logger = logger;
             _notificationOptions = notificationOptions?.Value ?? new NotificationOptions();
             _stripeOptions = stripeOptions?.Value ?? new StripeOptions();
+            _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
             _sessionService = new StripeSessionServiceWrapper();
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
 
@@ -172,7 +197,13 @@ namespace OCPP.Core.Server.Payments
                     continue;
                 }
 
-                var idleFeeStartsAtUtc = transaction.ChargingEndedAtUtc.Value.AddMinutes(reservation.StartUsageFeeAfterMinutes);
+                var idleSnapshot = IdleFeeCalculator.CalculateSnapshot(transaction, reservation, _flowOptions, now, _logger);
+                if (!idleSnapshot.IdleFeeStartAtUtc.HasValue)
+                {
+                    continue;
+                }
+
+                var idleFeeStartsAtUtc = idleSnapshot.IdleFeeStartAtUtc.Value;
                 if (now >= idleFeeStartsAtUtc)
                 {
                     _sentWarnings.TryAdd(transaction.TransactionId, now);

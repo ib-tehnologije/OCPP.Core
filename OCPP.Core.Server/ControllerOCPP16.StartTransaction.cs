@@ -44,6 +44,7 @@ namespace OCPP.Core.Server
                 StartTransactionRequest startTransactionRequest = DeserializeMessage<StartTransactionRequest>(msgIn);
                 Logger.LogTrace("StartTransaction => Message deserialized");
 
+                connectorId = startTransactionRequest.ConnectorId;
                 string idTag = CleanChargeTagId(startTransactionRequest.IdTag, Logger);
 
                 startTransactionResponse.IdTagInfo = InternalAuthorize(idTag, ocppMiddleware, startTransactionRequest.ConnectorId, AuthAction.StartTransaction, string.Empty, string.Empty, denyConcurrentTx);
@@ -51,7 +52,7 @@ namespace OCPP.Core.Server
                 if (connectorId > 0)
                 {
                     // Update meter value in db connector status 
-                    UpdateConnectorStatus(connectorId, ConnectorStatusEnum.Occupied.ToString(), startTransactionRequest.Timestamp, (double)startTransactionRequest.MeterStart / 1000, startTransactionRequest.Timestamp);
+                    UpdateConnectorStatus(connectorId, null, null, (double)startTransactionRequest.MeterStart / 1000, startTransactionRequest.Timestamp);
                     UpdateMemoryConnectorStatus(connectorId, (double)startTransactionRequest.MeterStart / 1000, startTransactionRequest.Timestamp, null, null, null);
                 }
 

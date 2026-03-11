@@ -80,5 +80,10 @@ namespace OCPP.Core.Management.Models
         /// Details about the current charge process
         /// </summary>
         public string CurrentChargeData { get; set; }
+
+        /// <summary>
+        /// Raw OCPP connector status when available.
+        /// </summary>
+        public string OcppStatus { get; set; }
     }
 }

@@ -70,6 +70,14 @@ namespace OCPP.Core.Server
                 // If msg contains no time stamp => use current time
                 if (!meterTime.HasValue) meterTime = DateTime.UtcNow;
 
+                string rawChargingState = transactionEventRequest.TransactionInfo?.ChargingState?.ToString();
+                if (connectorId > 0 && !string.IsNullOrWhiteSpace(rawChargingState))
+                {
+                    UpdateConnectorStatus(connectorId, rawChargingState, transactionEventRequest.Timestamp, null, null);
+                    ApplyConnectorStatusTransition(connectorId, rawChargingState, transactionEventRequest.Timestamp);
+                    ocppMiddleware?.NotifyConnectorOcppStatus(DbContext, ChargePointStatus, connectorId, rawChargingState);
+                }
+
                 if (connectorId > 0 && meterKWH >= 0)
                 {
                     UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
@@ -106,8 +114,6 @@ namespace OCPP.Core.Server
 
                         if (transactionEventResponse.IdTokenInfo.Status == AuthorizationStatusEnumType.Accepted)
                         {
-                            UpdateConnectorStatus(connectorId, ConnectorStatusEnum.Occupied.ToString(), meterTime, null, null);
-
                             try
                             {
                                 Logger.LogInformation("StartTransaction => Meter='{0}' (kWh)", meterKWH);
@@ -274,6 +280,7 @@ namespace OCPP.Core.Server
                                         transaction.MeterStop = meterKWH;
                                         transaction.StopTagId = idTag;
                                         transaction.StopReason = transactionEventRequest.TriggerReason.ToString();
+                                        FinalizeIdleTracking(transaction, transaction.StopTime.Value);
                                         DbContext.SaveChanges();
 
                                         ocppMiddleware?.NotifyTransactionCompleted(DbContext, transaction);

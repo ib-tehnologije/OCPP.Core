@@ -51,54 +51,19 @@ namespace OCPP.Core.Server
                 // Write raw status in DB
                 WriteMessageLog(ChargePointStatus.Id, connectorId, msgIn.Action, string.Format("Status={0}", statusNotificationRequest.ConnectorStatus), string.Empty);
 
-                ConnectorStatusEnum newStatus = ConnectorStatusEnum.Undefined;
-
-                switch (statusNotificationRequest.ConnectorStatus)
-                {
-                    case ConnectorStatusEnumType.Available:
-                        newStatus = ConnectorStatusEnum.Available;
-                        break;
-                    case ConnectorStatusEnumType.Preparing:
-                        newStatus = ConnectorStatusEnum.Preparing;
-                        break;
-                    case ConnectorStatusEnumType.Occupied:
-                    case ConnectorStatusEnumType.Reserved:
-                        newStatus = ConnectorStatusEnum.Occupied;
-                        break;
-                    case ConnectorStatusEnumType.Unavailable:
-                        newStatus = ConnectorStatusEnum.Unavailable;
-                        break;
-                    case ConnectorStatusEnumType.Faulted:
-                        newStatus = ConnectorStatusEnum.Faulted;
-                        break;
-                }
+                string rawStatus = statusNotificationRequest.ConnectorStatus.ToString();
+                ConnectorStatusEnum newStatus = OcppConnectorStatus.ToConnectorStatusEnum(rawStatus);
                 Logger.LogInformation("StatusNotification => ChargePoint={0} / Connector={1} / newStatus={2}", ChargePointStatus?.Id, connectorId, newStatus.ToString());
 
                 if (connectorId > 0)
                 {
-                    if (UpdateConnectorStatus(connectorId, newStatus.ToString(), statusNotificationRequest.Timestamp, null, null) == false)
+                    if (UpdateConnectorStatus(connectorId, rawStatus, statusNotificationRequest.Timestamp, null, null) == false)
                     {
                         errorCode = ErrorCodes.InternalError;
                     }
 
-                    if (ChargePointStatus.OnlineConnectors.ContainsKey(connectorId))
-                    {
-                        OnlineConnectorStatus ocs = ChargePointStatus.OnlineConnectors[connectorId];
-                        ocs.Status = newStatus;
-                    }
-                    else
-                    {
-                        OnlineConnectorStatus ocs = new OnlineConnectorStatus();
-                        ocs.Status = newStatus;
-                        if (ChargePointStatus.OnlineConnectors.TryAdd(connectorId, ocs))
-                        {
-                            Logger.LogTrace("StatusNotification => new OnlineConnectorStatus with values: ChargePoint={0} / Connector={1} / newStatus={2}", ChargePointStatus?.Id, connectorId, newStatus.ToString());
-                        }
-                        else
-                        {
-                            Logger.LogError("StatusNotification => Error adding new OnlineConnectorStatus for ChargePoint={0} / Connector={1}", ChargePointStatus?.Id, connectorId);
-                        }
-                    }
+                    ApplyConnectorStatusTransition(connectorId, rawStatus, statusNotificationRequest.Timestamp);
+                    ocppMiddleware?.NotifyConnectorOcppStatus(DbContext, ChargePointStatus, connectorId, rawStatus);
 
                     if (newStatus == ConnectorStatusEnum.Preparing)
                     {
