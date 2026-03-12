@@ -33,10 +33,11 @@ namespace OCPP.Core.Server.Tests
                 emailService,
                 NullLogger<PaymentAuthorizationEmailJob>.Instance);
 
-            job.SendPaymentAuthorized(reservationId, "payer@example.com", "sess_1");
+            job.SendPaymentAuthorized(reservationId, "payer@example.com", "sess_1", "https://example.com/session");
 
             Assert.Equal(1, emailService.PaymentAuthorizedCount);
             Assert.Equal("payer@example.com", emailService.LastToEmail);
+            Assert.Equal("https://example.com/session", emailService.LastStatusUrl);
         }
 
         [Fact]
@@ -49,7 +50,7 @@ namespace OCPP.Core.Server.Tests
                 emailService,
                 NullLogger<PaymentAuthorizationEmailJob>.Instance);
 
-            job.SendPaymentAuthorized(Guid.Empty, "payer@example.com", "sess_2");
+            job.SendPaymentAuthorized(Guid.Empty, "payer@example.com", "sess_2", "https://example.com/session");
 
             Assert.Equal(0, emailService.PaymentAuthorizedCount);
         }
@@ -64,7 +65,7 @@ namespace OCPP.Core.Server.Tests
                 emailService,
                 NullLogger<PaymentAuthorizationEmailJob>.Instance);
 
-            job.SendPaymentAuthorized(Guid.NewGuid(), "payer@example.com", "sess_3");
+            job.SendPaymentAuthorized(Guid.NewGuid(), "payer@example.com", "sess_3", "https://example.com/session");
 
             Assert.Equal(0, emailService.PaymentAuthorizedCount);
         }

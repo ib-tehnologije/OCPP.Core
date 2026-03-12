@@ -19,6 +19,8 @@ namespace OCPP.Core.Database
         public string HeaderLogoUrl { get; set; }
         public string FooterLogoUrl { get; set; }
         public bool? QrScannerEnabled { get; set; }
+        public bool? IdleFeeExcludedWindowEnabled { get; set; }
+        public string IdleFeeExcludedWindow { get; set; }
         public DateTime CreatedAtUtc { get; set; }
         public DateTime UpdatedAtUtc { get; set; }
     }

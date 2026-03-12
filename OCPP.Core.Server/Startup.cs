@@ -101,18 +101,30 @@ namespace OCPP.Core.Server
             services.AddSingleton<IERacuniApiClient, ERacuniApiClient>();
             services.AddSingleton<Payments.Invoices.IInvoiceIntegrationService, Payments.Invoices.InvoiceIntegrationService>();
             services.AddTransient<Payments.PaymentAuthorizationEmailJob>();
+            bool useMockStripeServices = Configuration.GetValue<bool>("Stripe:UseMockServices");
+            if (useMockStripeServices)
+            {
+                services.AddSingleton<Payments.MockStripeStore>();
+            }
             services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
                 sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
                 sp.GetRequiredService<IOptions<Payments.PaymentFlowOptions>>(),
                 sp.GetRequiredService<ILogger<StripePaymentCoordinator>>(),
-                new Payments.StripeSessionServiceWrapper(),
-                new Payments.StripePaymentIntentServiceWrapper(),
+                useMockStripeServices
+                    ? new Payments.MockStripeSessionService(
+                        sp.GetRequiredService<Payments.MockStripeStore>(),
+                        sp.GetRequiredService<IConfiguration>())
+                    : new Payments.StripeSessionServiceWrapper(),
+                useMockStripeServices
+                    ? new Payments.MockStripePaymentIntentService(sp.GetRequiredService<Payments.MockStripeStore>())
+                    : new Payments.StripePaymentIntentServiceWrapper(),
                 new Payments.StripeEventFactoryWrapper(),
                 () => DateTime.UtcNow,
                 sp.GetService<Payments.IEmailNotificationService>(),
                 sp.GetRequiredService<Payments.StartChargingMediator>(),
                 sp.GetService<IBackgroundJobClient>(),
-                sp.GetService<Payments.Invoices.IInvoiceIntegrationService>()));
+                sp.GetService<Payments.Invoices.IInvoiceIntegrationService>(),
+                sp.GetRequiredService<IConfiguration>()));
             services.AddHostedService<Payments.PaymentReservationCleanupService>();
             services.AddHostedService<Payments.IdleFeeWarningEmailService>();
         }

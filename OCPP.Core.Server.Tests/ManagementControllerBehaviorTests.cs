@@ -162,6 +162,63 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void ManageChargePoint_UsesCaseInsensitiveOnlineStatusLookup()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"manage-live-case-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "ns2571148979",
+                        Name = "Huawei test"
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "ns2571148979",
+                        ConnectorId = 1,
+                        LastStatus = "Unknown"
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var server = TestHttpServer.Start(request =>
+                {
+                    Assert.Equal("GET", request.Method);
+                    Assert.Equal("/Status", request.Path);
+
+                    return TestHttpResponse.Json(
+                        "[{\"id\":\"NS2571148979\",\"onlineConnectors\":{\"1\":{\"status\":\"Available\",\"ocppStatus\":\"Available\",\"meterKWH\":6.958}}}]");
+                });
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateHomeController(
+                    actionContext,
+                    new Dictionary<string, string?>
+                    {
+                        ["ServerApiUrl"] = server.BaseUri.ToString(),
+                        ["ApiKey"] = "test-management-key"
+                    });
+
+                var result = controller.ManageChargePoint("ns2571148979");
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<ChargePointManageViewModel>(viewResult.Model);
+                var connector = Assert.Single(model.LiveConnectors);
+
+                Assert.True(model.OnlineConnectorStatuses.ContainsKey("ns2571148979"));
+                Assert.Equal("Available", connector.LiveStatus);
+                Assert.Equal("Available", connector.LiveOcppStatus);
+                Assert.Equal(6.958, connector.MeterKwh);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task CancelReservation_ReturnsAppliedMessage_WhenBackendCancelsReservation()
         {
             using var server = TestHttpServer.Start(request =>

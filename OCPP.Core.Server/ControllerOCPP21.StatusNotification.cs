@@ -63,7 +63,7 @@ namespace OCPP.Core.Server
                     }
 
                     ApplyConnectorStatusTransition(connectorId, rawStatus, statusNotificationRequest.Timestamp);
-                    ocppMiddleware?.NotifyConnectorOcppStatus(DbContext, ChargePointStatus, connectorId, rawStatus);
+                    ocppMiddleware?.NotifyConnectorOcppStatus(DbContext, ChargePointStatus, connectorId, rawStatus, statusNotificationRequest.Timestamp);
 
                     if (newStatus == ConnectorStatusEnum.Preparing)
                     {

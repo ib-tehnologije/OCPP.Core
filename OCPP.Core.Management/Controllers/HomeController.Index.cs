@@ -64,7 +64,7 @@ namespace OCPP.Core.Management.Controllers
             overviewModel.ChargePoints = new List<ChargePointsOverviewViewModel>();
             try
             {
-                Dictionary<string, ChargePointStatus> dictOnlineStatus = new Dictionary<string, ChargePointStatus>();
+                Dictionary<string, ChargePointStatus> dictOnlineStatus = CreateChargePointStatusDictionary();
                 #region Load online status from OCPP server
                 string serverApiUrl = base.Config.GetValue<string>("ServerApiUrl");
                 string apiKeyConfig = base.Config.GetValue<string>("ApiKey");

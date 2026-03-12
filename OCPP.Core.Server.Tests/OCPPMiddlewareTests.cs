@@ -181,6 +181,117 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task HandlePaymentStatusAsync_UsesCanonicalLifecycleAndLiveEnergyFields()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-canonical-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            var now = new DateTime(2026, 3, 12, 19, 45, 0, DateTimeKind.Utc);
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-CANONICAL",
+                        Name = "CP-CANONICAL"
+                    });
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-CANONICAL",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-CANONICAL",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.WaitingForDisconnect,
+                        TransactionId = 771,
+                        StartTransactionAtUtc = now.AddMinutes(-30),
+                        StopTransactionAtUtc = now.AddMinutes(-12),
+                        UsageFeeAnchorMinutes = 1,
+                        UsageFeePerMinute = 0.25m,
+                        StartUsageFeeAfterMinutes = 0,
+                        MaxUsageFeeMinutes = 120,
+                        CreatedAtUtc = now.AddMinutes(-35),
+                        UpdatedAtUtc = now.AddMinutes(-1)
+                    });
+                    setupContext.Transactions.Add(new Transaction
+                    {
+                        TransactionId = 771,
+                        ChargePointId = "CP-CANONICAL",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-CANONICAL",
+                        StartTime = now.AddMinutes(-30),
+                        StopTime = now.AddMinutes(-12),
+                        MeterStart = 5.0,
+                        MeterStop = null,
+                        EnergyKwh = 0
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(configValues: new Dictionary<string, string?>
+                {
+                    ["Payments:IdleFeeExcludedWindow"] = "00:00-23:59",
+                    ["Payments:IdleFeeExcludedTimeZoneId"] = "Europe/Zagreb"
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-CANONICAL"] = new ChargePointStatus
+                    {
+                        Id = "CP-CANONICAL",
+                        Protocol = "ocpp1.6",
+                        WebSocket = new FakeOpenWebSocket(() => Task.CompletedTask),
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Occupied,
+                                OcppStatus = "SuspendedEV",
+                                MeterKWH = 9.7,
+                                MeterValueDate = new DateTimeOffset(now)
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "GET";
+                    httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var json = await reader.ReadToEndAsync();
+                    var payload = JObject.Parse(json);
+
+                    Assert.Equal("WaitingForDisconnect", payload["status"]?.Value<string>());
+                    Assert.Equal("waitingForDisconnect", payload["sessionStage"]?.Value<string>());
+                    Assert.True(Math.Abs((payload["liveMeterKwh"]?.Value<double>() ?? 0d) - 9.7) < 0.001);
+                    Assert.True(Math.Abs((payload["liveSessionEnergyKwh"]?.Value<double>() ?? 0d) - 4.7) < 0.001);
+                    Assert.True(payload["idleBillingPausedByWindow"]?.Value<bool>());
+                    Assert.Equal("SuspendedEV", payload["liveOcppStatus"]?.Value<string>());
+                    Assert.Equal(JTokenType.Null, payload["disconnectedAtUtc"]?.Type);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task HandlePaymentStatusAsync_ReportsReservationLockMetadata()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-lock-{Guid.NewGuid():N}.sqlite");
@@ -454,6 +565,218 @@ namespace OCPP.Core.Server.Tests
                     Assert.True(payload["liveIdleFeeAmount"]?.Value<decimal>() >= 1.0m);
                     Assert.NotNull(payload["suspendedEvSinceUtc"]?.Value<string>());
                     Assert.NotNull(payload["idleFeeStartsAtUtc"]?.Value<string>());
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task HandlePaymentStatusAsync_UsesWaitingForDisconnectStageAndLiveSessionEnergy()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-disconnect-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            DateTime now = DateTime.UtcNow;
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-WAIT",
+                        Name = "CP-WAIT"
+                    });
+
+                    var transaction = new Transaction
+                    {
+                        TransactionId = 515,
+                        ChargePointId = "CP-WAIT",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-WAIT",
+                        StartTime = now.AddMinutes(-25),
+                        StopTime = now.AddMinutes(-1),
+                        MeterStart = 10.0
+                    };
+
+                    setupContext.Transactions.Add(transaction);
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-WAIT",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-WAIT",
+                        OcppIdTag = "TAG-WAIT",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.WaitingForDisconnect,
+                        TransactionId = transaction.TransactionId,
+                        StartTransactionAtUtc = now.AddMinutes(-24),
+                        StopTransactionAtUtc = now.AddMinutes(-1),
+                        CreatedAtUtc = now.AddMinutes(-30),
+                        UpdatedAtUtc = now
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-WAIT"] = new ChargePointStatus
+                    {
+                        Id = "CP-WAIT",
+                        Protocol = "ocpp1.6",
+                        WebSocket = new FakeOpenWebSocket(() => Task.CompletedTask),
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Occupied,
+                                OcppStatus = "Finishing",
+                                OcppStatusAtUtc = now,
+                                MeterKWH = 14.2,
+                                MeterValueDate = DateTimeOffset.UtcNow
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    var middleware = CreateMiddleware();
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "GET";
+                    httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                    Assert.Equal("waitingForDisconnect", payload["sessionStage"]?.Value<string>());
+                    Assert.Null(payload["disconnectedAtUtc"]?.Value<string>());
+                    Assert.True(Math.Abs((payload["liveSessionEnergyKwh"]?.Value<double>() ?? 0d) - 4.2) < 0.001);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task HandlePaymentStatusAsync_UsesDatabaseQuietHoursForIdlePauseFlag()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-window-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            DateTime now = DateTime.UtcNow;
+            string window = $"{now.AddMinutes(-5):HH\\:mm}-{now.AddMinutes(5):HH\\:mm}";
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-WINDOW",
+                        Name = "CP-WINDOW"
+                    });
+                    setupContext.PublicPortalSettings.Add(new PublicPortalSettings
+                    {
+                        CreatedAtUtc = now.AddMinutes(-10),
+                        UpdatedAtUtc = now,
+                        IdleFeeExcludedWindowEnabled = true,
+                        IdleFeeExcludedWindow = window
+                    });
+
+                    var transaction = new Transaction
+                    {
+                        TransactionId = 516,
+                        ChargePointId = "CP-WINDOW",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-WINDOW",
+                        StartTime = now.AddMinutes(-30),
+                        MeterStart = 10.0,
+                        ChargingEndedAtUtc = now.AddMinutes(-2)
+                    };
+
+                    setupContext.Transactions.Add(transaction);
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-WINDOW",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-WINDOW",
+                        OcppIdTag = "TAG-WINDOW",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = transaction.TransactionId,
+                        UsageFeeAnchorMinutes = 1,
+                        UsageFeePerMinute = 0.50m,
+                        StartUsageFeeAfterMinutes = 0,
+                        MaxUsageFeeMinutes = 120,
+                        CreatedAtUtc = now.AddMinutes(-35),
+                        UpdatedAtUtc = now
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-WINDOW"] = new ChargePointStatus
+                    {
+                        Id = "CP-WINDOW",
+                        Protocol = "ocpp1.6",
+                        WebSocket = new FakeOpenWebSocket(() => Task.CompletedTask),
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Occupied,
+                                OcppStatus = "SuspendedEV",
+                                OcppStatusAtUtc = now,
+                                MeterKWH = 11.0,
+                                MeterValueDate = DateTimeOffset.UtcNow
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    var middleware = CreateMiddleware(configValues: new Dictionary<string, string?>
+                    {
+                        ["Payments:IdleFeeExcludedTimeZoneId"] = "UTC"
+                    });
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "GET";
+                    httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                    Assert.True(payload["idleBillingPausedByWindow"]?.Value<bool>() ?? false);
+                    Assert.Equal("charging", payload["sessionStage"]?.Value<string>());
                 }
                 finally
                 {
@@ -1211,6 +1534,7 @@ namespace OCPP.Core.Server.Tests
             public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
             public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
             public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
             public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
         }
 
@@ -1240,6 +1564,7 @@ namespace OCPP.Core.Server.Tests
             public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
             public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
             public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
             public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
         }
     }

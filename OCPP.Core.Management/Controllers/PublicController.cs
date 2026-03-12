@@ -233,7 +233,9 @@ namespace OCPP.Core.Management.Controllers
 
             foreach (var cp in chargePoints)
             {
-                var statuses = connectorStatuses.Where(c => c.ChargePointId == cp.ChargePointId).ToList();
+                var statuses = connectorStatuses
+                    .Where(c => string.Equals(c.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
                 string aggregatedStatus = "Unknown";
                 DateTime? statusTime = null;
 
@@ -504,6 +506,7 @@ namespace OCPP.Core.Management.Controllers
                 string.Equals(reservationStatus, ChargePaymentReservationState.Authorized, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(reservationStatus, ChargePaymentReservationState.StartRequested, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(reservationStatus, ChargePaymentReservationState.Charging, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, ChargePaymentReservationState.WaitingForDisconnect, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(reservationStatus, ChargePaymentReservationState.Completed, StringComparison.OrdinalIgnoreCase))
             {
                 return RedirectToAction("Status", "Payments", new { reservationId = recovery.ReservationId, origin = "public" });

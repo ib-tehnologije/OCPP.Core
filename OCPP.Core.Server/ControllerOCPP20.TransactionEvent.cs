@@ -75,7 +75,7 @@ namespace OCPP.Core.Server
                 {
                     UpdateConnectorStatus(connectorId, rawChargingState, transactionEventRequest.Timestamp, null, null);
                     ApplyConnectorStatusTransition(connectorId, rawChargingState, transactionEventRequest.Timestamp);
-                    ocppMiddleware?.NotifyConnectorOcppStatus(DbContext, ChargePointStatus, connectorId, rawChargingState);
+                    ocppMiddleware?.NotifyConnectorOcppStatus(DbContext, ChargePointStatus, connectorId, rawChargingState, transactionEventRequest.Timestamp);
                 }
 
                 if (connectorId > 0 && meterKWH >= 0)
@@ -279,8 +279,17 @@ namespace OCPP.Core.Server
                                         transaction.StopTime = transactionEventRequest.Timestamp.UtcDateTime;
                                         transaction.MeterStop = meterKWH;
                                         transaction.StopTagId = idTag;
-                                        transaction.StopReason = transactionEventRequest.TriggerReason.ToString();
-                                        FinalizeIdleTracking(transaction, transaction.StopTime.Value);
+                                        transaction.StopReason = (transactionEventRequest.TransactionInfo?.StoppedReason ?? ReasonEnumType.Missing) != ReasonEnumType.Missing
+                                            ? transactionEventRequest.TransactionInfo.StoppedReason.ToString()
+                                            : transactionEventRequest.TriggerReason.ToString();
+                                        var reservation = FindReservationForTransaction(transaction);
+                                        bool deferIdleFinalization = ocppMiddleware != null &&
+                                                                     reservation != null &&
+                                                                     OCPP.Core.Server.Payments.PaymentReservationStatus.IsActive(reservation.Status);
+                                        if (!deferIdleFinalization)
+                                        {
+                                            FinalizeIdleTracking(transaction, transaction.StopTime.Value);
+                                        }
                                         DbContext.SaveChanges();
 
                                         ocppMiddleware?.NotifyTransactionCompleted(DbContext, transaction);
@@ -353,6 +362,7 @@ namespace OCPP.Core.Server
             {
                 var powerAggregate = new PhaseAwareMeasurementAggregate();
                 var currentAggregate = new PhaseAwareMeasurementAggregate();
+                var energyAggregate = new PhaseAwareMeasurementAggregate();
 
                 foreach (SampledValueType sampleValue in meterValue.SampledValue)
                 {
@@ -388,27 +398,28 @@ namespace OCPP.Core.Server
                              sampleValue.Measurand == null)  // Spec: Default=Energy_Active_Import_Register
                     {
                         // charged amount of energy
-                        meterKWH = sampleValue.Value;
+                        var normalizedEnergy = sampleValue.Value;
                         if (sampleValue.UnitOfMeasure?.Unit == "Wh" ||
                             sampleValue.UnitOfMeasure?.Unit == "VAh" ||
                             sampleValue.UnitOfMeasure?.Unit == "varh" ||
                             (sampleValue.UnitOfMeasure == null || sampleValue.UnitOfMeasure.Unit == null))
                         {
-                            Logger.LogTrace("GetMeterValues => Value: '{0:0.0}' Wh", meterKWH);
+                            Logger.LogTrace("GetMeterValues => Value: '{0:0.0}' Wh", sampleValue.Value);
                             // convert Wh => kWh
-                            meterKWH = meterKWH / 1000;
+                            normalizedEnergy = sampleValue.Value / 1000;
                         }
                         else if (sampleValue.UnitOfMeasure?.Unit == "kWh" ||
                                 sampleValue.UnitOfMeasure?.Unit == "kVAh" ||
                                 sampleValue.UnitOfMeasure?.Unit == "kvarh")
                         {
                             // already kWh => OK
-                            Logger.LogTrace("GetMeterValues => Value: '{0:0.0}' kWh", meterKWH);
+                            Logger.LogTrace("GetMeterValues => Value: '{0:0.0}' kWh", sampleValue.Value);
                         }
                         else
                         {
                             Logger.LogWarning("GetMeterValues => Value: unexpected unit: '{0}' (Value={1})", sampleValue.UnitOfMeasure?.Unit, sampleValue.Value);
                         }
+                        energyAggregate.Add(normalizedEnergy, sampleValue.Phase?.ToString());
                         meterTime = meterValue.Timestamp;
                     }
                     else if (sampleValue.Measurand == MeasurandEnumType.SoC)
@@ -421,6 +432,7 @@ namespace OCPP.Core.Server
 
                 currentChargeKW = powerAggregate.GetValue() ?? currentChargeKW;
                 currentImportA = currentAggregate.GetValue() ?? currentImportA;
+                meterKWH = energyAggregate.GetValuePreferOverall() ?? meterKWH;
             }
         }
 

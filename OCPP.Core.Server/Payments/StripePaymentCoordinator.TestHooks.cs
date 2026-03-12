@@ -22,7 +22,7 @@ namespace OCPP.Core.Server.Payments
                 Options.Create(new StripeOptions()),
                 Options.Create(new PaymentFlowOptions()),
                 logger: null)
-            .CalculateUsageFeeMinutes(transaction, reservation, nowUtc);
+            .CalculateUsageFeeMinutes(transaction, reservation, new PaymentFlowOptions(), nowUtc);
 
         internal static void TestPersistTransactionBreakdown(
             OCPPCoreContext dbContext,

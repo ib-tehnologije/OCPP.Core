@@ -12,6 +12,7 @@
                 "Available",
                 "Occupied",
                 "Reserved",
+                "Preparing",
                 "Unavailable",
                 "Faulted"
             ]

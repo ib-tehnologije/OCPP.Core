@@ -119,6 +119,23 @@ namespace OCPP.Core.Management.Controllers
         }
 
         [HttpGet]
+        public IActionResult MockCheckout(Guid reservationId, string session_id, string successUrl, string cancelUrl)
+        {
+            if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(session_id) || string.IsNullOrWhiteSpace(successUrl))
+            {
+                return View("Result", BuildResult("Error", "Missing mock checkout parameters."));
+            }
+
+            return View(new MockCheckoutViewModel
+            {
+                ReservationId = reservationId,
+                SessionId = session_id,
+                SuccessUrl = successUrl,
+                CancelUrl = cancelUrl
+            });
+        }
+
+        [HttpGet]
         public async Task<IActionResult> Status(Guid reservationId, string origin)
         {
             ClearRecoveryCookie();

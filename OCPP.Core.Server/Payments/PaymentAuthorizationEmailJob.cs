@@ -23,7 +23,7 @@ namespace OCPP.Core.Server.Payments
         }
 
         [Queue("payments")]
-        public void SendPaymentAuthorized(Guid reservationId, string toEmail, string checkoutSessionId)
+        public void SendPaymentAuthorized(Guid reservationId, string toEmail, string checkoutSessionId, string statusUrl)
         {
             if (reservationId == Guid.Empty)
             {
@@ -41,7 +41,7 @@ namespace OCPP.Core.Server.Payments
             var session = new Session { Id = checkoutSessionId };
             try
             {
-                _emailService?.SendPaymentAuthorized(toEmail, reservation, session);
+                _emailService?.SendPaymentAuthorized(toEmail, reservation, session, statusUrl);
             }
             catch (Exception ex)
             {

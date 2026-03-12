@@ -38,6 +38,13 @@ namespace OCPP.Core.Management.Controllers
                 return View("PublicPortal", model);
             }
 
+            var normalizedIdleWindow = NormalizeIdleWindow(model.IdleFeeExcludedWindow);
+            if (model.IdleFeeExcludedWindowEnabled && string.IsNullOrWhiteSpace(normalizedIdleWindow))
+            {
+                ModelState.AddModelError(nameof(model.IdleFeeExcludedWindow), "Enter a non-billing idle window in HH:mm-HH:mm format.");
+                return View("PublicPortal", model);
+            }
+
             var entity = DbContext.PublicPortalSettings
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .FirstOrDefault();
@@ -65,6 +72,8 @@ namespace OCPP.Core.Management.Controllers
             entity.HeaderLogoUrl = NormalizeUrl(model.HeaderLogoUrl);
             entity.FooterLogoUrl = NormalizeUrl(model.FooterLogoUrl);
             entity.QrScannerEnabled = model.QrScannerEnabled;
+            entity.IdleFeeExcludedWindowEnabled = model.IdleFeeExcludedWindowEnabled;
+            entity.IdleFeeExcludedWindow = model.IdleFeeExcludedWindowEnabled ? normalizedIdleWindow : null;
             entity.UpdatedAtUtc = DateTime.UtcNow;
 
             DbContext.SaveChanges();
@@ -81,6 +90,24 @@ namespace OCPP.Core.Management.Controllers
         private static string NormalizeUrl(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        private static string NormalizeIdleWindow(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            var parts = value.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 ||
+                !TimeSpan.TryParse(parts[0], out var start) ||
+                !TimeSpan.TryParse(parts[1], out var end))
+            {
+                return null;
+            }
+
+            return $"{start:hh\\:mm}-{end:hh\\:mm}";
         }
     }
 }

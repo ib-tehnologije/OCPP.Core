@@ -1,0 +1,51 @@
+name: E2E browser regression
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      MSBUILDNOINPROCNODE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Simulators/playwright/package-lock.json
+
+      - name: Restore .NET
+        run: dotnet restore OCPP.Core.sln --disable-build-servers -m:1
+
+      - name: Build .NET apps
+        run: dotnet build OCPP.Core.sln --disable-build-servers --no-restore -m:1
+
+      - name: Install Playwright package
+        run: npm ci --prefix Simulators/playwright
+
+      - name: Install Playwright browser
+        run: npx --prefix Simulators/playwright playwright install --with-deps chromium
+
+      - name: Run local regression matrix
+        run: python3 Simulators/run_local_regression.py
+
+      - name: Upload regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocpp-regression-output
+          path: Simulators/output
+          if-no-files-found: ignore

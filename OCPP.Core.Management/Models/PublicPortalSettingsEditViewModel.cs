@@ -61,5 +61,12 @@ namespace OCPP.Core.Management.Models
 
         [Display(Name = "Enable QR scanner")]
         public bool QrScannerEnabled { get; set; } = true;
+
+        [Display(Name = "Enable non-billing idle window")]
+        public bool IdleFeeExcludedWindowEnabled { get; set; }
+
+        [Display(Name = "Non-billing idle window")]
+        [StringLength(32)]
+        public string IdleFeeExcludedWindow { get; set; }
     }
 }

@@ -88,7 +88,7 @@ namespace OCPP.Core.Management.Controllers
 
         private void LoadOnlineStatus(ChargePointManageViewModel vm)
         {
-            Dictionary<string, ChargePointStatus> dictOnlineStatus = new Dictionary<string, ChargePointStatus>();
+            Dictionary<string, ChargePointStatus> dictOnlineStatus = CreateChargePointStatusDictionary();
             string serverApiUrl = base.Config.GetValue<string>("ServerApiUrl");
             string apiKeyConfig = base.Config.GetValue<string>("ApiKey");
             if (string.IsNullOrEmpty(serverApiUrl))
@@ -164,7 +164,7 @@ namespace OCPP.Core.Management.Controllers
                 .GroupBy(r => r.ConnectorId)
                 .ToDictionary(g => g.Key, g => g.First());
 
-            vm.OnlineConnectorStatuses ??= new Dictionary<string, ChargePointStatus>();
+            vm.OnlineConnectorStatuses ??= CreateChargePointStatusDictionary();
             vm.OnlineConnectorStatuses.TryGetValue(vm.ChargePoint.ChargePointId, out var onlineStatus);
 
             foreach (var connector in vm.ConnectorStatuses.OrderBy(c => c.ConnectorId))
@@ -197,6 +197,11 @@ namespace OCPP.Core.Management.Controllers
                         ChargePaymentReservationState.IsCancelable(activeReservation.Status)
                 });
             }
+        }
+
+        private static Dictionary<string, ChargePointStatus> CreateChargePointStatusDictionary()
+        {
+            return new Dictionary<string, ChargePointStatus>(StringComparer.OrdinalIgnoreCase);
         }
 
     }

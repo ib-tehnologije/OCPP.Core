@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Hangfire;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,7 @@ namespace OCPP.Core.Server.Payments
     {
         private readonly StripeOptions _options;
         private readonly PaymentFlowOptions _flowOptions;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<StripePaymentCoordinator> _logger;
         private readonly IStripeSessionService _sessionService;
         private readonly IStripePaymentIntentService _paymentIntentService;
@@ -44,8 +46,9 @@ namespace OCPP.Core.Server.Payments
         public StripePaymentCoordinator(
             IOptions<StripeOptions> options,
             IOptions<PaymentFlowOptions> flowOptions,
-            ILogger<StripePaymentCoordinator> logger)
-            : this(options, flowOptions, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow, null, null, null, null)
+            ILogger<StripePaymentCoordinator> logger,
+            IConfiguration configuration = null)
+            : this(options, flowOptions, logger, new StripeSessionServiceWrapper(), new StripePaymentIntentServiceWrapper(), new StripeEventFactoryWrapper(), () => DateTime.UtcNow, null, null, null, null, configuration)
         {
         }
 
@@ -60,10 +63,12 @@ namespace OCPP.Core.Server.Payments
             IEmailNotificationService emailNotificationService = null,
             StartChargingMediator startMediator = null,
             IBackgroundJobClient backgroundJobClient = null,
-            IInvoiceIntegrationService invoiceIntegrationService = null)
+            IInvoiceIntegrationService invoiceIntegrationService = null,
+            IConfiguration configuration = null)
         {
             _options = options?.Value ?? new StripeOptions();
             _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
+            _configuration = configuration;
             _logger = logger;
             _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
             _paymentIntentService = paymentIntentService ?? throw new ArgumentNullException(nameof(paymentIntentService));
@@ -463,15 +468,16 @@ namespace OCPP.Core.Server.Payments
                     {
                         var recipientEmail = session?.CustomerDetails?.Email;
                         var sessionId = session?.Id;
+                        var statusUrl = BuildStatusUrl(reservationId);
                         if (_backgroundJobClient != null)
                         {
                             _backgroundJobClient.Enqueue<PaymentAuthorizationEmailJob>(job =>
-                                job.SendPaymentAuthorized(reservationId, recipientEmail, sessionId));
+                                job.SendPaymentAuthorized(reservationId, recipientEmail, sessionId, statusUrl));
                             _logger.LogInformation("Stripe/Confirm => Queued payment authorization email reservation={ReservationId}", reservationId);
                         }
                         else
                         {
-                            _emailNotificationService?.SendPaymentAuthorized(recipientEmail, reservation, session);
+                            _emailNotificationService?.SendPaymentAuthorized(recipientEmail, reservation, session, statusUrl);
                         }
                     }
                     catch (Exception ex)
@@ -875,6 +881,39 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
+            var now = _utcNow();
+            reservation.StopTransactionAtUtc ??= transaction.StopTime ?? now;
+            reservation.UpdatedAtUtc = now;
+
+            if (reservation.UsageFeeAnchorMinutes == 1 &&
+                !transaction.ChargingEndedAtUtc.HasValue &&
+                reservation.StopTransactionAtUtc.HasValue)
+            {
+                transaction.ChargingEndedAtUtc = reservation.StopTransactionAtUtc.Value;
+            }
+
+            bool hasConnectorAvailability = TryGetConnectorAvailability(dbContext, reservation, out bool connectorAvailable);
+            bool disconnected = reservation.DisconnectedAtUtc.HasValue ||
+                                IsDisconnectedStopReason(transaction.StopReason) ||
+                                connectorAvailable;
+
+            if (!disconnected && hasConnectorAvailability)
+            {
+                reservation.Status = PaymentReservationStatus.WaitingForDisconnect;
+                dbContext.SaveChanges();
+
+                _logger.LogInformation(
+                    "Stripe/Complete => Deferred capture until disconnect reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId}",
+                    reservation.ReservationId,
+                    transaction.TransactionId,
+                    transaction.ChargePointId,
+                    transaction.ConnectorId);
+                return;
+            }
+
+            reservation.DisconnectedAtUtc ??= ResolveDisconnectedAtUtc(dbContext, reservation) ?? reservation.StopTransactionAtUtc ?? now;
+            dbContext.SaveChanges();
+
             _logger.LogInformation("Stripe/Complete => Begin capture for reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId} currentStatus={Status}",
                 reservation.ReservationId,
                 transaction.TransactionId,
@@ -889,7 +928,7 @@ namespace OCPP.Core.Server.Payments
             }
 
             reservation.ActualEnergyKwh = actualEnergy;
-            reservation.UpdatedAtUtc = _utcNow();
+            reservation.UpdatedAtUtc = now;
 
             if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
             {
@@ -902,7 +941,16 @@ namespace OCPP.Core.Server.Payments
 
             var energyCostCents = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
             var sessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
-            var usageFeeMinutes = CalculateUsageFeeMinutes(transaction, reservation, _utcNow());
+            var flowOptions = ResolveFlowOptions(dbContext);
+            var idleSnapshot = IdleFeeCalculator.ApplyFinalSnapshot(
+                transaction,
+                reservation,
+                flowOptions,
+                reservation.DisconnectedAtUtc ?? now,
+                _logger);
+            var usageFeeMinutes = reservation.UsageFeeAnchorMinutes == 1
+                ? idleSnapshot.TotalMinutes
+                : CalculateUsageFeeMinutes(transaction, reservation, flowOptions, now);
             var usageFeeCents = usageFeeMinutes > 0
                 ? CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute)
                 : 0L;
@@ -919,6 +967,13 @@ namespace OCPP.Core.Server.Payments
                 usageFeeCents,
                 sessionFeeCents,
                 amountToCapture);
+
+            _logger.LogInformation(
+                "Stripe/Complete => Final idle snapshot reservation={ReservationId} tx={TransactionId} minutes={IdleMinutes} amount={IdleAmount}",
+                reservation.ReservationId,
+                transaction.TransactionId,
+                idleSnapshot.TotalMinutes,
+                idleSnapshot.TotalAmount);
 
             try
             {
@@ -965,7 +1020,7 @@ namespace OCPP.Core.Server.Payments
                 else if (paymentIntent.Status == "succeeded")
                 {
                     reservation.CapturedAmountCents = paymentIntent.AmountReceived;
-                    reservation.CapturedAtUtc = _utcNow();
+                    reservation.CapturedAtUtc = now;
                     reservation.Status = PaymentReservationStatus.Completed;
 
                     _logger.LogInformation(
@@ -997,9 +1052,56 @@ namespace OCPP.Core.Server.Payments
                 _logger.LogError(sex, "Stripe capture failed for reservation {ReservationId}", reservation.ReservationId);
                 reservation.Status = PaymentReservationStatus.Failed;
                 reservation.LastError = sex.Message;
-                reservation.UpdatedAtUtc = _utcNow();
+                reservation.UpdatedAtUtc = now;
                 dbContext.SaveChanges();
             }
+        }
+
+        public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc)
+        {
+            if (!IsEnabled || dbContext == null || string.IsNullOrWhiteSpace(chargePointId) || connectorId <= 0)
+            {
+                return;
+            }
+
+            var reservation = dbContext.ChargePaymentReservations
+                .Where(r =>
+                    r.ChargePointId == chargePointId &&
+                    r.ConnectorId == connectorId &&
+                    r.Status == PaymentReservationStatus.WaitingForDisconnect)
+                .OrderByDescending(r => r.UpdatedAtUtc)
+                .FirstOrDefault();
+
+            if (reservation == null)
+            {
+                return;
+            }
+
+            reservation.DisconnectedAtUtc ??= disconnectedAtUtc;
+            reservation.UpdatedAtUtc = _utcNow();
+            dbContext.SaveChanges();
+
+            if (!reservation.TransactionId.HasValue)
+            {
+                _logger.LogWarning(
+                    "Stripe/ConnectorAvailable => Waiting reservation has no transaction reservation={ReservationId} cp={ChargePointId} connector={ConnectorId}",
+                    reservation.ReservationId,
+                    reservation.ChargePointId,
+                    reservation.ConnectorId);
+                return;
+            }
+
+            var transaction = dbContext.Transactions.Find(reservation.TransactionId.Value);
+            if (transaction == null)
+            {
+                _logger.LogWarning(
+                    "Stripe/ConnectorAvailable => Transaction not found reservation={ReservationId} tx={TransactionId}",
+                    reservation.ReservationId,
+                    reservation.TransactionId.Value);
+                return;
+            }
+
+            CompleteReservation(dbContext, transaction);
         }
 
         private void TrySendR1RequestedNotification(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
@@ -1172,7 +1274,7 @@ namespace OCPP.Core.Server.Payments
             return $"{TrimTrailingSlash(_options.ReturnBaseUrl)}/Payments/Status?reservationId={reservationId}&origin=public";
         }
 
-        private int CalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, DateTime? nowUtc = null)
+        private int CalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, PaymentFlowOptions flowOptions, DateTime? nowUtc = null)
         {
             if (reservation == null) throw new ArgumentNullException(nameof(reservation));
             if (transaction == null) throw new ArgumentNullException(nameof(transaction));
@@ -1187,8 +1289,8 @@ namespace OCPP.Core.Server.Payments
                 return IdleFeeCalculator.CalculateSnapshot(
                     transaction,
                     reservation,
-                    _flowOptions,
-                    transaction.StopTime ?? nowUtc ?? DateTime.UtcNow,
+                    flowOptions,
+                    nowUtc ?? DateTime.UtcNow,
                     _logger).TotalMinutes;
             }
 
@@ -1205,6 +1307,61 @@ namespace OCPP.Core.Server.Payments
             return Math.Min(
                 Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
                 reservation.MaxUsageFeeMinutes);
+        }
+
+        private PaymentFlowOptions ResolveFlowOptions(OCPPCoreContext dbContext)
+        {
+            return PaymentFlowOptionsResolver.Resolve(_configuration, dbContext, _flowOptions);
+        }
+
+        private static bool IsDisconnectedStopReason(string stopReason)
+        {
+            if (string.IsNullOrWhiteSpace(stopReason))
+            {
+                return false;
+            }
+
+            return stopReason.IndexOf("EVDisconnected", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   stopReason.IndexOf("EVDeparted", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static DateTime? ResolveDisconnectedAtUtc(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
+        {
+            if (dbContext == null || reservation == null)
+            {
+                return null;
+            }
+
+            var connectorStatus = dbContext.ConnectorStatuses.Find(reservation.ChargePointId, reservation.ConnectorId);
+            if (connectorStatus?.LastStatusTime.HasValue == true &&
+                string.Equals(connectorStatus.LastStatus, "Available", StringComparison.OrdinalIgnoreCase))
+            {
+                DateTime referenceUtc = reservation.StopTransactionAtUtc ?? reservation.StartTransactionAtUtc ?? reservation.CreatedAtUtc;
+                if (connectorStatus.LastStatusTime.Value >= referenceUtc)
+                {
+                    return connectorStatus.LastStatusTime.Value;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool TryGetConnectorAvailability(OCPPCoreContext dbContext, ChargePaymentReservation reservation, out bool isAvailable)
+        {
+            isAvailable = false;
+            if (dbContext == null || reservation == null)
+            {
+                return false;
+            }
+
+            var connectorStatus = dbContext.ConnectorStatuses.Find(reservation.ChargePointId, reservation.ConnectorId);
+            if (connectorStatus == null)
+            {
+                return false;
+            }
+
+            isAvailable = ResolveDisconnectedAtUtc(dbContext, reservation).HasValue;
+            return true;
         }
 
         private static bool TryParseDailyWindow(string window, out TimeSpan start, out TimeSpan end)

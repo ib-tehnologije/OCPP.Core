@@ -313,15 +313,12 @@ namespace OCPP.Core.Server
                 var reservation = FindReservationForTransaction(transaction);
                 if (reservation != null && IdleFeeCalculator.IsIdleFeeEnabled(reservation))
                 {
-                    var snapshot = IdleFeeCalculator.CalculateSnapshot(
+                    var snapshot = IdleFeeCalculator.ApplyFinalSnapshot(
                         transaction,
                         reservation,
                         GetPaymentFlowOptions(),
                         asOfUtc,
                         Logger);
-
-                    transaction.IdleUsageFeeMinutes = snapshot.TotalMinutes;
-                    transaction.IdleUsageFeeAmount = snapshot.TotalAmount;
                 }
 
                 Logger.LogInformation(
@@ -331,12 +328,40 @@ namespace OCPP.Core.Server
                     transaction.TransactionId,
                     transaction.IdleUsageFeeMinutes,
                     transaction.IdleUsageFeeAmount);
-
-                transaction.ChargingEndedAtUtc = null;
             }
             catch (Exception exp)
             {
                 Logger.LogError(exp, "FinalizeIdleTracking => Error finalizing idle totals for tx={TransactionId}", transaction?.TransactionId);
+            }
+        }
+
+        protected void UpdateOpenTransactionMeterStop(int connectorId, double meterKwh)
+        {
+            if (meterKwh < 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var transaction = DbContext.Transactions
+                    .Where(t => t.ChargePointId == ChargePointStatus.Id &&
+                                t.ConnectorId == connectorId &&
+                                !t.StopTime.HasValue)
+                    .OrderByDescending(t => t.TransactionId)
+                    .FirstOrDefault();
+
+                if (transaction == null)
+                {
+                    return;
+                }
+
+                transaction.MeterStop = meterKwh;
+                DbContext.SaveChanges();
+            }
+            catch (Exception exp)
+            {
+                Logger.LogDebug(exp, "UpdateOpenTransactionMeterStop => Failed cp={ChargePointId} connector={ConnectorId}", ChargePointStatus?.Id, connectorId);
             }
         }
 
@@ -492,14 +517,7 @@ namespace OCPP.Core.Server
 
         private PaymentFlowOptions GetPaymentFlowOptions()
         {
-            return new PaymentFlowOptions
-            {
-                StartWindowMinutes = Configuration.GetValue<int?>("Payments:StartWindowMinutes") ?? 2,
-                EnableReservationProfile = Configuration.GetValue<bool?>("Payments:EnableReservationProfile") ?? false,
-                IdleFeeExcludedWindow = Configuration.GetValue<string>("Payments:IdleFeeExcludedWindow"),
-                IdleFeeExcludedTimeZoneId = Configuration.GetValue<string>("Payments:IdleFeeExcludedTimeZoneId"),
-                IdleAutoStopMinutes = Configuration.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0
-            };
+            return PaymentFlowOptionsResolver.Resolve(Configuration, DbContext);
         }
     }
 }

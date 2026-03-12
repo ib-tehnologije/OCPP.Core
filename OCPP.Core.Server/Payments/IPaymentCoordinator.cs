@@ -20,6 +20,7 @@ namespace OCPP.Core.Server.Payments
         void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason);
         void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId);
         void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction);
+        void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc);
         void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader);
     }
 
@@ -103,6 +104,7 @@ namespace OCPP.Core.Server.Payments
         public const string StartTimeout = ChargePaymentReservationState.StartTimeout;
         public const string Abandoned = ChargePaymentReservationState.Abandoned;
         public const string Charging = ChargePaymentReservationState.Charging;
+        public const string WaitingForDisconnect = ChargePaymentReservationState.WaitingForDisconnect;
         public const string Completed = ChargePaymentReservationState.Completed;
         public const string Cancelled = ChargePaymentReservationState.Cancelled;
         public const string Failed = ChargePaymentReservationState.Failed;

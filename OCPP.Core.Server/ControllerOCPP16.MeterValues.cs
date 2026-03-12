@@ -84,6 +84,7 @@ namespace OCPP.Core.Server
                     {
                         var powerAggregate = new PhaseAwareMeasurementAggregate();
                         var currentAggregate = new PhaseAwareMeasurementAggregate();
+                        var energyAggregate = new PhaseAwareMeasurementAggregate();
 
                         foreach (SampledValue sampleValue in meterValue.SampledValue)
                         {
@@ -132,26 +133,29 @@ namespace OCPP.Core.Server
                                     sampleValue.Measurand == null)
                             {
                                 // charged amount of energy
-                                if (double.TryParse(sampleValue.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out meterKWH))
+                                if (double.TryParse(sampleValue.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedEnergy))
                                 {
+                                    double normalizedEnergy = parsedEnergy;
                                     if (sampleValue.Unit == SampledValueUnit.Wh ||
                                         sampleValue.Unit == SampledValueUnit.Varh ||
                                         sampleValue.Unit == null)
                                     {
-                                        Logger.LogTrace("MeterValues => Value: '{0:0.0}' Wh", meterKWH);
+                                        Logger.LogTrace("MeterValues => Value: '{0:0.0}' Wh", parsedEnergy);
                                         // convert Wh => kWh
-                                        meterKWH = meterKWH / 1000;
+                                        normalizedEnergy = parsedEnergy / 1000;
                                     }
                                     else if (sampleValue.Unit == SampledValueUnit.KWh ||
                                             sampleValue.Unit == SampledValueUnit.Kvarh)
                                     {
                                         // already kWh => OK
-                                        Logger.LogTrace("MeterValues => Value: '{0:0.0}' kWh", meterKWH);
+                                        Logger.LogTrace("MeterValues => Value: '{0:0.0}' kWh", parsedEnergy);
                                     }
                                     else
                                     {
                                         Logger.LogWarning("MeterValues => Value: unexpected unit: '{0}' (Value={1})", sampleValue.Unit, sampleValue.Value);
                                     }
+
+                                    energyAggregate.Add(normalizedEnergy, sampleValue.Phase?.ToString());
                                     meterTime = meterValue.Timestamp;
                                 }
                                 else
@@ -175,6 +179,7 @@ namespace OCPP.Core.Server
 
                         currentChargeKW = powerAggregate.GetValue() ?? currentChargeKW;
                         currentImportA = currentAggregate.GetValue() ?? currentImportA;
+                        meterKWH = energyAggregate.GetValuePreferOverall() ?? meterKWH;
                     }
 
                     // write charging/meter data in chargepoint status
@@ -186,6 +191,7 @@ namespace OCPP.Core.Server
                         {
                             UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
                             UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime, currentChargeKW, currentImportA, stateOfCharge);
+                            UpdateOpenTransactionMeterStop(connectorId, meterKWH);
                         }
                     }
                 }

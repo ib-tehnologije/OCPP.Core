@@ -200,6 +200,7 @@ namespace OCPP.Core.Server.Tests
             public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
             public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
             public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
             public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
         }
     }

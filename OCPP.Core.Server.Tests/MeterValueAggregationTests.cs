@@ -20,6 +20,21 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void PhaseAwareMeasurementAggregate_GetValuePreferOverall_UsesAggregateRegisterWhenPresent()
+        {
+            var aggregate = new PhaseAwareMeasurementAggregate();
+
+            aggregate.Add(24.6, null);
+            aggregate.Add(8.1, "L1");
+            aggregate.Add(8.2, "L2");
+            aggregate.Add(8.3, "L3");
+
+            var total = aggregate.GetValuePreferOverall();
+            Assert.NotNull(total);
+            Assert.Equal(24.6, total.Value, 3);
+        }
+
+        [Fact]
         public void NormalizeCurrentToAmpere_ConvertsMilliAmpere()
         {
             Assert.Equal(12.5, MeterValueAggregation.NormalizeCurrentToAmpere(12.5, "A"));

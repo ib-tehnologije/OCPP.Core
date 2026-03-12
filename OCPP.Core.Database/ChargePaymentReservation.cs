@@ -61,6 +61,7 @@ namespace OCPP.Core.Database
         public DateTime? RemoteStartAcceptedAtUtc { get; set; }
         public DateTime? StartTransactionAtUtc { get; set; }
         public DateTime? StopTransactionAtUtc { get; set; }
+        public DateTime? DisconnectedAtUtc { get; set; }
         public DateTime? LastOcppEventAtUtc { get; set; }
         public bool? AwaitingPlug { get; set; }
         public int? StartTransactionId { get; set; }

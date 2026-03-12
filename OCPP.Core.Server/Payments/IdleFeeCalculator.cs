@@ -10,6 +10,7 @@ namespace OCPP.Core.Server.Payments
     {
         public DateTime? SuspendedSinceUtc { get; set; }
         public DateTime? IdleFeeStartAtUtc { get; set; }
+        public bool BillingPausedByExcludedWindow { get; set; }
         public int AccumulatedMinutes { get; set; }
         public decimal AccumulatedAmount { get; set; }
         public int CurrentIntervalMinutes { get; set; }
@@ -45,20 +46,27 @@ namespace OCPP.Core.Server.Payments
             snapshot.AccumulatedMinutes = accumulatedMinutes;
             snapshot.AccumulatedAmount = CalculateAmount(accumulatedMinutes, reservation.UsageFeePerMinute);
 
-            if (transaction.ChargingEndedAtUtc.HasValue)
+            var intervalStartUtc = ResolveIntervalStartUtc(transaction, reservation);
+            if (intervalStartUtc.HasValue)
             {
-                snapshot.SuspendedSinceUtc = transaction.ChargingEndedAtUtc.Value;
+                snapshot.SuspendedSinceUtc = intervalStartUtc.Value;
                 snapshot.IdleFeeStartAtUtc = CalculateIdleFeeStartAtUtc(
-                    transaction.ChargingEndedAtUtc.Value,
+                    intervalStartUtc.Value,
                     reservation,
                     flowOptions,
                     logger);
+                snapshot.BillingPausedByExcludedWindow = IsBillingPausedByExcludedWindow(
+                    intervalStartUtc.Value,
+                    reservation,
+                    flowOptions,
+                    asOfUtc,
+                    logger);
 
-                DateTime intervalEndUtc = transaction.StopTime ?? asOfUtc;
-                if (intervalEndUtc > transaction.ChargingEndedAtUtc.Value)
+                DateTime intervalEndUtc = ResolveIntervalEndUtc(transaction, reservation, asOfUtc);
+                if (intervalEndUtc > intervalStartUtc.Value)
                 {
                     snapshot.CurrentIntervalMinutes = CalculateIntervalBillableMinutes(
-                        transaction.ChargingEndedAtUtc.Value,
+                        intervalStartUtc.Value,
                         intervalEndUtc,
                         reservation,
                         flowOptions,
@@ -78,6 +86,25 @@ namespace OCPP.Core.Server.Payments
             snapshot.CurrentIntervalMinutes = Math.Max(0, snapshot.TotalMinutes - snapshot.AccumulatedMinutes);
             snapshot.CurrentIntervalAmount = CalculateAmount(snapshot.CurrentIntervalMinutes, reservation.UsageFeePerMinute);
 
+            return snapshot;
+        }
+
+        public static IdleFeeSnapshot ApplyFinalSnapshot(
+            Transaction transaction,
+            ChargePaymentReservation reservation,
+            PaymentFlowOptions flowOptions,
+            DateTime asOfUtc,
+            ILogger logger = null)
+        {
+            var snapshot = CalculateSnapshot(transaction, reservation, flowOptions, asOfUtc, logger);
+            if (transaction == null)
+            {
+                return snapshot;
+            }
+
+            transaction.IdleUsageFeeMinutes = snapshot.TotalMinutes;
+            transaction.IdleUsageFeeAmount = snapshot.TotalAmount;
+            transaction.ChargingEndedAtUtc = null;
             return snapshot;
         }
 
@@ -142,6 +169,72 @@ namespace OCPP.Core.Server.Payments
             }
 
             return Math.Round(minutes * pricePerMinute, 4, MidpointRounding.AwayFromZero);
+        }
+
+        public static bool IsBillingPausedByExcludedWindow(
+            DateTime intervalStartUtc,
+            ChargePaymentReservation reservation,
+            PaymentFlowOptions flowOptions,
+            DateTime asOfUtc,
+            ILogger logger = null)
+        {
+            if (!IsIdleFeeEnabled(reservation))
+            {
+                return false;
+            }
+
+            var graceEndsAtUtc = intervalStartUtc.AddMinutes(Math.Max(0, reservation.StartUsageFeeAfterMinutes));
+            if (asOfUtc < graceEndsAtUtc)
+            {
+                return false;
+            }
+
+            return IsWithinExcludedWindow(asOfUtc, flowOptions, logger);
+        }
+
+        public static bool IsWithinExcludedWindow(DateTime utc, PaymentFlowOptions flowOptions, ILogger logger = null)
+        {
+            if (!TryParseDailyWindow(flowOptions?.IdleFeeExcludedWindow, out var excludedStart, out var excludedEnd) ||
+                !TryResolveTimeZone(flowOptions?.IdleFeeExcludedTimeZoneId, out var timeZone))
+            {
+                return false;
+            }
+
+            try
+            {
+                DateTime localTime = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), timeZone);
+                return TryGetContainingExcludedWindowEnd(localTime, excludedStart, excludedEnd, out _);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogDebug(ex, "IdleFeeCalculator => Failed checking excluded window tz={TimeZoneId}", timeZone.Id);
+                return false;
+            }
+        }
+
+        public static DateTime? ResolveIntervalStartUtc(Transaction transaction, ChargePaymentReservation reservation)
+        {
+            if (transaction?.ChargingEndedAtUtc.HasValue == true)
+            {
+                return transaction.ChargingEndedAtUtc.Value;
+            }
+
+            return reservation?.StopTransactionAtUtc;
+        }
+
+        public static DateTime ResolveIntervalEndUtc(Transaction transaction, ChargePaymentReservation reservation, DateTime asOfUtc)
+        {
+            if (reservation?.DisconnectedAtUtc.HasValue == true)
+            {
+                return reservation.DisconnectedAtUtc.Value;
+            }
+
+            if (string.Equals(reservation?.Status, ChargePaymentReservationState.WaitingForDisconnect, StringComparison.OrdinalIgnoreCase))
+            {
+                return asOfUtc;
+            }
+
+            return transaction?.StopTime ?? asOfUtc;
         }
 
         private static DateTime AdvancePastExcludedWindow(

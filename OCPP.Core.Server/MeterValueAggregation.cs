@@ -24,6 +24,11 @@ namespace OCPP.Core.Server
         {
             return _phaseValues.Count > 0 ? _phaseValues.Values.Sum() : _overallValue;
         }
+
+        public double? GetValuePreferOverall()
+        {
+            return _overallValue ?? (_phaseValues.Count > 0 ? _phaseValues.Values.Sum() : null);
+        }
     }
 
     internal static class MeterValueAggregation

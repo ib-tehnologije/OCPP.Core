@@ -46,7 +46,9 @@ namespace OCPP.Core.Server.Tests
                     SeoDescription = "  SEO desc  ",
                     HeaderLogoUrl = " https://cdn.example.test/header.png ",
                     FooterLogoUrl = " https://cdn.example.test/footer.png ",
-                    QrScannerEnabled = false
+                    QrScannerEnabled = false,
+                    IdleFeeExcludedWindowEnabled = true,
+                    IdleFeeExcludedWindow = " 20:00-08:00 "
                 });
 
                 var redirect = Assert.IsType<RedirectToActionResult>(result);
@@ -66,6 +68,8 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal("https://cdn.example.test/header.png", saved.HeaderLogoUrl);
                 Assert.Equal("https://cdn.example.test/footer.png", saved.FooterLogoUrl);
                 Assert.False(saved.QrScannerEnabled);
+                Assert.True(saved.IdleFeeExcludedWindowEnabled);
+                Assert.Equal("20:00-08:00", saved.IdleFeeExcludedWindow);
                 Assert.Equal("Public portal settings were saved successfully.", controller.TempData["InfoMessage"]);
             }
             finally
@@ -103,7 +107,9 @@ namespace OCPP.Core.Server.Tests
                 {
                     BrandName = "Updated brand",
                     SeoTitle = "Updated SEO",
-                    QrScannerEnabled = true
+                    QrScannerEnabled = true,
+                    IdleFeeExcludedWindowEnabled = false,
+                    IdleFeeExcludedWindow = "22:00-06:00"
                 });
 
                 Assert.IsType<RedirectToActionResult>(result);
@@ -114,6 +120,8 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal("Updated brand", saved.BrandName);
                 Assert.Equal("Updated SEO", saved.SeoTitle);
                 Assert.True(saved.QrScannerEnabled);
+                Assert.False(saved.IdleFeeExcludedWindowEnabled);
+                Assert.Null(saved.IdleFeeExcludedWindow);
             }
             finally
             {

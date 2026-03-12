@@ -27,7 +27,9 @@ namespace OCPP.Core.Server.Tests
                         BrandName = "  DB Brand  ",
                         SupportPhone = "  +385123  ",
                         CanonicalBaseUrl = " https://db.example.test/ ",
-                        QrScannerEnabled = false
+                        QrScannerEnabled = false,
+                        IdleFeeExcludedWindowEnabled = true,
+                        IdleFeeExcludedWindow = "20:00-08:00"
                     });
                     setupContext.SaveChanges();
                 }
@@ -59,6 +61,8 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal("Config SEO", resolved.SeoDescription);
                 Assert.Equal("https://db.example.test", resolved.CanonicalBaseUrl);
                 Assert.False(resolved.QrScannerEnabled);
+                Assert.True(editor.IdleFeeExcludedWindowEnabled);
+                Assert.Equal("20:00-08:00", editor.IdleFeeExcludedWindow);
 
                 Assert.NotNull(editor.PublicPortalSettingsId);
                 Assert.Equal("DB Brand", editor.BrandName);
@@ -86,7 +90,8 @@ namespace OCPP.Core.Server.Tests
                     {
                         ["PublicPortal:BrandName"] = "Config Brand",
                         ["PublicPortal:Tagline"] = "Config tagline",
-                        ["Email:ReplyToAddress"] = "reply@example.test"
+                        ["Email:ReplyToAddress"] = "reply@example.test",
+                        ["Payments:IdleFeeExcludedWindow"] = "22:00-06:00"
                     })
                     .Build();
 
@@ -100,6 +105,10 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal("Config Brand", resolved.FooterCompanyLine);
                 Assert.Equal("Config tagline", resolved.FooterLegalLine);
                 Assert.True(resolved.QrScannerEnabled);
+
+                var editor = resolver.ResolveForEditor();
+                Assert.True(editor.IdleFeeExcludedWindowEnabled);
+                Assert.Equal("22:00-06:00", editor.IdleFeeExcludedWindow);
             }
             finally
             {

@@ -472,6 +472,7 @@ namespace OCPP.Core.Server.Tests
             Assert.True(result.Success);
             Assert.Equal(1, emailService.PaymentAuthorizedCount);
             Assert.Equal("driver@example.com", emailService.LastToEmail);
+            Assert.Contains($"/Payments/Status?reservationId={reservationId}", emailService.LastStatusUrl);
         }
 
         [Fact]
@@ -1046,6 +1047,297 @@ namespace OCPP.Core.Server.Tests
             Assert.True(intentService.CaptureCalled);
             Assert.Equal(reservation.CapturedAmountCents, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
             Assert.True(reservation.CapturedAmountCents > 0);
+        }
+
+        [Fact]
+        public void CompleteReservation_DefersCaptureUntilConnectorBecomesAvailable()
+        {
+            using var context = CreateContext();
+            var now = new DateTime(2026, 3, 12, 12, 20, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-DEFER",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-DEFER",
+                StripePaymentIntentId = "pi_defer",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 30,
+                UsageFeeAnchorMinutes = 1,
+                Currency = "eur",
+                StartTransactionAtUtc = now.AddMinutes(-15)
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 314,
+                ChargePointId = "CP-DEFER",
+                ConnectorId = 1,
+                StartTagId = "TAG-DEFER",
+                StartTime = now.AddMinutes(-15),
+                StopTime = now.AddMinutes(-2),
+                MeterStart = 1.0,
+                MeterStop = 2.0
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.ConnectorStatuses.Add(new ConnectorStatus
+            {
+                ChargePointId = "CP-DEFER",
+                ConnectorId = 1,
+                LastStatus = "Occupied",
+                LastStatusTime = now.AddMinutes(-1)
+            });
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_defer", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => now);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.WaitingForDisconnect, reservation.Status);
+            Assert.Equal(transaction.StopTime, reservation.StopTransactionAtUtc);
+            Assert.Null(reservation.DisconnectedAtUtc);
+            Assert.Equal(transaction.StopTime, transaction.ChargingEndedAtUtc);
+            Assert.False(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+        }
+
+        [Fact]
+        public void CompleteReservation_CompletesImmediately_WhenStopReasonSignalsDisconnect()
+        {
+            using var context = CreateContext();
+            var stopAtUtc = new DateTime(2026, 3, 12, 12, 20, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-EV-DISCONNECT",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-EV-DISCONNECT",
+                StripePaymentIntentId = "pi_ev_disconnect",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 30,
+                UsageFeeAnchorMinutes = 1,
+                Currency = "eur",
+                StartTransactionAtUtc = stopAtUtc.AddMinutes(-20)
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 317,
+                ChargePointId = "CP-EV-DISCONNECT",
+                ConnectorId = 1,
+                StartTagId = "TAG-EV-DISCONNECT",
+                StartTime = stopAtUtc.AddMinutes(-20),
+                StopTime = stopAtUtc,
+                StopReason = "EVDisconnected",
+                MeterStart = 0,
+                MeterStop = 2
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_ev_disconnect", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => stopAtUtc);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(stopAtUtc, reservation.DisconnectedAtUtc);
+            Assert.True(intentService.CaptureCalled);
+        }
+
+        [Fact]
+        public void HandleConnectorAvailable_CompletesWaitingReservationAndCaptures()
+        {
+            using var context = CreateContext();
+            var disconnectedAtUtc = new DateTime(2026, 3, 12, 12, 25, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-DONE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-DONE",
+                StripePaymentIntentId = "pi_done_wait",
+                Status = PaymentReservationStatus.WaitingForDisconnect,
+                PricePerKwh = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 30,
+                UsageFeeAnchorMinutes = 1,
+                Currency = "eur",
+                TransactionId = 315,
+                StartTransactionAtUtc = disconnectedAtUtc.AddMinutes(-20),
+                StopTransactionAtUtc = disconnectedAtUtc.AddMinutes(-3)
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 315,
+                ChargePointId = "CP-DONE",
+                ConnectorId = 1,
+                StartTagId = "TAG-DONE",
+                StartTime = disconnectedAtUtc.AddMinutes(-20),
+                StopTime = disconnectedAtUtc.AddMinutes(-3),
+                MeterStart = 0,
+                MeterStop = 2
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_done_wait", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => disconnectedAtUtc);
+
+            coordinator.HandleConnectorAvailable(context, "CP-DONE", 1, disconnectedAtUtc);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(disconnectedAtUtc, reservation.DisconnectedAtUtc);
+            Assert.True(intentService.CaptureCalled);
+            Assert.True(reservation.CapturedAmountCents > 0);
+        }
+
+        [Fact]
+        public void CompleteReservation_KeepsPreStopSuspendedEvAnchorUntilDisconnect()
+        {
+            using var context = CreateContext();
+            var suspendedAtUtc = new DateTime(2026, 3, 12, 12, 5, 0, DateTimeKind.Utc);
+            var stopAtUtc = suspendedAtUtc.AddMinutes(2);
+            var disconnectedAtUtc = suspendedAtUtc.AddMinutes(7);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-IDLE-CONTINUITY",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-IDLE-CONTINUITY",
+                StripePaymentIntentId = "pi_idle_continuity",
+                Status = PaymentReservationStatus.WaitingForDisconnect,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 60,
+                UsageFeeAnchorMinutes = 1,
+                Currency = "eur",
+                StartTransactionAtUtc = suspendedAtUtc.AddMinutes(-20),
+                StopTransactionAtUtc = stopAtUtc,
+                DisconnectedAtUtc = disconnectedAtUtc
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 318,
+                ChargePointId = "CP-IDLE-CONTINUITY",
+                ConnectorId = 1,
+                StartTagId = "TAG-IDLE-CONTINUITY",
+                StartTime = suspendedAtUtc.AddMinutes(-20),
+                ChargingEndedAtUtc = suspendedAtUtc,
+                StopTime = stopAtUtc,
+                MeterStart = 20,
+                MeterStop = 20
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_idle_continuity", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => disconnectedAtUtc);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(7, transaction.IdleUsageFeeMinutes);
+            Assert.Equal(1.4m, transaction.IdleUsageFeeAmount);
+            Assert.Null(transaction.ChargingEndedAtUtc);
+        }
+
+        [Fact]
+        public void CompleteReservation_UsesDisconnectedAtUtcForIdleBillingAfterStop()
+        {
+            using var context = CreateContext();
+            var stopAtUtc = new DateTime(2026, 3, 12, 12, 10, 0, DateTimeKind.Utc);
+            var disconnectedAtUtc = stopAtUtc.AddMinutes(5);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-IDLE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-IDLE",
+                StripePaymentIntentId = "pi_idle",
+                Status = PaymentReservationStatus.WaitingForDisconnect,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 60,
+                UsageFeeAnchorMinutes = 1,
+                Currency = "eur",
+                DisconnectedAtUtc = disconnectedAtUtc
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 316,
+                ChargePointId = "CP-IDLE",
+                ConnectorId = 1,
+                StartTagId = "TAG-IDLE",
+                StartTime = stopAtUtc.AddMinutes(-30),
+                StopTime = stopAtUtc,
+                MeterStart = 10,
+                MeterStop = 10
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_idle", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => disconnectedAtUtc);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(5, transaction.IdleUsageFeeMinutes);
+            Assert.Equal(1.0m, transaction.IdleUsageFeeAmount);
+            Assert.Equal(100, reservation.CapturedAmountCents);
         }
 
         [Fact]
@@ -2158,6 +2450,7 @@ namespace OCPP.Core.Server.Tests
         public int R1InvoiceRequestedCount { get; private set; }
         public int R1InvoiceReadyCount { get; private set; }
         public string? LastToEmail { get; private set; }
+        public string? LastStatusUrl { get; private set; }
         public string? LastBuyerCompanyName { get; private set; }
         public string? LastBuyerOib { get; private set; }
         public DateTime? LastIdleFeeStartsAtUtc { get; private set; }
@@ -2167,22 +2460,25 @@ namespace OCPP.Core.Server.Tests
         public string? LastR1InvoiceNumber { get; private set; }
         public string? LastR1InvoiceUrl { get; private set; }
 
-        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session)
+        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session, string statusUrl)
         {
             PaymentAuthorizedCount++;
             LastToEmail = toEmail;
+            LastStatusUrl = statusUrl;
         }
 
         public void SendChargingCompleted(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl)
         {
             ChargingCompletedCount++;
             LastToEmail = toEmail;
+            LastStatusUrl = statusUrl;
         }
 
         public void SendIdleFeeWarning(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, DateTime idleFeeStartsAtUtc, TimeSpan remainingUntilIdleFee, string statusUrl)
         {
             IdleFeeWarningCount++;
             LastToEmail = toEmail;
+            LastStatusUrl = statusUrl;
             LastIdleFeeStartsAtUtc = idleFeeStartsAtUtc;
             LastIdleFeeRemaining = remainingUntilIdleFee;
         }
@@ -2191,6 +2487,7 @@ namespace OCPP.Core.Server.Tests
         {
             SessionReceiptCount++;
             LastToEmail = toEmail;
+            LastStatusUrl = statusUrl;
             LastSessionReceiptInvoiceNumber = invoiceNumber;
             LastSessionReceiptInvoiceUrl = invoiceUrl;
         }
@@ -2199,6 +2496,7 @@ namespace OCPP.Core.Server.Tests
         {
             R1InvoiceRequestedCount++;
             LastToEmail = toEmail;
+            LastStatusUrl = statusUrl;
             LastBuyerCompanyName = buyerCompanyName;
             LastBuyerOib = buyerOib;
         }
@@ -2207,6 +2505,7 @@ namespace OCPP.Core.Server.Tests
         {
             R1InvoiceReadyCount++;
             LastToEmail = toEmail;
+            LastStatusUrl = statusUrl;
             LastR1InvoiceNumber = invoiceNumber;
             LastR1InvoiceUrl = invoiceUrl;
         }

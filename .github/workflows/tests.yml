@@ -1,0 +1,28 @@
+name: Build and unit tests
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MSBUILDNOINPROCNODE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore OCPP.Core.sln --disable-build-servers -m:1
+
+      - name: Build
+        run: dotnet build OCPP.Core.sln --disable-build-servers --no-restore -m:1
+
+      - name: Run server tests
+        run: dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --disable-build-servers --no-build -m:1

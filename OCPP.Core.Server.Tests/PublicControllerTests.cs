@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -421,6 +422,59 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal(2, chargePoint.ConnectorCount);
                 Assert.True(chargePoint.HasMultipleConnectors);
                 Assert.Equal("Occupied", chargePoint.Status);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public void Map_ChargePointIdCaseMismatch_StillUsesConnectorStatus()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-case-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "ns2571148979", "Huawei test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "ns2571148979",
+                        ConnectorId = 1,
+                        LastStatus = "Available"
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+                {
+                    connection.Open();
+
+                    using var disableCommand = connection.CreateCommand();
+                    disableCommand.CommandText = "PRAGMA foreign_keys = OFF;";
+                    disableCommand.ExecuteNonQuery();
+
+                    using var updateCommand = connection.CreateCommand();
+                    updateCommand.CommandText = "UPDATE ConnectorStatus SET ChargePointId = 'NS2571148979' WHERE ChargePointId = 'ns2571148979';";
+                    updateCommand.ExecuteNonQuery();
+
+                    using var enableCommand = connection.CreateCommand();
+                    enableCommand.CommandText = "PRAGMA foreign_keys = ON;";
+                    enableCommand.ExecuteNonQuery();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("ns2571148979", chargePoint.ChargePointId);
+                Assert.Equal("Available", chargePoint.Status);
             }
             finally
             {

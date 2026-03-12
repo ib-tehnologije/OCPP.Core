@@ -21,6 +21,7 @@ namespace OCPP.Core.Server.Payments
     public class IdleFeeWarningEmailService : BackgroundService
     {
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<IdleFeeWarningEmailService> _logger;
         private readonly NotificationOptions _notificationOptions;
         private readonly StripeOptions _stripeOptions;
@@ -73,6 +74,7 @@ namespace OCPP.Core.Server.Payments
             Func<DateTime> utcNow)
         {
             _scopeFactory = scopeFactory;
+            _configuration = configuration;
             _logger = logger;
             _notificationOptions = notificationOptions?.Value ?? new NotificationOptions();
             _stripeOptions = stripeOptions?.Value ?? new StripeOptions();
@@ -197,7 +199,8 @@ namespace OCPP.Core.Server.Payments
                     continue;
                 }
 
-                var idleSnapshot = IdleFeeCalculator.CalculateSnapshot(transaction, reservation, _flowOptions, now, _logger);
+                var flowOptions = PaymentFlowOptionsResolver.Resolve(_configuration, db, _flowOptions);
+                var idleSnapshot = IdleFeeCalculator.CalculateSnapshot(transaction, reservation, flowOptions, now, _logger);
                 if (!idleSnapshot.IdleFeeStartAtUtc.HasValue)
                 {
                     continue;

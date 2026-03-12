@@ -4,6 +4,7 @@ namespace OCPP.Core.Server.Payments
     {
         public bool EnableCustomerEmails { get; set; } = false;
         public int IdleWarningLeadMinutes { get; set; } = 15;
+        public string SinkDirectory { get; set; }
         public string FromAddress { get; set; }
         public string FromName { get; set; }
         public string ReplyToAddress { get; set; }

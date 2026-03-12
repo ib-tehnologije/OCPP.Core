@@ -1,0 +1,8 @@
+{
+  "eventName": "PaymentAuthorized",
+  "toEmail": "driver@example.com",
+  "subject": "Charging payment authorized",
+  "reservationId": "77777777-7777-7777-7777-777777777777",
+  "actionText": "Open session",
+  "actionUrl": "/Payments/Status?reservationId=77777777-7777-7777-7777-777777777777&origin=public&lang=en"
+}

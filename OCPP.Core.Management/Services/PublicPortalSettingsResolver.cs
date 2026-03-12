@@ -75,7 +75,11 @@ namespace OCPP.Core.Management.Services
                 SeoDescription = resolved.SeoDescription,
                 HeaderLogoUrl = resolved.HeaderLogoUrl,
                 FooterLogoUrl = resolved.FooterLogoUrl,
-                QrScannerEnabled = resolved.QrScannerEnabled
+                QrScannerEnabled = resolved.QrScannerEnabled,
+                IdleFeeExcludedWindowEnabled = dbSettings?.IdleFeeExcludedWindowEnabled ?? !string.IsNullOrWhiteSpace(_configuration["Payments:IdleFeeExcludedWindow"]),
+                IdleFeeExcludedWindow = !string.IsNullOrWhiteSpace(dbSettings?.IdleFeeExcludedWindow)
+                    ? dbSettings.IdleFeeExcludedWindow
+                    : (_configuration["Payments:IdleFeeExcludedWindow"] ?? string.Empty)
             };
         }
 

@@ -207,6 +207,7 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.SeoDescription).HasMaxLength(500);
                 entity.Property(e => e.HeaderLogoUrl).HasMaxLength(500);
                 entity.Property(e => e.FooterLogoUrl).HasMaxLength(500);
+                entity.Property(e => e.IdleFeeExcludedWindow).HasMaxLength(32);
                 entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("getutcdate()");
                 entity.Property(e => e.UpdatedAtUtc).HasDefaultValueSql("getutcdate()");
             });
@@ -393,6 +394,7 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.RemoteStartAcceptedAtUtc);
                 entity.Property(e => e.StartTransactionAtUtc);
                 entity.Property(e => e.StopTransactionAtUtc);
+                entity.Property(e => e.DisconnectedAtUtc);
                 entity.Property(e => e.LastOcppEventAtUtc);
 
                 entity.HasIndex(e => e.StripeCheckoutSessionId)

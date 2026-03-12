@@ -155,7 +155,14 @@ namespace OCPP.Core.Server
                         transaction.MeterStop = (double)stopTransactionRequest.MeterStop / 1000; // Meter value here is always Wh
                         transaction.StopReason = stopTransactionRequest.Reason.ToString();
                         transaction.StopTime = stopTransactionRequest.Timestamp.UtcDateTime;
-                        FinalizeIdleTracking(transaction, transaction.StopTime.Value);
+                        var reservation = FindReservationForTransaction(transaction);
+                        bool deferIdleFinalization = ocppMiddleware != null &&
+                                                     reservation != null &&
+                                                     OCPP.Core.Server.Payments.PaymentReservationStatus.IsActive(reservation.Status);
+                        if (!deferIdleFinalization)
+                        {
+                            FinalizeIdleTracking(transaction, transaction.StopTime.Value);
+                        }
                         DbContext.SaveChanges();
 
                         ocppMiddleware?.NotifyTransactionCompleted(DbContext, transaction);

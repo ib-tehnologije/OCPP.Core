@@ -12,6 +12,7 @@ namespace OCPP.Core.Database
         public const string StartTimeout = "StartTimeout";
         public const string Abandoned = "Abandoned";
         public const string Charging = "Charging";
+        public const string WaitingForDisconnect = "WaitingForDisconnect";
         public const string Completed = "Completed";
         public const string Cancelled = "Cancelled";
         public const string Failed = "Failed";
@@ -31,7 +32,8 @@ namespace OCPP.Core.Database
             Pending,
             Authorized,
             StartRequested,
-            Charging
+            Charging,
+            WaitingForDisconnect
         };
 
         private static readonly HashSet<string> InactiveStatusSet = new HashSet<string>(InactiveStatuses, StringComparer.OrdinalIgnoreCase);

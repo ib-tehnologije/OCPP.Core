@@ -1,0 +1,49 @@
+@model OCPP.Core.Management.Models.MockCheckoutViewModel
+@{
+    Layout = "_PublicPortalLayout";
+    ViewData["PublicPageTitle"] = "Mock checkout";
+    ViewData["PublicPageDescription"] = "Local mock checkout used for automated browser tests.";
+    ViewData["PublicNav"] = "map";
+}
+
+<div class="page-wrap">
+    <div class="card">
+        <div class="status-header">
+            <div class="status-badge waiting">
+                <span class="dot"></span>
+                <span>Mock Stripe checkout</span>
+            </div>
+            <h1 class="charger-title">Local payment confirmation</h1>
+            <p class="charger-sub">Session <span class="mono">@Model.SessionId</span></p>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="session-view active" style="display:block;">
+            <div class="alert-box warning" style="margin-top: 0;">
+                <span class="alert-icon">TEST</span>
+                <span>This page replaces Stripe during local simulator and browser runs.</span>
+            </div>
+
+            <div class="info-section">
+                <div class="info-row">
+                    <div class="tile full">
+                        <div class="label">Reservation</div>
+                        <div class="value mono">@Model.ReservationId</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section" style="padding-top: 0;">
+                <a class="btn-primary" id="mock-pay-now" href="@Model.SuccessUrl">
+                    <span>Pay now</span>
+                    <span class="arrow">→</span>
+                </a>
+                @if (!string.IsNullOrWhiteSpace(Model.CancelUrl))
+                {
+                    <a class="btn-secondary" id="mock-cancel-checkout" href="@Model.CancelUrl">Cancel</a>
+                }
+            </div>
+        </div>
+    </div>
+</div>

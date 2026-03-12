@@ -4,7 +4,9 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Mail;
+using System.IO;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
@@ -14,7 +16,7 @@ namespace OCPP.Core.Server.Payments
 {
     public interface IEmailNotificationService
     {
-        void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session);
+        void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session, string statusUrl);
         void SendChargingCompleted(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl);
         void SendIdleFeeWarning(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, DateTime idleFeeStartsAtUtc, TimeSpan remainingUntilIdleFee, string statusUrl);
         void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl);
@@ -33,7 +35,7 @@ namespace OCPP.Core.Server.Payments
             _logger = logger;
         }
 
-        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session)
+        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session, string statusUrl)
         {
             var details = new List<(string Label, string Value)>
             {
@@ -49,8 +51,8 @@ namespace OCPP.Core.Server.Payments
                 "Payment authorized",
                 "Your card hold is confirmed. Charging can start now.",
                 details,
-                null,
-                null,
+                string.IsNullOrWhiteSpace(statusUrl) ? null : "Open session",
+                statusUrl,
                 "If you did not initiate this charging session, reply to this email.",
                 reservation?.ReservationId,
                 "PaymentAuthorized");
@@ -224,6 +226,12 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
+            string htmlBody = BuildHtmlBody(title, intro, details, actionText, actionUrl, footerText);
+            if (TryWriteEmailSink(toEmail, subject, htmlBody, actionText, actionUrl, reservationId, eventName))
+            {
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(_options?.Smtp?.Host) || string.IsNullOrWhiteSpace(_options.FromAddress))
             {
                 _logger.LogWarning("Email notification skipped for {EventName} because SMTP configuration is incomplete.", eventName);
@@ -236,7 +244,7 @@ namespace OCPP.Core.Server.Payments
                 {
                     From = new MailAddress(_options.FromAddress, _options.FromName),
                     Subject = subject,
-                    Body = BuildHtmlBody(title, intro, details, actionText, actionUrl, footerText),
+                    Body = htmlBody,
                     IsBodyHtml = true
                 };
 
@@ -266,6 +274,68 @@ namespace OCPP.Core.Server.Payments
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to send {EventName} email to {Email} reservation={ReservationId}", eventName, toEmail, reservationId);
+            }
+        }
+
+        private bool TryWriteEmailSink(
+            string toEmail,
+            string subject,
+            string htmlBody,
+            string actionText,
+            string actionUrl,
+            Guid? reservationId,
+            string eventName)
+        {
+            if (string.IsNullOrWhiteSpace(_options?.SinkDirectory))
+            {
+                return false;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(_options.SinkDirectory);
+
+                string safeEventName = new string((eventName ?? "Email")
+                    .Where(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_')
+                    .ToArray());
+                if (string.IsNullOrWhiteSpace(safeEventName))
+                {
+                    safeEventName = "Email";
+                }
+
+                string reservationPart = reservationId.HasValue ? reservationId.Value.ToString("N") : "noreservation";
+                string fileName = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}-{safeEventName}-{reservationPart}.json";
+                string filePath = Path.Combine(_options.SinkDirectory, fileName);
+
+                var payload = new
+                {
+                    eventName,
+                    toEmail,
+                    subject,
+                    reservationId,
+                    actionText,
+                    actionUrl,
+                    createdAtUtc = DateTime.UtcNow,
+                    htmlBody
+                };
+
+                File.WriteAllText(filePath, JsonSerializer.Serialize(payload, new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                }));
+
+                _logger.LogInformation(
+                    "Wrote {EventName} email to sink {FilePath} reservation={ReservationId}",
+                    eventName,
+                    filePath,
+                    reservationId);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to write {EventName} email sink reservation={ReservationId}", eventName, reservationId);
+                return false;
             }
         }
 

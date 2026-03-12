@@ -114,14 +114,7 @@ namespace OCPP.Core.Server
 
         private PaymentFlowOptions GetPaymentFlowOptions()
         {
-            return new PaymentFlowOptions
-            {
-                StartWindowMinutes = _configuration.GetValue<int?>("Payments:StartWindowMinutes") ?? 2,
-                EnableReservationProfile = _configuration.GetValue<bool?>("Payments:EnableReservationProfile") ?? false,
-                IdleFeeExcludedWindow = _configuration.GetValue<string>("Payments:IdleFeeExcludedWindow"),
-                IdleFeeExcludedTimeZoneId = _configuration.GetValue<string>("Payments:IdleFeeExcludedTimeZoneId"),
-                IdleAutoStopMinutes = _configuration.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0
-            };
+            return PaymentFlowOptionsResolver.Resolve(_configuration, null);
         }
 
         private static bool IsStatus(string value, string expected) =>
@@ -207,6 +200,87 @@ namespace OCPP.Core.Server
                 .Where(t => t.StartTime >= reservation.CreatedAtUtc)
                 .OrderByDescending(t => t.TransactionId)
                 .FirstOrDefault();
+        }
+
+        private static double? ResolveLiveSessionEnergyKwh(Transaction transaction, ChargePaymentReservation reservation, double? liveMeterKwh)
+        {
+            if (reservation?.ActualEnergyKwh.HasValue == true)
+            {
+                return Math.Max(0, reservation.ActualEnergyKwh.Value);
+            }
+
+            if (transaction == null)
+            {
+                return null;
+            }
+
+            if (transaction.StopTime.HasValue && transaction.MeterStop.HasValue)
+            {
+                return Math.Max(0, transaction.MeterStop.Value - transaction.MeterStart);
+            }
+
+            if (liveMeterKwh.HasValue)
+            {
+                return Math.Max(0, liveMeterKwh.Value - transaction.MeterStart);
+            }
+
+            if (transaction.MeterStop.HasValue)
+            {
+                return Math.Max(0, transaction.MeterStop.Value - transaction.MeterStart);
+            }
+
+            if (transaction.EnergyKwh > 0)
+            {
+                return transaction.EnergyKwh;
+            }
+
+            return null;
+        }
+
+        private static string ResolveSessionStage(
+            ChargePaymentReservation reservation,
+            Transaction transaction,
+            bool activeTransaction,
+            string liveStatus,
+            string liveOcppStatus,
+            string persistedStatus)
+        {
+            string reservationStatus = reservation?.Status;
+            if (string.Equals(reservationStatus, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, PaymentReservationStatus.Cancelled, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, PaymentReservationStatus.StartRejected, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, PaymentReservationStatus.StartTimeout, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reservationStatus, PaymentReservationStatus.Abandoned, StringComparison.OrdinalIgnoreCase))
+            {
+                return "error";
+            }
+
+            if (string.Equals(reservationStatus, PaymentReservationStatus.WaitingForDisconnect, StringComparison.OrdinalIgnoreCase) ||
+                (reservation?.StopTransactionAtUtc.HasValue == true && reservation.DisconnectedAtUtc == null))
+            {
+                return "waitingForDisconnect";
+            }
+
+            if (reservation?.DisconnectedAtUtc.HasValue == true ||
+                string.Equals(reservationStatus, PaymentReservationStatus.Completed, StringComparison.OrdinalIgnoreCase))
+            {
+                return "done";
+            }
+
+            string normalizedLive = (liveOcppStatus ?? liveStatus ?? persistedStatus)?.Trim();
+            if (activeTransaction ||
+                reservation?.StartTransactionAtUtc.HasValue == true ||
+                OcppConnectorStatus.IsSuspendedEv(normalizedLive) ||
+                string.Equals(normalizedLive, "Charging", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalizedLive, "SuspendedEVSE", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalizedLive, "Finishing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalizedLive, "Occupied", StringComparison.OrdinalIgnoreCase) ||
+                transaction?.StopTime.HasValue == false)
+            {
+                return "charging";
+            }
+
+            return "waiting";
         }
 
         private static string NormalizeOibDigits(string input)
@@ -421,11 +495,20 @@ namespace OCPP.Core.Server
             });
         }
 
-        public void NotifyConnectorOcppStatus(OCPPCoreContext dbContext, ChargePointStatus chargePointStatus, int connectorId, string rawStatus)
+        public void NotifyConnectorOcppStatus(OCPPCoreContext dbContext, ChargePointStatus chargePointStatus, int connectorId, string rawStatus, DateTimeOffset? statusTime = null)
         {
             if (dbContext == null || chargePointStatus == null || connectorId <= 0)
             {
                 return;
+            }
+
+            if (string.Equals(OcppConnectorStatus.Normalize(rawStatus), "Available", StringComparison.OrdinalIgnoreCase))
+            {
+                _paymentCoordinator?.HandleConnectorAvailable(
+                    dbContext,
+                    chargePointStatus.Id,
+                    connectorId,
+                    (statusTime ?? DateTimeOffset.UtcNow).UtcDateTime);
             }
 
             var transaction = dbContext.Transactions
@@ -1854,17 +1937,22 @@ namespace OCPP.Core.Server
 
             if (transaction != null)
             {
+                var flowOptions = PaymentFlowOptionsResolver.Resolve(_configuration, dbContext, GetPaymentFlowOptions());
                 idleFeeSnapshot = IdleFeeCalculator.CalculateSnapshot(
                     transaction,
                     reservation,
-                    GetPaymentFlowOptions(),
+                    flowOptions,
                     _utcNow(),
                     _logger);
             }
 
+            double? liveSessionEnergyKwh = ResolveLiveSessionEnergyKwh(transaction, reservation, liveMeterKwh);
+            string sessionStage = ResolveSessionStage(reservation, transaction, activeTx, liveStatus, liveOcppStatus, persistedStatus);
+
             var payload = new
             {
                 status = reservation.Status,
+                sessionStage,
                 reservationId = reservation.ReservationId,
                 chargePointId = reservation.ChargePointId,
                 connectorId = reservation.ConnectorId,
@@ -1885,6 +1973,7 @@ namespace OCPP.Core.Server
                 remoteStartAcceptedAtUtc = reservation.RemoteStartAcceptedAtUtc,
                 startTransactionAtUtc = reservation.StartTransactionAtUtc,
                 stopTransactionAtUtc = reservation.StopTransactionAtUtc,
+                disconnectedAtUtc = reservation.DisconnectedAtUtc,
                 lastOcppEventAtUtc = reservation.LastOcppEventAtUtc,
                 maxEnergyKwh = reservation.MaxEnergyKwh,
                 pricePerKwh = reservation.PricePerKwh,
@@ -1901,6 +1990,7 @@ namespace OCPP.Core.Server
                 liveChargeRateKw,
                 liveCurrentImportA,
                 liveMeterKwh,
+                liveSessionEnergyKwh,
                 liveSoC,
                 liveMeterValueAtUtc,
                 persistedStatus,
@@ -1922,6 +2012,7 @@ namespace OCPP.Core.Server
                 transactionSessionFeeAmount = transaction?.UserSessionFeeAmount,
                 suspendedEvSinceUtc = idleFeeSnapshot?.SuspendedSinceUtc,
                 idleFeeStartsAtUtc = idleFeeSnapshot?.IdleFeeStartAtUtc,
+                idleBillingPausedByWindow = idleFeeSnapshot?.BillingPausedByExcludedWindow ?? false,
                 liveIdleFeeMinutes = idleFeeSnapshot?.TotalMinutes,
                 liveIdleFeeAmount = idleFeeSnapshot?.TotalAmount,
                 startable = startability?.Startable ?? false,

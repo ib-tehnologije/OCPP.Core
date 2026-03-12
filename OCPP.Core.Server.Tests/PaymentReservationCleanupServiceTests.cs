@@ -275,6 +275,9 @@ namespace OCPP.Core.Server.Tests
         public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) =>
             throw new NotImplementedException();
 
+        public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) =>
+            throw new NotImplementedException();
+
         public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) =>
             throw new NotImplementedException();
     }
