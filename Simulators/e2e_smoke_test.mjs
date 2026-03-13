@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { httpJson, httpText } from "./lib/test_support.mjs";
 import { runApiScenario } from "./lib/protocol_scenarios.mjs";
-import { setIdleWindow } from "./lib/sqlite_helpers.mjs";
+import { setIdleWindowForScenario } from "./lib/sqlite_helpers.mjs";
 
 const MGMT_HTTP_BASE = process.env.MGMT_HTTP_BASE ?? "http://127.0.0.1:8082";
 const SERVER_HTTP_BASE = process.env.SERVER_HTTP_BASE ?? "http://127.0.0.1:8081";
@@ -34,14 +34,6 @@ async function smokeHttp() {
   };
 }
 
-function buildWindowAroundNow() {
-  const now = new Date();
-  const start = new Date(now.getTime() - 5 * 60 * 1000);
-  const end = new Date(now.getTime() + 5 * 60 * 1000);
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${pad(start.getUTCHours())}:${pad(start.getUTCMinutes())}-${pad(end.getUTCHours())}:${pad(end.getUTCMinutes())}`;
-}
-
 async function main() {
   const summary = {
     startedAtUtc: new Date().toISOString(),
@@ -51,21 +43,11 @@ async function main() {
 
   for (const target of protocolTargets) {
     for (const scenario of scenarios) {
-      if (scenario === "quiet_hours_idle_excluded") {
-        if (!SQLITE_DB_PATH) {
-          throw new Error("SQLITE_DB_PATH is required for quiet_hours_idle_excluded");
-        }
-
-        await setIdleWindow(SQLITE_DB_PATH, {
-          enabled: true,
-          window: buildWindowAroundNow(),
-        });
-      } else if (SQLITE_DB_PATH) {
-        await setIdleWindow(SQLITE_DB_PATH, {
-          enabled: false,
-          window: null,
-        });
+      if (scenario === "quiet_hours_idle_excluded" && !SQLITE_DB_PATH) {
+        throw new Error("SQLITE_DB_PATH is required for quiet_hours_idle_excluded");
       }
+
+      await setIdleWindowForScenario(SQLITE_DB_PATH, scenario);
 
       const result = await runApiScenario({
         protocol: target.protocol,
@@ -84,10 +66,7 @@ async function main() {
   }
 
   if (SQLITE_DB_PATH) {
-    await setIdleWindow(SQLITE_DB_PATH, {
-      enabled: false,
-      window: null,
-    });
+    await setIdleWindowForScenario(SQLITE_DB_PATH, "reset");
   }
 
   summary.finishedAtUtc = new Date().toISOString();

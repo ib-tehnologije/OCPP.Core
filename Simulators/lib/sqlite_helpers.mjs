@@ -15,6 +15,14 @@ async function runSqlite(dbPath, sql) {
   await execFileAsync("sqlite3", [dbPath, sql]);
 }
 
+export function buildWindowAroundNowUtc(spanMinutes = 5) {
+  const now = new Date();
+  const start = new Date(now.getTime() - spanMinutes * 60 * 1000);
+  const end = new Date(now.getTime() + spanMinutes * 60 * 1000);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(start.getUTCHours())}:${pad(start.getUTCMinutes())}-${pad(end.getUTCHours())}:${pad(end.getUTCMinutes())}`;
+}
+
 export async function seedTestStack(dbPath, { cp16Id = "Test1234", cp20Id = "TestAAA", cp21Id = "TestBBB" } = {}) {
   const now = new Date().toISOString();
   const sql = `
@@ -117,4 +125,23 @@ SET IdleFeeExcludedWindowEnabled = ${enabled ? 1 : 0},
 `;
 
   await runSqlite(dbPath, sql);
+}
+
+export async function setIdleWindowForScenario(dbPath, scenario) {
+  if (!dbPath) {
+    return;
+  }
+
+  if (scenario === "quiet_hours_idle_excluded") {
+    await setIdleWindow(dbPath, {
+      enabled: true,
+      window: buildWindowAroundNowUtc(),
+    });
+    return;
+  }
+
+  await setIdleWindow(dbPath, {
+    enabled: false,
+    window: null,
+  });
 }
