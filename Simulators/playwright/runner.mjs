@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
-import WebSocket from "ws";
 import {
   assert,
   clearDirectoryContents,
@@ -12,6 +11,7 @@ import {
   setQuietHours,
   sleep,
 } from "./common.mjs";
+import { attachWebSocketMessageHandler, connectWebSocket, isWebSocketOpen } from "../lib/websocket_support.mjs";
 
 const protocolPresets = {
   "1.6": {
@@ -99,22 +99,13 @@ class OcppClient {
   }
 
   async connect(timeoutMs = 8_000) {
-    this.ws = new WebSocket(this.url, this.protocols);
-
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`[${this.label}] connect timeout`)), timeoutMs);
-      this.ws.once("open", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-      this.ws.once("error", () => {
-        clearTimeout(timeout);
-        reject(new Error(`[${this.label}] websocket error`));
-      });
+    this.ws = await connectWebSocket(this.url, this.protocols, {
+      timeoutMs,
+      label: this.label,
     });
 
-    this.ws.on("message", (buffer) => {
-      this.#handleMessage(buffer.toString()).catch((error) => {
+    attachWebSocketMessageHandler(this.ws, (data) => {
+      this.#handleMessage(data).catch((error) => {
         throw error;
       });
     });
@@ -129,13 +120,13 @@ class OcppClient {
   }
 
   sendRaw(payload) {
-    assert(this.ws && this.ws.readyState === WebSocket.OPEN, `[${this.label}] websocket not open`);
+    assert(isWebSocketOpen(this.ws), `[${this.label}] websocket not open`);
     this.ws.send(JSON.stringify(payload));
   }
 
   async call(action, payload, timeoutMs = 15_000) {
     const id = newId("c");
-    assert(this.ws && this.ws.readyState === WebSocket.OPEN, `[${this.label}] websocket not open`);
+    assert(isWebSocketOpen(this.ws), `[${this.label}] websocket not open`);
 
     const result = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {

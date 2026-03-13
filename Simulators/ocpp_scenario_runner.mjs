@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { attachWebSocketMessageHandler, connectWebSocket, isWebSocketOpen } from "./lib/websocket_support.mjs";
 
 const SERVER_HTTP_BASE = process.env.SERVER_HTTP_BASE ?? "http://localhost:8081";
 const SERVER_API_BASE = process.env.SERVER_API_BASE ?? `${SERVER_HTTP_BASE}/API`;
@@ -81,23 +82,13 @@ class OcppClient
 
   async connect({ timeoutMs = 8000 } = {})
   {
-    assert(typeof WebSocket === "function", "Global WebSocket is not available in this Node runtime.");
-    this.ws = new WebSocket(this.url, this.protocols);
-
-    const ws = this.ws;
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`[${this.label}] connect timeout`)), timeoutMs);
-      ws.onopen = () => {
-        clearTimeout(timeout);
-        resolve();
-      };
-      ws.onerror = () => {
-        clearTimeout(timeout);
-        reject(new Error(`[${this.label}] websocket error`));
-      };
+    this.ws = await connectWebSocket(this.url, this.protocols, {
+      timeoutMs,
+      label: this.label,
     });
 
-    ws.onmessage = (event) => this.#handleMessage(event.data);
+    const ws = this.ws;
+    attachWebSocketMessageHandler(ws, (data) => this.#handleMessage(data));
   }
 
   close(code = 3001, reason = "")
@@ -111,7 +102,7 @@ class OcppClient
 
   sendRaw(obj)
   {
-    assert(this.ws && this.ws.readyState === 1, `[${this.label}] websocket not open`);
+    assert(isWebSocketOpen(this.ws), `[${this.label}] websocket not open`);
     this.ws.send(JSON.stringify(obj));
   }
 
@@ -119,7 +110,7 @@ class OcppClient
   {
     const id = newId("c");
     const ws = this.ws;
-    assert(ws && ws.readyState === 1, `[${this.label}] websocket not open`);
+    assert(isWebSocketOpen(ws), `[${this.label}] websocket not open`);
 
     const pending = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {

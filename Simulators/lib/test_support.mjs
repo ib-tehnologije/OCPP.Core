@@ -1,3 +1,5 @@
+import { attachWebSocketMessageHandler, connectWebSocket, isWebSocketOpen } from "./websocket_support.mjs";
+
 export function nowIsoUtc() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -90,24 +92,12 @@ export class OcppClient {
   }
 
   async connect({ timeoutMs = 10000 } = {}) {
-    assert(typeof WebSocket === "function", "Global WebSocket is not available in this Node runtime.");
-
-    this.ws = new WebSocket(this.url, this.protocols);
-    const ws = this.ws;
-
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`[${this.label}] connect timeout`)), timeoutMs);
-      ws.onopen = () => {
-        clearTimeout(timeout);
-        resolve();
-      };
-      ws.onerror = () => {
-        clearTimeout(timeout);
-        reject(new Error(`[${this.label}] websocket error`));
-      };
+    this.ws = await connectWebSocket(this.url, this.protocols, {
+      timeoutMs,
+      label: this.label,
     });
-
-    ws.onmessage = (event) => this.#handleMessage(event.data);
+    const ws = this.ws;
+    attachWebSocketMessageHandler(ws, (data) => this.#handleMessage(data));
   }
 
   close(code = 3001, reason = "") {
@@ -121,7 +111,7 @@ export class OcppClient {
   async call(action, payload, { timeoutMs = 15000 } = {}) {
     const id = newId("c");
     const ws = this.ws;
-    assert(ws && ws.readyState === 1, `[${this.label}] websocket not open`);
+    assert(isWebSocketOpen(ws), `[${this.label}] websocket not open`);
 
     const pending = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -138,7 +128,7 @@ export class OcppClient {
 
   sendRaw(payload) {
     const ws = this.ws;
-    if (!ws || ws.readyState !== 1) {
+    if (!isWebSocketOpen(ws)) {
       return false;
     }
     ws.send(JSON.stringify(payload));
