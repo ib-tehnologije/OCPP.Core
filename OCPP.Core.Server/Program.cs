@@ -45,6 +45,7 @@ namespace OCPP.Core.Server
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     webBuilder
+                    .UseSentry()
                     .ConfigureLogging((ctx, builder) =>
                                         {
                                             builder.AddConfiguration(ctx.Configuration.GetSection("Logging"));

@@ -99,13 +99,14 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("EUR", energy.Currency);
             Assert.Equal(0.30m, energy.Price);
             Assert.Null(energy.NetPrice);
-            Assert.Equal(25m, energy.VatPercentage);
+            Assert.Equal(13m, energy.VatPercentage);
             Assert.Equal("0", energy.VatTransactionType);
 
             var idle = invoice.Items[1];
             Assert.Equal("EV-IDLE", idle.ProductCode);
             Assert.Equal("MIN", idle.Unit);
             Assert.Equal(0.20m, idle.Price);
+            Assert.Equal(25m, idle.VatPercentage);
         }
 
         [Fact]
@@ -221,7 +222,7 @@ namespace OCPP.Core.Server.Tests
                 RequireBuyerTaxNumberForR1 = true,
                 LineItems = new Dictionary<string, ERacuniLineItemOptions>
                 {
-                    ["Energy"] = new ERacuniLineItemOptions { ProductCode = "EV-ENERGY", Unit = "kWh" },
+                    ["Energy"] = new ERacuniLineItemOptions { ProductCode = "EV-ENERGY", Unit = "kWh", VatPercentage = 13m },
                     ["IdleFee"] = new ERacuniLineItemOptions { ProductCode = "EV-IDLE", Unit = "MIN" }
                 }
             };
