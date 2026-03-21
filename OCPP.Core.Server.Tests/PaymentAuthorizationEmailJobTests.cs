@@ -1,7 +1,9 @@
 using System;
+using Hangfire.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Extensions.Hangfire;
 using OCPP.Core.Server.Payments;
 using Xunit;
 
@@ -68,6 +70,18 @@ namespace OCPP.Core.Server.Tests
             job.SendPaymentAuthorized(Guid.NewGuid(), "payer@example.com", "sess_3", "https://example.com/session");
 
             Assert.Equal(0, emailService.PaymentAuthorizedCount);
+        }
+
+        [Fact]
+        public void SendPaymentAuthorized_HangfireJobUsesSharedContractType()
+        {
+            var reservationId = Guid.NewGuid();
+            var job = Job.FromExpression<IPaymentAuthorizationEmailJob>(emailJob =>
+                emailJob.SendPaymentAuthorized(reservationId, "payer@example.com", "sess_4", "https://example.com/session"));
+
+            Assert.Equal(typeof(IPaymentAuthorizationEmailJob), job.Type);
+            Assert.Equal(nameof(IPaymentAuthorizationEmailJob.SendPaymentAuthorized), job.Method.Name);
+            Assert.NotEqual(typeof(PaymentAuthorizationEmailJob), job.Type);
         }
 
         private static OCPPCoreContext CreateContext()

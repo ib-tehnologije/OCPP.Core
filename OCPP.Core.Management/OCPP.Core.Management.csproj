@@ -35,6 +35,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OCPP.Core.Database\OCPP.Core.Database.csproj" />
+    <ProjectReference Include="..\OCPP.Core.Server.Extensions\OCPP.Core.Server.Extensions.csproj" />
   </ItemGroup>
 
 </Project>

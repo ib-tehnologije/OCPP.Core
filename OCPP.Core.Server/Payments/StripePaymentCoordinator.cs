@@ -6,6 +6,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Hangfire;
+using Hangfire.Common;
+using Hangfire.States;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -13,6 +15,7 @@ using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Extensions.Hangfire;
 using OCPP.Core.Server.Payments.Invoices;
 using Stripe;
 using Stripe.Checkout;
@@ -22,6 +25,7 @@ namespace OCPP.Core.Server.Payments
 {
     public partial class StripePaymentCoordinator : IPaymentCoordinator
     {
+        private const string PaymentAuthorizationEmailQueue = "payments";
         private readonly StripeOptions _options;
         private readonly PaymentFlowOptions _flowOptions;
         private readonly IConfiguration _configuration;
@@ -471,8 +475,9 @@ namespace OCPP.Core.Server.Payments
                         var statusUrl = BuildStatusUrl(reservationId);
                         if (_backgroundJobClient != null)
                         {
-                            _backgroundJobClient.Enqueue<PaymentAuthorizationEmailJob>(job =>
-                                job.SendPaymentAuthorized(reservationId, recipientEmail, sessionId, statusUrl));
+                            var job = Job.FromExpression<IPaymentAuthorizationEmailJob>(emailJob =>
+                                emailJob.SendPaymentAuthorized(reservationId, recipientEmail, sessionId, statusUrl));
+                            _backgroundJobClient.Create(job, new EnqueuedState(PaymentAuthorizationEmailQueue));
                             _logger.LogInformation("Stripe/Confirm => Queued payment authorization email reservation={ReservationId}", reservationId);
                         }
                         else

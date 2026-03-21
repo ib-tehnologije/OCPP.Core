@@ -33,19 +33,21 @@ namespace OCPP.Core.Server
 
         public static void Main(string[] args)
         {
-            _configuration = new ConfigurationBuilder()
-                .AddJsonFile("appsettings.json", optional: false)
-                .Build();
+            _configuration = BuildBootstrapConfiguration();
 
-            CreateHostBuilder(args).Build().Run();
+            CreateHostBuilder(args, _configuration).Build().Run();
         }
 
-        public static IHostBuilder CreateHostBuilder(string[] args) =>
+        public static IHostBuilder CreateHostBuilder(string[] args, IConfiguration bootstrapConfiguration = null) =>
             Host.CreateDefaultBuilder(args)
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
+                    if (HasSentryDsn(bootstrapConfiguration))
+                    {
+                        webBuilder.UseSentry();
+                    }
+
                     webBuilder
-                    .UseSentry()
                     .ConfigureLogging((ctx, builder) =>
                                         {
                                             builder.AddConfiguration(ctx.Configuration.GetSection("Logging"));
@@ -53,5 +55,34 @@ namespace OCPP.Core.Server
                                         })
                     .UseStartup<Startup>();
                 });
+
+        private static IConfiguration BuildBootstrapConfiguration()
+        {
+            string environmentName =
+                Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+
+            var configurationBuilder = new ConfigurationBuilder()
+                .AddJsonFile("appsettings.json", optional: false);
+
+            if (!string.IsNullOrWhiteSpace(environmentName))
+            {
+                configurationBuilder.AddJsonFile($"appsettings.{environmentName}.json", optional: true);
+            }
+
+            configurationBuilder.AddEnvironmentVariables();
+            return configurationBuilder.Build();
+        }
+
+        private static bool HasSentryDsn(IConfiguration configuration)
+        {
+            if (configuration == null)
+            {
+                return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(configuration["Sentry:Dsn"]) ||
+                   !string.IsNullOrWhiteSpace(configuration["SENTRY_DSN"]);
+        }
     }
 }

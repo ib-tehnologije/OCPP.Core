@@ -38,6 +38,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Extensions.Hangfire;
 using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
 using OCPP.Core.Server.Payments.Invoices.ERacuni;
@@ -101,6 +102,7 @@ namespace OCPP.Core.Server
             services.AddSingleton<IERacuniApiClient, ERacuniApiClient>();
             services.AddSingleton<Payments.Invoices.IInvoiceIntegrationService, Payments.Invoices.InvoiceIntegrationService>();
             services.AddTransient<Payments.PaymentAuthorizationEmailJob>();
+            services.AddTransient<IPaymentAuthorizationEmailJob, Payments.PaymentAuthorizationEmailJob>();
             bool useMockStripeServices = Configuration.GetValue<bool>("Stripe:UseMockServices");
             if (useMockStripeServices)
             {

@@ -2,11 +2,12 @@ using System;
 using Hangfire;
 using Microsoft.Extensions.Logging;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Extensions.Hangfire;
 using Stripe.Checkout;
 
 namespace OCPP.Core.Server.Payments
 {
-    public class PaymentAuthorizationEmailJob
+    public class PaymentAuthorizationEmailJob : IPaymentAuthorizationEmailJob
     {
         private readonly OCPPCoreContext _dbContext;
         private readonly IEmailNotificationService _emailService;
