@@ -18,6 +18,9 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Check migration metadata
+        run: bash ./scripts/check-mssql-migration-metadata.sh
+
       - name: Restore
         run: dotnet restore OCPP.Core.sln --disable-build-servers -m:1
 

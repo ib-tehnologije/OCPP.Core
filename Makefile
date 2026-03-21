@@ -7,7 +7,7 @@ CONFIG ?= Debug
 MIGRATION_NAME ?= migration_$(shell date +%Y%m%d%H%M%S)
 NAME ?= NewMigration
 
-.PHONY: restore build run-server run-management migrate migrate-sqlite sqlite-reset auto-migrate add-migration dbupdate
+.PHONY: restore build run-server run-management migrate migrate-sqlite sqlite-reset auto-migrate add-migration dbupdate check-migration-metadata
 
 SQLITE_DB ?= ./SQLite/OCPP.Core.test.sqlite
 
@@ -49,6 +49,9 @@ add-migration: export DOTNET_ENVIRONMENT=Production
 add-migration: export ConnectionStrings__SQLite=
 add-migration: restore
 	$(DOTNET) ef migrations add $(NAME) --project $(DB_PROJECT) --startup-project $(STARTUP) --context $(DB_CONTEXT)
+
+check-migration-metadata:
+	bash ./scripts/check-mssql-migration-metadata.sh
 
 # Local SQLite uses EnsureCreated() at app startup instead of EF migrations.
 sqlite-reset:

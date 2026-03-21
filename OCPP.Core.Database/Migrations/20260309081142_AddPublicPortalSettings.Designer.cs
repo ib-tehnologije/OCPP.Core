@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OCPP.Core.Database;
@@ -18,83 +19,89 @@ namespace OCPP.Core.Database.Migrations
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "8.0.17");
+            modelBuilder
+                .HasAnnotation("ProductVersion", "8.0.17")
+                .HasAnnotation("Relational:MaxIdentifierLength", 128);
+
+            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
             modelBuilder.Entity("OCPP.Core.Database.ChargePaymentReservation", b =>
                 {
                     b.Property<Guid>("ReservationId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ActiveConnectorKey")
-                        .ValueGeneratedOnAdd()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)")
-                        .HasDefaultValue("ACTIVE");
+                        .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed','StartRejected','StartTimeout','Abandoned') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
 
                     b.Property<double?>("ActualEnergyKwh")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<DateTime?>("AuthorizedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<bool?>("AwaitingPlug")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<long?>("CapturedAmountCents")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<DateTime?>("CapturedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ChargePointId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("ChargeTagId")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int>("ConnectorId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Currency")
                         .IsRequired()
                         .HasMaxLength(10)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(10)");
+
 
                     b.Property<string>("FailureCode")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("FailureMessage")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("LastError")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<DateTime?>("LastOcppEventAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<long>("MaxAmountCents")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<double>("MaxEnergyKwh")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<int>("MaxUsageFeeMinutes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("OcppIdTag")
                         .HasMaxLength(20)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<decimal>("OwnerCommissionFixedPerKwh")
                         .HasColumnType("decimal(18,4)");
@@ -109,51 +116,51 @@ namespace OCPP.Core.Database.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime?>("RemoteStartAcceptedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("RemoteStartResult")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime?>("RemoteStartSentAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("StartDeadlineAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("StartTransactionAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<int?>("StartTransactionId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<int>("StartUsageFeeAfterMinutes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime?>("StopTransactionAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("StripeCheckoutSessionId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("StripePaymentIntentId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<int?>("TransactionId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("UsageFeeAnchorMinutes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<decimal>("UsageFeePerMinute")
                         .HasColumnType("decimal(18,4)");
@@ -183,45 +190,45 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<string>("ChargePointId")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("ClientCertThumb")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Comment")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<decimal>("ConnectorUsageFeePerMinute")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("Description")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<bool>("FreeChargingEnabled")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<double?>("Latitude")
                         .HasColumnType("float");
 
                     b.Property<string>("LocationDescription")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<double?>("Longitude")
                         .HasColumnType("float");
 
                     b.Property<double>("MaxSessionKwh")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<int>("MaxUsageFeeMinutes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("Name")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<decimal>("OwnerCommissionFixedPerKwh")
                         .HasColumnType("decimal(18,4)");
@@ -230,20 +237,20 @@ namespace OCPP.Core.Database.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int?>("OwnerId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<decimal>("OwnerSessionFee")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("Password")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<decimal>("PricePerKwh")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("StartUsageFeeAfterMinutes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<bool>("UsageFeeAfterChargingEnds")
                         .HasColumnType("bit");
@@ -253,7 +260,7 @@ namespace OCPP.Core.Database.Migrations
 
                     b.Property<string>("Username")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.HasKey("ChargePointId");
 
@@ -269,21 +276,21 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<string>("TagId")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<bool?>("Blocked")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<DateTime?>("ExpiryDate")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ParentTagId")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("TagName")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.HasKey("TagId")
                         .HasName("PK_ChargeKeys");
@@ -295,31 +302,33 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("ChargePointId")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("datetime2")
                         .HasDefaultValueSql("getutcdate()");
 
                     b.Property<bool>("FreeChargingEnabled")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<string>("Note")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("TagId")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
@@ -335,27 +344,27 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<string>("ChargePointId")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<int>("ConnectorId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("ConnectorName")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<double?>("LastMeter")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<DateTime?>("LastMeterTime")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("LastStatus")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime?>("LastStatusTime")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("ChargePointId", "ConnectorId");
 
@@ -366,86 +375,88 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<int>("InvoiceSubmissionLogId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("InvoiceSubmissionLogId"));
 
                     b.Property<string>("ApiTransactionId")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime?>("CompletedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Error")
                         .HasMaxLength(4000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<string>("ExternalDocumentId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("ExternalInvoiceNumber")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("ExternalPdfUrl")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<string>("ExternalPublicUrl")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<int?>("HttpStatusCode")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("InvoiceKind")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("Mode")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("ProviderOperation")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("ProviderResponseStatus")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("RequestPayloadJson")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("ReservationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ResponseBody")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("StripeCheckoutSessionId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("StripePaymentIntentId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<int?>("TransactionId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.HasKey("InvoiceSubmissionLogId");
 
@@ -465,30 +476,32 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<int>("LogId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("LogId"));
 
                     b.Property<string>("ChargePointId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<int?>("ConnectorId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("ErrorCode")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime>("LogTime")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Result")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("LogId");
 
@@ -501,16 +514,18 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<int>("OwnerId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("OwnerId"));
 
                     b.Property<string>("Email")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.HasKey("OwnerId");
 
@@ -521,71 +536,75 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<int>("PublicPortalSettingsId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("PublicPortalSettingsId"));
 
                     b.Property<string>("BrandName")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("CanonicalBaseUrl")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("datetime2")
                         .HasDefaultValueSql("getutcdate()");
 
                     b.Property<string>("FooterAddressLine")
                         .HasMaxLength(300)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("FooterCompanyLine")
                         .HasMaxLength(300)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("FooterLegalLine")
                         .HasMaxLength(300)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("FooterLogoUrl")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("HeaderLogoUrl")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("HelpUrl")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
+
+
 
                     b.Property<bool?>("QrScannerEnabled")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<string>("SeoDescription")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("SeoTitle")
                         .HasMaxLength(300)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("SupportEmail")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("SupportPhone")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Tagline")
                         .HasMaxLength(300)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("datetime2")
                         .HasDefaultValueSql("getutcdate()");
 
                     b.HasKey("PublicPortalSettingsId");
@@ -597,20 +616,20 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<string>("EventId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime>("ProcessedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("ReservationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("StripeCreatedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Type")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.HasKey("EventId");
 
@@ -623,44 +642,46 @@ namespace OCPP.Core.Database.Migrations
                 {
                     b.Property<int>("TransactionId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("TransactionId"));
 
                     b.Property<string>("ChargePointId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime?>("ChargingEndedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("ConnectorId")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("Currency")
                         .HasMaxLength(10)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(10)");
 
                     b.Property<decimal>("EnergyCost")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<double>("EnergyKwh")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<string>("FreeReason")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<decimal>("IdleUsageFeeAmount")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("IdleUsageFeeMinutes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<double>("MeterStart")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<double?>("MeterStop")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<decimal>("OperatorCommissionAmount")
                         .HasColumnType("decimal(18,4)");
@@ -682,35 +703,35 @@ namespace OCPP.Core.Database.Migrations
 
                     b.Property<string>("StartResult")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("StartTagId")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime>("StartTime")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("StopReason")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("StopTagId")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime?>("StopTime")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Uid")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<decimal>("UsageFeeAmount")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("UsageFeeMinutes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<decimal>("UserSessionFeeAmount")
                         .HasColumnType("decimal(18,4)");
