@@ -221,6 +221,9 @@ namespace OCPP.Core.Server.Payments
                 Mode = "payment",
                 SuccessUrl = successUrl,
                 CancelUrl = cancelUrl,
+                // Keep billing collection at Stripe's least-intrusive mode.
+                // We only need the checkout email for receipts; R1/company data can be added later.
+                BillingAddressCollection = "auto",
                 PaymentIntentData = new SessionPaymentIntentDataOptions
                 {
                     CaptureMethod = "manual",

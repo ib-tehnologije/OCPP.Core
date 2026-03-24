@@ -374,6 +374,7 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("reservation_id", sessionService.LastCreateOptions.Metadata.Keys);
             Assert.StartsWith("https://custom-return", sessionService.LastCreateOptions.SuccessUrl);
             Assert.StartsWith("https://custom-return", sessionService.LastCreateOptions.CancelUrl);
+            Assert.Equal("auto", sessionService.LastCreateOptions.BillingAddressCollection);
         }
 
         [Fact]
