@@ -77,7 +77,7 @@
                     </div>
                     <div class="live-stat">
                         <div class="stat-value" id="stat-cost">-</div>
-                        <div class="stat-label" data-i18n="status.label.authorized">AUTHORIZED</div>
+                        <div class="stat-label" data-i18n="status.label.currentTotal">CURRENT TOTAL</div>
                     </div>
                     <div class="live-stat">
                         <div class="stat-value" id="stat-power">-</div>
@@ -412,6 +412,38 @@
             return `${(num / 100).toFixed(2)} ${ccy}`.trim();
         };
 
+        const parseAmount = (value) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num : null;
+        };
+
+        const roundAmount = (value) => {
+            const num = Number(value);
+            return Number.isFinite(num)
+                ? Math.round((num + Number.EPSILON) * 100) / 100
+                : null;
+        };
+
+        const fmtAmount = (value, currency) => {
+            const amount = roundAmount(value);
+            if (amount === null) return "-";
+            const ccy = String(currency || "").toUpperCase();
+            return `${amount.toFixed(2)} ${ccy}`.trim();
+        };
+
+        const sumAmounts = (...values) => {
+            let total = 0;
+            let hasAny = false;
+            values.forEach((value) => {
+                const amount = parseAmount(value);
+                if (amount !== null) {
+                    total += amount;
+                    hasAny = true;
+                }
+            });
+            return hasAny ? roundAmount(total) : null;
+        };
+
         const fmtNumber = (value, digits = 1) => {
             const num = Number(value);
             return Number.isFinite(num) ? num.toFixed(digits) : "-";
@@ -648,7 +680,15 @@
             else if (liveMeterKwh != null && txMeterStart != null) sessionEnergy = Number(liveMeterKwh) - Number(txMeterStart);
 
             statEnergy.textContent = Number.isFinite(sessionEnergy) ? fmtNumber(sessionEnergy, 1) : "-";
-            statCost.textContent = authorizedText;
+            const pricePerKwh = parseAmount(data?.pricePerKwh);
+            const liveEnergyCost = Number.isFinite(sessionEnergy) && pricePerKwh !== null
+                ? roundAmount(sessionEnergy * pricePerKwh)
+                : null;
+            const energyCost = parseAmount(data?.transactionEnergyCost) ?? liveEnergyCost;
+            const sessionFeeAmount = parseAmount(data?.transactionSessionFeeAmount) ?? parseAmount(data?.userSessionFee);
+            const idleFeeAmount = parseAmount(data?.liveIdleFeeAmount) ?? parseAmount(data?.transactionIdleFeeAmount);
+            const currentTotalAmount = sumAmounts(energyCost, sessionFeeAmount, idleFeeAmount);
+            statCost.textContent = currentTotalAmount !== null ? fmtAmount(currentTotalAmount, currency) : "-";
 
             let pct = null;
             if (Number.isFinite(sessionEnergy) && Number.isFinite(maxEnergyKwh) && maxEnergyKwh > 0) {
@@ -660,14 +700,11 @@
                 : "-";
             progressRight.textContent = pct != null ? `${pct.toFixed(1)}%` : "-";
 
-            const energyCost = data?.transactionEnergyCost;
-            const sessionFeeAmount = data?.transactionSessionFeeAmount;
-            const idleFeeAmount = data?.liveIdleFeeAmount != null ? data.liveIdleFeeAmount : data?.transactionIdleFeeAmount;
             const idleFeeMinutes = data?.liveIdleFeeMinutes != null ? data.liveIdleFeeMinutes : data?.transactionIdleFeeMinutes;
-            bdEnergy.textContent = energyCost != null ? `${Number(energyCost).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
+            bdEnergy.textContent = energyCost !== null ? fmtAmount(energyCost, currency) : "-";
             bdEnergySub.textContent = Number.isFinite(sessionEnergy) ? `${fmtNumber(sessionEnergy, 1)} kWh` : "-";
-            bdSessionFee.textContent = sessionFeeAmount != null ? `${Number(sessionFeeAmount).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
-            bdIdleFee.textContent = idleFeeAmount != null ? `${Number(idleFeeAmount).toFixed(2)} ${String(currency || "").toUpperCase()}` : "-";
+            bdSessionFee.textContent = sessionFeeAmount !== null ? fmtAmount(sessionFeeAmount, currency) : "-";
+            bdIdleFee.textContent = idleFeeAmount !== null ? fmtAmount(idleFeeAmount, currency) : "-";
             bdIdleSub.textContent = idlePausedByWindow
                 ? t("status.idlePausedByWindow")
                 : (idleFeeMinutes != null ? `${idleFeeMinutes} min` : "-");
