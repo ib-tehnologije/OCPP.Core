@@ -13,6 +13,7 @@ namespace OCPP.Core.Server.Payments.Invoices
         public DateTime? ServiceDateToUtc { get; set; }
         public string Currency { get; set; }
         public string BuyerCompanyName { get; set; }
+        public string BuyerPersonalName { get; set; }
         public string BuyerOib { get; set; }
         public string BuyerCode { get; set; }
         public string BuyerEmail { get; set; }

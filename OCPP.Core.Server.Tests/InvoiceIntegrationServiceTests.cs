@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Net;
+using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -98,18 +99,66 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("HTTP 400", audit.Error);
         }
 
+        [Fact]
+        public void HandleCompletedReservation_FailsBeforeProviderCall_WhenSubmitModeIsMissingProductCodes()
+        {
+            var draft = CreateDraft();
+            var draftBuilder = new StubInvoiceDraftBuilder(draft);
+            var requestFactory = new StubERacuniInvoiceRequestFactory();
+            var apiClient = new StubERacuniApiClient();
+            var service = CreateService(
+                "Submit",
+                draftBuilder,
+                requestFactory,
+                apiClient,
+                eracuni =>
+                {
+                    eracuni.LineItems = new Dictionary<string, ERacuniLineItemOptions>();
+                });
+
+            using var dbContext = CreateContext();
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session()));
+
+            Assert.Contains("requires configured product codes", ex.Message);
+            Assert.Equal(1, draftBuilder.BuildCount);
+            Assert.Equal(0, requestFactory.BuildCount);
+            Assert.Equal(0, apiClient.CreateCount);
+
+            var audit = Assert.Single(dbContext.InvoiceSubmissionLogs);
+            Assert.Equal("Failed", audit.Status);
+            Assert.Contains("INVOICES_ERACUNI_LINEITEM_ENERGY_PRODUCT_CODE", audit.RequestPayloadJson);
+            Assert.Contains("\"isConfigured\":false", audit.RequestPayloadJson);
+            Assert.Contains("SessionFee", audit.RequestPayloadJson);
+        }
+
         private static InvoiceIntegrationService CreateService(
             string mode,
             IInvoiceDraftBuilder draftBuilder,
             IERacuniInvoiceRequestFactory requestFactory,
-            IERacuniApiClient apiClient)
+            IERacuniApiClient apiClient,
+            Action<ERacuniInvoiceOptions>? configureEracuni = null)
         {
+            var eracuni = new ERacuniInvoiceOptions
+            {
+                LineItems = new Dictionary<string, ERacuniLineItemOptions>
+                {
+                    ["Energy"] = new ERacuniLineItemOptions { ProductCode = "EV-ENERGY" },
+                    ["SessionFee"] = new ERacuniLineItemOptions { ProductCode = "EV-SESSION" },
+                    ["UsageFee"] = new ERacuniLineItemOptions { ProductCode = "EV-OCCUPANCY" },
+                    ["IdleFee"] = new ERacuniLineItemOptions { ProductCode = "EV-IDLE" }
+                }
+            };
+            configureEracuni?.Invoke(eracuni);
+
             return new InvoiceIntegrationService(
                 Options.Create(new InvoiceIntegrationOptions
                 {
                     Enabled = true,
                     Provider = "ERacuni",
-                    Mode = mode
+                    Mode = mode,
+                    ERacuni = eracuni
                 }),
                 draftBuilder,
                 requestFactory,

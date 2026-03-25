@@ -41,7 +41,11 @@ namespace OCPP.Core.Server.Tests
 
             var session = new Session
             {
-                CustomerDetails = new SessionCustomerDetails { Email = "billing@example.com" },
+                CustomerDetails = new SessionCustomerDetails
+                {
+                    Email = "billing@example.com",
+                    Name = "Denis Draguzet"
+                },
                 Metadata = new System.Collections.Generic.Dictionary<string, string>
                 {
                     ["invoice_type"] = "R1",
@@ -56,6 +60,7 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("R1", draft.InvoiceKind);
             Assert.Equal("EUR", draft.Currency);
             Assert.Equal("Acme d.o.o.", draft.BuyerCompanyName);
+            Assert.Equal("Denis Draguzet", draft.BuyerPersonalName);
             Assert.Equal("12345678901", draft.BuyerOib);
             Assert.Equal("billing@example.com", draft.BuyerEmail);
             Assert.Equal(3, draft.Lines.Count);

@@ -122,6 +122,12 @@
                             </div>
                         }
                     }
+                    @if (Model.ChargePoints.Count > 0)
+                    {
+                        <div class="tile full" id="charger-list-empty" style="grid-column: 1 / -1; display: none;">
+                            <div class="label" data-i18n="map.noVisibleStations">No stations match the current map view.</div>
+                        </div>
+                    }
                 </div>
             </div>
         </div>
@@ -145,8 +151,11 @@
             const clearSearch = document.getElementById('mapSearchClear');
             const gpsBtn = document.getElementById('gpsBtn');
             const mapExpandBtn = document.getElementById('mapExpandBtn');
+            const chargerCountValue = document.querySelector('.charger-count span:first-child');
+            const emptyStateEl = document.getElementById('charger-list-empty');
             const markerLookup = {};
             let userMarker = null;
+            let activeQuery = '';
 
             const pick = (obj, primary, secondary) => {
                 if (obj[primary] !== undefined && obj[primary] !== null) return obj[primary];
@@ -270,31 +279,58 @@
                 }[match]));
             }
 
+            function getCurrentBounds() {
+                if (!map || typeof map.getBounds !== 'function') {
+                    return null;
+                }
+
+                const bounds = map.getBounds();
+                return bounds && typeof bounds.isValid === 'function' && bounds.isValid()
+                    ? bounds
+                    : null;
+            }
+
             function filterMapAndList(query) {
-                const term = (query || '').toLowerCase();
+                if (typeof query === 'string') {
+                    activeQuery = query.trim().toLowerCase();
+                }
+
+                const term = activeQuery;
                 const cards = document.querySelectorAll('.cp-card');
-                const visibleMarkers = [];
+                const bounds = getCurrentBounds();
+                let visibleCount = 0;
 
                 cards.forEach(card => {
                     const text = (card.dataset.search || '').toLowerCase();
-                    const match = term.length === 0 || text.indexOf(term) >= 0;
-                    card.style.display = match ? '' : 'none';
-
                     const cpId = card.dataset.cpId;
                     const marker = cpId ? markerLookup[cpId] : null;
+                    const matchesSearch = term.length === 0 || text.indexOf(term) >= 0;
+                    const withinBounds = !bounds || (marker && bounds.contains(marker.getLatLng()));
+                    const visible = matchesSearch && withinBounds;
+
+                    card.style.display = visible ? '' : 'none';
+
                     if (marker) {
-                        if (match) {
-                            marker.addTo(map);
-                            visibleMarkers.push(marker.getLatLng());
-                        } else {
+                        if (visible) {
+                            if (!map.hasLayer(marker)) {
+                                marker.addTo(map);
+                            }
+                        } else if (map.hasLayer(marker)) {
                             map.removeLayer(marker);
                         }
                     }
+
+                    if (visible) {
+                        visibleCount++;
+                    }
                 });
 
-                if (visibleMarkers.length > 0) {
-                    const bounds = L.latLngBounds(visibleMarkers);
-                    map.fitBounds(bounds.pad(0.2));
+                if (chargerCountValue) {
+                    chargerCountValue.textContent = visibleCount.toString();
+                }
+
+                if (emptyStateEl) {
+                    emptyStateEl.style.display = visibleCount === 0 ? '' : 'none';
                 }
             }
 
@@ -348,7 +384,10 @@
                 if (mapExpandBtn) {
                     mapExpandBtn.textContent = expanded ? '🗺 Shrink' : '🗺 Expand';
                 }
-                requestAnimationFrame(() => map.invalidateSize());
+                requestAnimationFrame(() => {
+                    map.invalidateSize();
+                    filterMapAndList();
+                });
             }
 
             function locateUser() {
@@ -385,16 +424,24 @@
                 console.error('Public map: no finite coordinates found in marker list.');
             }
 
+            map.on('moveend', () => filterMapAndList());
+            map.on('zoomend', () => filterMapAndList());
+
             requestAnimationFrame(() => {
                 map.invalidateSize();
                 if (hasLocation.length > 0) {
                     const bounds = L.latLngBounds(hasLocation.map(p => [asNumber(pick(p, 'Latitude', 'latitude')), asNumber(pick(p, 'Longitude', 'longitude'))]));
                     map.fitBounds(bounds.pad(0.2));
                 }
+
+                filterMapAndList(searchInput ? searchInput.value : '');
             });
 
-            filterMapAndList('');
-            window.addEventListener('resize', () => map.invalidateSize());
+            filterMapAndList(searchInput ? searchInput.value : '');
+            window.addEventListener('resize', () => {
+                map.invalidateSize();
+                filterMapAndList();
+            });
             }
         </script>
     }

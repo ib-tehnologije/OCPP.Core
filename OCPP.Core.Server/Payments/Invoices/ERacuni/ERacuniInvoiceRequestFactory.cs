@@ -61,7 +61,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 DateOfSupplyFrom = FormatDate(supplyFromDate),
                 DateOfSupplyUntil = FormatDate(supplyUntilDate),
                 VatTransactionType = NullIfWhiteSpace(eracuni.VatTransactionType),
-                BuyerName = NullIfWhiteSpace(draft.BuyerCompanyName),
+                BuyerName = ResolveBuyerName(draft),
                 BuyerCountry = "HR",
                 BuyerTaxNumber = NullIfWhiteSpace(draft.BuyerOib),
                 BuyerVatRegistration = ResolveBuyerVatRegistration(draft, eracuni),
@@ -110,11 +110,14 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             if (line == null) throw new ArgumentNullException(nameof(line));
 
             var lineOptions = ResolveLineOptions(line.Type, options);
+            var productCode = NullIfWhiteSpace(lineOptions?.ProductCode);
+            var productCatalogueCode = NullIfWhiteSpace(lineOptions?.ProductCatalogueCode);
+            var usesCatalogProduct = !string.IsNullOrWhiteSpace(productCode) || !string.IsNullOrWhiteSpace(productCatalogueCode);
             var item = new ERacuniSalesInvoiceItem
             {
-                ProductCode = NullIfWhiteSpace(lineOptions?.ProductCode),
-                ProductCatalogueCode = NullIfWhiteSpace(lineOptions?.ProductCatalogueCode),
-                Description = NullIfWhiteSpace(line.Description),
+                ProductCode = productCode,
+                ProductCatalogueCode = productCatalogueCode,
+                Description = usesCatalogProduct ? null : NullIfWhiteSpace(line.Description),
                 Quantity = line.Quantity,
                 Unit = NullIfWhiteSpace(lineOptions?.Unit) ?? NullIfWhiteSpace(line.UnitCode),
                 Currency = NullIfWhiteSpace(currency) ?? "EUR",
@@ -179,6 +182,12 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         private static string ResolveBuyerCode(InvoiceDraft draft)
         {
             return NullIfWhiteSpace(draft?.BuyerCode);
+        }
+
+        private static string ResolveBuyerName(InvoiceDraft draft)
+        {
+            return NullIfWhiteSpace(draft?.BuyerCompanyName) ??
+                   NullIfWhiteSpace(draft?.BuyerPersonalName);
         }
 
         private static string ResolveReference(InvoiceDraft draft, ERacuniInvoiceOptions options)

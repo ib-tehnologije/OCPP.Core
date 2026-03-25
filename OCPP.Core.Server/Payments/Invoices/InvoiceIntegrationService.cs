@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -79,6 +81,8 @@ namespace OCPP.Core.Server.Payments.Invoices
                     throw new InvalidOperationException($"Unsupported invoice provider '{provider}'.");
                 }
 
+                ValidateSubmitModeConfiguration(draft, provider, mode, auditLog);
+
                 var request = _eracuniRequestFactory.BuildCreateSalesInvoiceRequest(draft);
                 auditLog.ProviderOperation = request.Method;
                 auditLog.ApiTransactionId = TryGetApiTransactionId(request);
@@ -132,6 +136,60 @@ namespace OCPP.Core.Server.Payments.Invoices
                 PersistAuditLog(dbContext, auditLog);
                 throw;
             }
+        }
+
+        private void ValidateSubmitModeConfiguration(
+            InvoiceDraft draft,
+            string provider,
+            string mode,
+            InvoiceSubmissionLog auditLog)
+        {
+            if (!string.Equals(provider, "ERacuni", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(mode, "Submit", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var eracuni = _options.ERacuni ?? new ERacuniInvoiceOptions();
+            var lineItemSummaries = BuildLineItemSummaries(eracuni);
+            var missingProductCodes = lineItemSummaries
+                .Where(summary => string.IsNullOrWhiteSpace(summary.ProductCode))
+                .ToList();
+
+            if (missingProductCodes.Count == 0)
+            {
+                return;
+            }
+
+            auditLog.RequestPayloadJson = SerializeLogPayload(new
+            {
+                validation = "ERacuniSubmitPreflight",
+                provider,
+                mode,
+                reservationId = draft?.ReservationId,
+                transactionId = draft?.TransactionId,
+                invoiceKind = draft?.InvoiceKind,
+                lineItemProductCodes = lineItemSummaries.Select(summary => new
+                {
+                    summary.LineType,
+                    summary.ProductCode,
+                    summary.EnvironmentVariable,
+                    summary.ConfigPath,
+                    isConfigured = !string.IsNullOrWhiteSpace(summary.ProductCode)
+                }),
+                missingLineItemProductCodes = missingProductCodes.Select(summary => new
+                {
+                    summary.LineType,
+                    summary.EnvironmentVariable,
+                    summary.ConfigPath
+                })
+            });
+
+            var missingNames = string.Join(", ", missingProductCodes.Select(summary => summary.LineType));
+            var missingEnvVars = string.Join(", ", missingProductCodes.Select(summary => summary.EnvironmentVariable));
+            throw new InvalidOperationException(
+                $"e-racuni submit mode requires configured product codes for line items: {missingNames}. " +
+                $"Set {missingEnvVars} before submitting invoices.");
         }
 
         private static InvoiceSubmissionLog CreateAuditLog(
@@ -201,6 +259,39 @@ namespace OCPP.Core.Server.Payments.Invoices
             return $"e-racuni request failed with HTTP {(int)result.StatusCode}: {result.Body}";
         }
 
+        private static IReadOnlyList<LineItemProductCodeSummary> BuildLineItemSummaries(ERacuniInvoiceOptions options)
+        {
+            options ??= new ERacuniInvoiceOptions();
+            return RequiredLineItems
+                .Select(item =>
+                {
+                    var lineOptions = TryResolveLineItemOptions(options, item.LineType);
+                    return new LineItemProductCodeSummary(
+                        item.LineType,
+                        lineOptions?.ProductCode,
+                        item.EnvironmentVariable,
+                        item.ConfigPath);
+                })
+                .ToList();
+        }
+
+        private static ERacuniLineItemOptions TryResolveLineItemOptions(ERacuniInvoiceOptions options, string lineType)
+        {
+            if (options?.LineItems == null || options.LineItems.Count == 0 || string.IsNullOrWhiteSpace(lineType))
+            {
+                return null;
+            }
+
+            if (options.LineItems.TryGetValue(lineType, out var lineOptions))
+            {
+                return lineOptions;
+            }
+
+            return options.LineItems
+                .FirstOrDefault(entry => string.Equals(entry.Key, lineType, StringComparison.OrdinalIgnoreCase))
+                .Value;
+        }
+
         private static string Truncate(string value, int maxLength)
         {
             if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
@@ -225,5 +316,19 @@ namespace OCPP.Core.Server.Payments.Invoices
 
             dbContext.SaveChanges();
         }
+
+        private static readonly (string LineType, string EnvironmentVariable, string ConfigPath)[] RequiredLineItems =
+        {
+            ("Energy", "INVOICES_ERACUNI_LINEITEM_ENERGY_PRODUCT_CODE", "Invoices:ERacuni:LineItems:Energy:ProductCode"),
+            ("SessionFee", "INVOICES_ERACUNI_LINEITEM_SESSION_PRODUCT_CODE", "Invoices:ERacuni:LineItems:SessionFee:ProductCode"),
+            ("UsageFee", "INVOICES_ERACUNI_LINEITEM_USAGE_PRODUCT_CODE", "Invoices:ERacuni:LineItems:UsageFee:ProductCode"),
+            ("IdleFee", "INVOICES_ERACUNI_LINEITEM_IDLE_PRODUCT_CODE", "Invoices:ERacuni:LineItems:IdleFee:ProductCode")
+        };
+
+        private sealed record LineItemProductCodeSummary(
+            string LineType,
+            string ProductCode,
+            string EnvironmentVariable,
+            string ConfigPath);
     }
 }

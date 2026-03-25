@@ -25,6 +25,7 @@ namespace OCPP.Core.Server.Tests
                 ServiceDateToUtc = new DateTime(2026, 3, 5, 14, 0, 0, DateTimeKind.Utc),
                 Currency = "EUR",
                 BuyerCompanyName = "Acme d.o.o.",
+                BuyerPersonalName = "Denis Draguzet",
                 BuyerOib = "12345678901",
                 BuyerEmail = "billing@example.com",
                 ChargePointId = "CP-42",
@@ -93,7 +94,7 @@ namespace OCPP.Core.Server.Tests
 
             var energy = invoice.Items[0];
             Assert.Equal("EV-ENERGY", energy.ProductCode);
-            Assert.Equal("Charging energy", energy.Description);
+            Assert.Null(energy.Description);
             Assert.Equal(12.5m, energy.Quantity);
             Assert.Equal("kWh", energy.Unit);
             Assert.Equal("EUR", energy.Currency);
@@ -104,6 +105,7 @@ namespace OCPP.Core.Server.Tests
 
             var idle = invoice.Items[1];
             Assert.Equal("EV-IDLE", idle.ProductCode);
+            Assert.Null(idle.Description);
             Assert.Equal("MIN", idle.Unit);
             Assert.Equal(0.20m, idle.Price);
             Assert.Equal(25m, idle.VatPercentage);
@@ -197,6 +199,105 @@ namespace OCPP.Core.Server.Tests
 
             Assert.Equal("BUYER-001", parameters.SalesInvoice.BuyerCode);
             Assert.Equal("CreditCard", parameters.SalesInvoice.MethodOfPayment);
+        }
+
+        [Fact]
+        public void BuildCreateSalesInvoiceRequest_UsesPersonalBuyerName_WhenCompanyNameIsMissing()
+        {
+            var factory = CreateFactory();
+            var draft = new InvoiceDraft
+            {
+                ReservationId = Guid.NewGuid(),
+                TransactionId = 77,
+                InvoiceKind = "Retail",
+                IssueDateUtc = new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc),
+                ServiceDateFromUtc = new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc),
+                Currency = "EUR",
+                BuyerPersonalName = "Denis Draguzet",
+                Lines = new List<InvoiceDraftLine>
+                {
+                    new InvoiceDraftLine
+                    {
+                        Type = "Energy",
+                        Description = "Charging energy",
+                        Quantity = 1m,
+                        UnitCode = "kWh",
+                        UnitPrice = 0.30m,
+                        LineAmount = 0.30m
+                    }
+                }
+            };
+
+            var request = factory.BuildCreateSalesInvoiceRequest(draft);
+            var parameters = Assert.IsType<ERacuniSalesInvoiceCreateParameters>(request.Parameters);
+
+            Assert.Equal("Denis Draguzet", parameters.SalesInvoice.BuyerName);
+        }
+
+        [Fact]
+        public void BuildCreateSalesInvoiceRequest_OmitsCashRegisterCode_WhenConfigurationIsBlank()
+        {
+            var factory = CreateFactory(eracuni => eracuni.CashRegisterCode = " ");
+            var draft = new InvoiceDraft
+            {
+                ReservationId = Guid.NewGuid(),
+                TransactionId = 88,
+                InvoiceKind = "Retail",
+                IssueDateUtc = new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc),
+                ServiceDateFromUtc = new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc),
+                Currency = "EUR",
+                Lines = new List<InvoiceDraftLine>
+                {
+                    new InvoiceDraftLine
+                    {
+                        Type = "Energy",
+                        Description = "Charging energy",
+                        Quantity = 1m,
+                        UnitCode = "kWh",
+                        UnitPrice = 0.30m,
+                        LineAmount = 0.30m
+                    }
+                }
+            };
+
+            var request = factory.BuildCreateSalesInvoiceRequest(draft);
+            var parameters = Assert.IsType<ERacuniSalesInvoiceCreateParameters>(request.Parameters);
+
+            Assert.Null(parameters.SalesInvoice.CashRegisterCode);
+        }
+
+        [Fact]
+        public void BuildCreateSalesInvoiceRequest_PreservesDescription_WhenProductCodeIsMissing()
+        {
+            var factory = CreateFactory(eracuni => eracuni.LineItems["Energy"].ProductCode = null);
+            var draft = new InvoiceDraft
+            {
+                ReservationId = Guid.NewGuid(),
+                TransactionId = 89,
+                InvoiceKind = "Retail",
+                IssueDateUtc = new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc),
+                ServiceDateFromUtc = new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc),
+                Currency = "EUR",
+                Lines = new List<InvoiceDraftLine>
+                {
+                    new InvoiceDraftLine
+                    {
+                        Type = "Energy",
+                        Description = "Charging energy",
+                        Quantity = 1m,
+                        UnitCode = "kWh",
+                        UnitPrice = 0.30m,
+                        LineAmount = 0.30m
+                    }
+                }
+            };
+
+            var request = factory.BuildCreateSalesInvoiceRequest(draft);
+            var parameters = Assert.IsType<ERacuniSalesInvoiceCreateParameters>(request.Parameters);
+            var item = Assert.Single(parameters.SalesInvoice.Items);
+
+            Assert.Null(item.ProductCode);
+            Assert.Equal("Charging energy", item.Description);
         }
 
         private static ERacuniInvoiceRequestFactory CreateFactory(Action<ERacuniInvoiceOptions>? configure = null)

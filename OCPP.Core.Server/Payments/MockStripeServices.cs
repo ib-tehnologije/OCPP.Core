@@ -145,7 +145,8 @@ namespace OCPP.Core.Server.Payments
                     ? null
                     : new SessionCustomerDetails
                     {
-                        Email = session.CustomerDetails.Email
+                        Email = session.CustomerDetails.Email,
+                        Name = session.CustomerDetails.Name
                     }
             };
         }

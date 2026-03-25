@@ -27,6 +27,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 ServiceDateToUtc = transaction.StopTime,
                 Currency = NormalizeCurrency(reservation.Currency ?? transaction.Currency),
                 BuyerCompanyName = GetMetadataValue(checkoutSession, "buyer_company"),
+                BuyerPersonalName = checkoutSession?.CustomerDetails?.Name?.Trim(),
                 BuyerOib = GetMetadataValue(checkoutSession, "buyer_oib"),
                 BuyerEmail = checkoutSession?.CustomerDetails?.Email?.Trim(),
                 ChargePointId = reservation.ChargePointId,
