@@ -412,10 +412,15 @@ namespace OCPP.Core.Server
                 Messages_OCPP21.RequestStartTransactionRequest requestStartTransactionRequest = new Messages_OCPP21.RequestStartTransactionRequest();
                 requestStartTransactionRequest.EvseId = connectorId;
                 requestStartTransactionRequest.IdToken = new IdTokenType();
-                requestStartTransactionRequest.IdToken.Type = IdTokenEnumStringType.ISO14443;
+                requestStartTransactionRequest.IdToken.Type = ResolveRemoteStartIdTokenType21(logger);
                 requestStartTransactionRequest.IdToken.IdToken = idTag;
 
-                logger.LogInformation("OCPPMiddleware.OCPP21 => RequestStartTransaction21: ChargePoint='{0}' / ConnectorId={1} / idTag='{2}'", chargePointStatus.Id, connectorId, idTag);
+                logger.LogInformation(
+                    "OCPPMiddleware.OCPP21 => RequestStartTransaction21: ChargePoint='{0}' / ConnectorId={1} / idTag='{2}' / idTokenType='{3}'",
+                    chargePointStatus.Id,
+                    connectorId,
+                    idTag,
+                    requestStartTransactionRequest.IdToken.Type);
 
                 string jsonResetRequest = JsonConvert.SerializeObject(requestStartTransactionRequest);
 

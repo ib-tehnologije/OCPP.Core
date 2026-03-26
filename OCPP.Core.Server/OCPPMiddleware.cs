@@ -73,7 +73,8 @@ namespace OCPP.Core.Server
         private readonly ConcurrentDictionary<int, DateTime> _idleAutoStopTransactions = new ConcurrentDictionary<int, DateTime>();
 
         // Dictionary with status objects for each charge point
-        private static readonly ConcurrentDictionary<string, ChargePointStatus> _chargePointStatusDict = new ConcurrentDictionary<string, ChargePointStatus>();
+        private static readonly ConcurrentDictionary<string, ChargePointStatus> _chargePointStatusDict =
+            new ConcurrentDictionary<string, ChargePointStatus>(StringComparer.OrdinalIgnoreCase);
 
         // Dictionary for processing asynchronous API calls
         private readonly ConcurrentDictionary<string, OCPPMessage> _requestQueue = new ConcurrentDictionary<string, OCPPMessage>();
@@ -110,6 +111,127 @@ namespace OCPP.Core.Server
             // Default to "true" because several stations (e.g., Huawei) may ACK RemoteStart
             // without starting if the cable is not connected yet.
             return _configuration.GetValue<bool?>("Payments:RequirePreparingBeforeRemoteStart") ?? true;
+        }
+
+        private bool TryResolveLiveChargePointStatus(
+            string chargePointId,
+            string operation,
+            out ChargePointStatus status,
+            bool requireOpenWebSocket = true,
+            bool logIfMissing = true)
+        {
+            status = null;
+
+            if (string.IsNullOrWhiteSpace(chargePointId))
+            {
+                if (logIfMissing)
+                {
+                    _logger.LogWarning("{Operation} => Missing chargepoint ID for live lookup", operation);
+                }
+                return false;
+            }
+
+            if (!_chargePointStatusDict.TryGetValue(chargePointId, out var candidateStatus))
+            {
+                if (logIfMissing)
+                {
+                    var connectedIds = _chargePointStatusDict.Keys
+                        .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                        .Take(10)
+                        .ToArray();
+
+                    _logger.LogWarning(
+                        "{Operation} => Live chargepoint not found requestedId={RequestedId} connectedCount={ConnectedCount} connectedSample={ConnectedSample}",
+                        operation,
+                        chargePointId,
+                        _chargePointStatusDict.Count,
+                        connectedIds.Length > 0 ? string.Join(",", connectedIds) : "(none)");
+                }
+                return false;
+            }
+
+            if (requireOpenWebSocket &&
+                (candidateStatus.WebSocket == null || candidateStatus.WebSocket.State != WebSocketState.Open))
+            {
+                _logger.LogWarning(
+                    "{Operation} => Chargepoint session without open websocket requestedId={RequestedId} resolvedId={ResolvedId} protocol={Protocol} wsState={WebSocketState}",
+                    operation,
+                    chargePointId,
+                    candidateStatus.Id,
+                    candidateStatus.Protocol ?? "(none)",
+                    candidateStatus.WebSocket?.State.ToString() ?? "(null)");
+                return false;
+            }
+
+            status = candidateStatus;
+            _logger.LogDebug(
+                "{Operation} => Resolved live chargepoint requestedId={RequestedId} resolvedId={ResolvedId} protocol={Protocol} wsState={WebSocketState}",
+                operation,
+                chargePointId,
+                candidateStatus.Id,
+                candidateStatus.Protocol ?? "(none)",
+                candidateStatus.WebSocket?.State.ToString() ?? "(null)");
+            return true;
+        }
+
+        private string ResolveRemoteStartIdTokenTypeValue(string operation, ILogger logger)
+        {
+            const string defaultValue = Messages_OCPP21.IdTokenEnumStringType.ISO14443;
+
+            string configuredValue = _configuration.GetValue<string>("Payments:RemoteStartIdTokenType");
+            if (string.IsNullOrWhiteSpace(configuredValue))
+            {
+                return defaultValue;
+            }
+
+            string trimmedValue = configuredValue.Trim();
+            string[] allowedValues =
+            {
+                Messages_OCPP21.IdTokenEnumStringType.Central,
+                Messages_OCPP21.IdTokenEnumStringType.eMAID,
+                Messages_OCPP21.IdTokenEnumStringType.ISO14443,
+                Messages_OCPP21.IdTokenEnumStringType.ISO15693,
+                Messages_OCPP21.IdTokenEnumStringType.KeyCode,
+                Messages_OCPP21.IdTokenEnumStringType.Local,
+                Messages_OCPP21.IdTokenEnumStringType.MacAddress,
+                Messages_OCPP21.IdTokenEnumStringType.NoAuthorization
+            };
+
+            string matchedValue = allowedValues.FirstOrDefault(value =>
+                string.Equals(value, trimmedValue, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(matchedValue))
+            {
+                return matchedValue;
+            }
+
+            logger?.LogWarning(
+                "{Operation} => Invalid Payments:RemoteStartIdTokenType='{ConfiguredValue}', falling back to '{DefaultValue}'",
+                operation,
+                configuredValue,
+                defaultValue);
+            return defaultValue;
+        }
+
+        private Messages_OCPP20.IdTokenEnumType ResolveRemoteStartIdTokenType20(ILogger logger)
+        {
+            string configuredValue = ResolveRemoteStartIdTokenTypeValue("OCPPMiddleware.OCPP20", logger);
+            return configuredValue switch
+            {
+                Messages_OCPP21.IdTokenEnumStringType.Central => Messages_OCPP20.IdTokenEnumType.Central,
+                Messages_OCPP21.IdTokenEnumStringType.eMAID => Messages_OCPP20.IdTokenEnumType.EMAID,
+                Messages_OCPP21.IdTokenEnumStringType.ISO14443 => Messages_OCPP20.IdTokenEnumType.ISO14443,
+                Messages_OCPP21.IdTokenEnumStringType.ISO15693 => Messages_OCPP20.IdTokenEnumType.ISO15693,
+                Messages_OCPP21.IdTokenEnumStringType.KeyCode => Messages_OCPP20.IdTokenEnumType.KeyCode,
+                Messages_OCPP21.IdTokenEnumStringType.Local => Messages_OCPP20.IdTokenEnumType.Local,
+                Messages_OCPP21.IdTokenEnumStringType.MacAddress => Messages_OCPP20.IdTokenEnumType.MacAddress,
+                Messages_OCPP21.IdTokenEnumStringType.NoAuthorization => Messages_OCPP20.IdTokenEnumType.NoAuthorization,
+                _ => Messages_OCPP20.IdTokenEnumType.ISO14443
+            };
+        }
+
+        private string ResolveRemoteStartIdTokenType21(ILogger logger)
+        {
+            return ResolveRemoteStartIdTokenTypeValue("OCPPMiddleware.OCPP21", logger);
         }
 
         private PaymentFlowOptions GetPaymentFlowOptions()
@@ -900,8 +1022,7 @@ namespace OCPP.Core.Server
                         {
                             try
                             {
-                                ChargePointStatus status = null;
-                                if (_chargePointStatusDict.TryGetValue(urlChargePointId, out status))
+                                if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware Reset", out var status))
                                 {
                                     // Send message to chargepoint
                                     if (status.Protocol == Protocol_OCPP21)
@@ -923,7 +1044,6 @@ namespace OCPP.Core.Server
                                 else
                                 {
                                     // Chargepoint offline
-                                    _logger.LogError("OCPPMiddleware SoftReset => Chargepoint offline: {0}", urlChargePointId);
                                     context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                 }
                             }
@@ -945,8 +1065,7 @@ namespace OCPP.Core.Server
                         {
                             try
                             {
-                                ChargePointStatus status = null;
-                                if (_chargePointStatusDict.TryGetValue(urlChargePointId, out status))
+                                if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware UnlockConnector", out var status))
                                 {
                                     // Send message to chargepoint
                                     if (status.Protocol == Protocol_OCPP21)
@@ -968,7 +1087,6 @@ namespace OCPP.Core.Server
                                 else
                                 {
                                     // Chargepoint offline
-                                    _logger.LogError("OCPPMiddleware UnlockConnector => Chargepoint offline: {0}", urlChargePointId);
                                     context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                 }
                             }
@@ -1000,8 +1118,7 @@ namespace OCPP.Core.Server
 
                                     try
                                     {
-                                        ChargePointStatus status = null;
-                                        if (_chargePointStatusDict.TryGetValue(urlChargePointId, out status))
+                                        if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware SetChargingProfile", out var status))
                                         {
                                             // Send message to chargepoint
                                             if (status.Protocol == Protocol_OCPP21)
@@ -1023,7 +1140,6 @@ namespace OCPP.Core.Server
                                         else
                                         {
                                             // Chargepoint offline
-                                            _logger.LogError("OCPPMiddleware SetChargingProfile => Chargepoint offline: {0}", urlChargePointId);
                                             context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                         }
                                     }
@@ -1057,8 +1173,7 @@ namespace OCPP.Core.Server
                         {
                             try
                             {
-                                ChargePointStatus status = null;
-                                if (_chargePointStatusDict.TryGetValue(urlChargePointId, out status))
+                                if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware ClearChargingProfile", out var status))
                                 {
                                     // Send message to chargepoint
                                     if (status.Protocol == Protocol_OCPP21)
@@ -1080,7 +1195,6 @@ namespace OCPP.Core.Server
                                 else
                                 {
                                     // Chargepoint offline
-                                    _logger.LogError("OCPPMiddleware ClearChargingProfile => Chargepoint offline: {0}", urlChargePointId);
                                     context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                 }
                             }
@@ -1102,7 +1216,7 @@ namespace OCPP.Core.Server
                         {
                             try
                             {
-                                if (_chargePointStatusDict.TryGetValue(urlChargePointId, out var status))
+                                if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware GetConfiguration", out var status))
                                 {
                                     if (status.Protocol == Protocol_OCPP16)
                                     {
@@ -1117,7 +1231,6 @@ namespace OCPP.Core.Server
                                 }
                                 else
                                 {
-                                    _logger.LogError("OCPPMiddleware GetConfiguration => Chargepoint offline: {0}", urlChargePointId);
                                     context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                 }
                             }
@@ -1139,7 +1252,7 @@ namespace OCPP.Core.Server
                         {
                             try
                             {
-                                if (_chargePointStatusDict.TryGetValue(urlChargePointId, out var status))
+                                if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware ChangeConfiguration", out var status))
                                 {
                                     if (status.Protocol == Protocol_OCPP16)
                                     {
@@ -1154,7 +1267,6 @@ namespace OCPP.Core.Server
                                 }
                                 else
                                 {
-                                    _logger.LogError("OCPPMiddleware ChangeConfiguration => Chargepoint offline: {0}", urlChargePointId);
                                     context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                 }
                             }
@@ -1181,8 +1293,7 @@ namespace OCPP.Core.Server
                                 {
                                     try
                                     {
-                                        ChargePointStatus status = null;
-                                        if (_chargePointStatusDict.TryGetValue(urlChargePointId, out status))
+                                        if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware StartTransaction", out var status))
                                         {
                                             // Send message to chargepoint
                                             if (status.Protocol == Protocol_OCPP21)
@@ -1204,7 +1315,6 @@ namespace OCPP.Core.Server
                                         else
                                         {
                                             // Chargepoint offline
-                                            _logger.LogError("OCPPMiddleware StartTransaction => Chargepoint offline: {0}", urlChargePointId);
                                             context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                         }
                                     }
@@ -1238,8 +1348,7 @@ namespace OCPP.Core.Server
                         {
                             try
                             {
-                                ChargePointStatus status = null;
-                                if (_chargePointStatusDict.TryGetValue(urlChargePointId, out status))
+                                if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware StopTransaction", out var status))
                                 {
                                     if (int.TryParse(urlConnectorId, out int connectorId))
                                     {
@@ -1271,7 +1380,6 @@ namespace OCPP.Core.Server
                                 else
                                 {
                                     // Chargepoint offline
-                                    _logger.LogError("OCPPMiddleware StopTransaction => Chargepoint offline: {0}", urlChargePointId);
                                     context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                                 }
                             }
@@ -1419,9 +1527,7 @@ namespace OCPP.Core.Server
                 context.Connection.RemoteIpAddress?.ToString() ?? "(unknown)",
                 context.Request.Headers["User-Agent"].FirstOrDefault() ?? "(none)");
 
-            if (!_chargePointStatusDict.TryGetValue(request.ChargePointId, out var status) ||
-                status.WebSocket == null ||
-                status.WebSocket.State != WebSocketState.Open)
+            if (!TryResolveLiveChargePointStatus(request.ChargePointId, "Payments/Create", out var status))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.NotFound;
                 await context.Response.WriteAsync("{\"status\":\"ChargerOffline\",\"reason\":\"Offline\"}");
@@ -1624,7 +1730,7 @@ namespace OCPP.Core.Server
             try
             {
                 var reservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
-                if (reservation != null && _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var cpStatus))
+                if (reservation != null && TryResolveLiveChargePointStatus(reservation.ChargePointId, "Payments/Cancel", out var cpStatus, logIfMissing: false))
                 {
                     // Reservation profile disabled (was CancelReservation)
                 }
@@ -1729,9 +1835,7 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            if (!_chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var chargePointStatus) ||
-                chargePointStatus.WebSocket == null ||
-                chargePointStatus.WebSocket.State != WebSocketState.Open)
+            if (!TryResolveLiveChargePointStatus(reservation.ChargePointId, "Payments/Stop", out var chargePointStatus))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.OK;
                 context.Response.ContentType = "application/json";
@@ -1875,7 +1979,7 @@ namespace OCPP.Core.Server
                 "Payments/Status");
             var latestInvoiceUrl = InvoiceSubmissionLogLookup.GetPreferredDocumentUrl(latestInvoiceLog);
 
-            _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var cpStatus);
+            TryResolveLiveChargePointStatus(reservation.ChargePointId, "Payments/Status", out var cpStatus, logIfMissing: false);
             if (cpStatus?.OnlineConnectors != null &&
                 cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
             {

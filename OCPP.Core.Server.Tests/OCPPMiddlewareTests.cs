@@ -1286,6 +1286,432 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(expectedReason, reason);
         }
 
+        [Fact]
+        public async Task HandlePaymentCreateAsync_UsesCaseInsensitiveChargePointLookup()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-create-case-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "ns2571148979",
+                        Name = "Huawei payment create",
+                        FreeChargingEnabled = true
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.NotNull(queuedMessage?.TaskCompletionSource);
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["NS2571148979"] = new ChargePointStatus
+                    {
+                        Id = "NS2571148979",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket,
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Available,
+                                OcppStatus = "Available"
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "POST";
+                    httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("{\"chargePointId\":\"ns2571148979\",\"connectorId\":1,\"chargeTagId\":\"TAG-CASE\"}"));
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await InvokeHandlePaymentCreateAsync(middleware, httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                    Assert.Equal("Accepted", payload["status"]?.Value<string>());
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task HandlePaymentStopAsync_UsesCaseInsensitiveChargePointLookup()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-stop-case-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "ns2571148979",
+                        Name = "Huawei payment stop"
+                    });
+
+                    var transaction = new Transaction
+                    {
+                        ChargePointId = "ns2571148979",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-STOP",
+                        StartTime = DateTime.UtcNow.AddMinutes(-20),
+                        MeterStart = 1.0
+                    };
+
+                    setupContext.Transactions.Add(transaction);
+                    setupContext.SaveChanges();
+
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "ns2571148979",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-STOP",
+                        OcppIdTag = "TAG-STOP",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = transaction.TransactionId,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-25),
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.NotNull(queuedMessage?.TaskCompletionSource);
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["NS2571148979"] = new ChargePointStatus
+                    {
+                        Id = "NS2571148979",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket,
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Occupied,
+                                OcppStatus = "Charging"
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "POST";
+                    httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes($"{{\"reservationId\":\"{reservationId}\"}}"));
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await InvokeHandlePaymentStopAsync(middleware, httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                    Assert.Equal("Accepted", payload["status"]?.Value<string>());
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_StartTransactionApi_UsesCaseInsensitiveChargePointLookup()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-start-api-case-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargeTags.Add(new ChargeTag
+                    {
+                        TagId = "TAG-API-START",
+                        TagName = "API start",
+                        Blocked = false
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.NotNull(queuedMessage?.TaskCompletionSource);
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["NS2571148979"] = new ChargePointStatus
+                    {
+                        Id = "NS2571148979",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "GET";
+                    httpContext.Request.Path = "/API/StartTransaction/ns2571148979/1/TAG-API-START";
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                    Assert.Equal("Accepted", payload["status"]?.Value<string>());
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_StopTransactionApi_UsesCaseInsensitiveChargePointLookup()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-stop-api-case-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "ns2571148979",
+                        Name = "Huawei stop api"
+                    });
+                    setupContext.Transactions.Add(new Transaction
+                    {
+                        ChargePointId = "ns2571148979",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-API-STOP",
+                        StartTime = DateTime.UtcNow.AddMinutes(-20),
+                        MeterStart = 1.0
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.NotNull(queuedMessage?.TaskCompletionSource);
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["NS2571148979"] = new ChargePointStatus
+                    {
+                        Id = "NS2571148979",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "GET";
+                    httpContext.Request.Path = "/API/StopTransaction/ns2571148979/1";
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                    Assert.Equal("Accepted", payload["status"]?.Value<string>());
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task ExecuteRequestStartTransaction20_UsesConfiguredIdTokenType()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-start20-token-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargeTags.Add(new ChargeTag
+                    {
+                        TagId = "TAG20",
+                        TagName = "TAG20",
+                        Blocked = false
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(configValues: new Dictionary<string, string?>
+                {
+                    ["Payments:RemoteStartIdTokenType"] = "Central"
+                });
+
+                var chargePointStatus = new ChargePointStatus
+                {
+                    Id = "CP20",
+                    Protocol = "ocpp2.0.1",
+                    WebSocket = new FakeOpenWebSocket(async () =>
+                    {
+                        var queuedMessage = GetQueuedRequest(middleware);
+                        var payload = JObject.Parse(queuedMessage.JsonPayload);
+                        Assert.Equal("Central", payload["idToken"]?["type"]?.Value<string>());
+                        queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                        await Task.CompletedTask;
+                    })
+                };
+
+                using var actionContext = CreateContext(databasePath);
+                string result = await InvokeExecuteRequestStartTransaction20Async(middleware, chargePointStatus, actionContext, "1", "TAG20");
+
+                Assert.Equal("Accepted", JObject.Parse(result)["status"]?.Value<string>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task ExecuteRequestStartTransaction21_UsesConfiguredIdTokenType()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-start21-token-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargeTags.Add(new ChargeTag
+                    {
+                        TagId = "TAG21",
+                        TagName = "TAG21",
+                        Blocked = false
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(configValues: new Dictionary<string, string?>
+                {
+                    ["Payments:RemoteStartIdTokenType"] = "Local"
+                });
+
+                var chargePointStatus = new ChargePointStatus
+                {
+                    Id = "CP21",
+                    Protocol = "ocpp2.1",
+                    WebSocket = new FakeOpenWebSocket(async () =>
+                    {
+                        var queuedMessage = GetQueuedRequest(middleware);
+                        var payload = JObject.Parse(queuedMessage.JsonPayload);
+                        Assert.Equal("Local", payload["idToken"]?["type"]?.Value<string>());
+                        queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                        await Task.CompletedTask;
+                    })
+                };
+
+                using var actionContext = CreateContext(databasePath);
+                string result = await InvokeExecuteRequestStartTransaction21Async(middleware, chargePointStatus, actionContext, "1", "TAG21");
+
+                Assert.Equal("Accepted", JObject.Parse(result)["status"]?.Value<string>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public void TryRemoveStatusIfSameInstance_RemovesCaseInsensitiveCurrentSession()
+        {
+            var candidateStatus = new ChargePointStatus
+            {
+                Id = "ns2571148979"
+            };
+
+            var statusDict = new ConcurrentDictionary<string, ChargePointStatus>(StringComparer.OrdinalIgnoreCase);
+            statusDict["NS2571148979"] = candidateStatus;
+
+            bool removed = InvokeTryRemoveStatusIfSameInstance(statusDict, candidateStatus);
+
+            Assert.True(removed);
+            Assert.Empty(statusDict);
+        }
+
         private static OCPPCoreContext CreateContext(string databasePath)
         {
             var options = new DbContextOptionsBuilder<OCPPCoreContext>()
@@ -1362,6 +1788,20 @@ namespace OCPP.Core.Server.Tests
             await task;
         }
 
+        private static async Task InvokeHandlePaymentCreateAsync(
+            OCPPMiddleware middleware,
+            HttpContext httpContext,
+            OCPPCoreContext dbContext)
+        {
+            var method = typeof(OCPPMiddleware)
+                .GetMethod("HandlePaymentCreateAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            var task = Assert.IsAssignableFrom<Task>(method.Invoke(middleware, new object[] { httpContext, dbContext }));
+            await task;
+        }
+
         private static async Task InvokeHandlePaymentStopAsync(
             OCPPMiddleware middleware,
             HttpContext httpContext,
@@ -1406,6 +1846,38 @@ namespace OCPP.Core.Server.Tests
             await task;
         }
 
+        private static async Task<string> InvokeExecuteRequestStartTransaction20Async(
+            OCPPMiddleware middleware,
+            ChargePointStatus chargePointStatus,
+            OCPPCoreContext dbContext,
+            string connectorId,
+            string idTag)
+        {
+            var method = typeof(OCPPMiddleware)
+                .GetMethod("ExecuteRequestStartTransaction20", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            var task = Assert.IsAssignableFrom<Task<string>>(method.Invoke(middleware, new object[] { chargePointStatus, dbContext, connectorId, idTag }));
+            return await task;
+        }
+
+        private static async Task<string> InvokeExecuteRequestStartTransaction21Async(
+            OCPPMiddleware middleware,
+            ChargePointStatus chargePointStatus,
+            OCPPCoreContext dbContext,
+            string connectorId,
+            string idTag)
+        {
+            var method = typeof(OCPPMiddleware)
+                .GetMethod("ExecuteRequestStartTransaction21", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            var task = Assert.IsAssignableFrom<Task<string>>(method.Invoke(middleware, new object[] { chargePointStatus, dbContext, connectorId, idTag }));
+            return await task;
+        }
+
         private static OCPPMessage GetQueuedRequest(OCPPMiddleware middleware)
         {
             var field = typeof(OCPPMiddleware)
@@ -1432,6 +1904,18 @@ namespace OCPP.Core.Server.Tests
             Assert.NotNull(method);
 
             return method.Invoke(middleware, new object?[] { dbContext, chargePointId, connectorId, chargePointStatus, reservationToIgnore })!;
+        }
+
+        private static bool InvokeTryRemoveStatusIfSameInstance(
+            ConcurrentDictionary<string, ChargePointStatus> statusDict,
+            ChargePointStatus candidateStatus)
+        {
+            var method = typeof(OCPPMiddleware)
+                .GetMethod("TryRemoveStatusIfSameInstance", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+
+            Assert.NotNull(method);
+
+            return Assert.IsType<bool>(method.Invoke(null, new object[] { statusDict, candidateStatus }));
         }
 
         private static Dictionary<string, ChargePointStatus> ReplaceChargePointStatuses(IDictionary<string, ChargePointStatus> nextValue)
