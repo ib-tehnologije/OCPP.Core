@@ -848,29 +848,23 @@ namespace OCPP.Core.Server.Payments
 
             var normalizedTag = NormalizeChargeTag(chargeTagId);
 
-            var reservation = dbContext.ChargePaymentReservations
-                .Where(r =>
-                    r.ChargePointId == chargePointId &&
-                    r.ConnectorId == connectorId &&
-                    (r.OcppIdTag == normalizedTag || r.ChargeTagId == normalizedTag) &&
-                    (r.Status == PaymentReservationStatus.Authorized || r.Status == PaymentReservationStatus.StartRequested))
-                .OrderByDescending(r => r.CreatedAtUtc)
-                .FirstOrDefault();
+            var reservation = FindActiveReservationByTag(dbContext, chargePointId, connectorId, normalizedTag);
 
             if (reservation == null) return;
 
-            reservation.TransactionId = transactionId;
-            reservation.StartTransactionId = transactionId;
-            reservation.StartTransactionAtUtc = _utcNow();
+            var transaction = dbContext.Transactions.Find(transactionId);
+            CloseSupersededTransactions(dbContext, reservation, transaction);
+            RelinkReservationToTransaction(reservation, transactionId, transaction?.StartTime);
             reservation.Status = PaymentReservationStatus.Charging;
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
 
-            _logger.LogInformation("Stripe/MarkTransactionStarted => reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId}",
+            _logger.LogInformation("Stripe/MarkTransactionStarted => reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId} startAt={StartAtUtc}",
                 reservation.ReservationId,
                 transactionId,
                 reservation.ChargePointId,
-                reservation.ConnectorId);
+                reservation.ConnectorId,
+                reservation.StartTransactionAtUtc);
 
             TrySendR1RequestedNotification(dbContext, reservation);
         }
@@ -890,6 +884,8 @@ namespace OCPP.Core.Server.Payments
             }
 
             var now = _utcNow();
+            CloseSupersededTransactions(dbContext, reservation, transaction);
+            RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction.StartTime);
             reservation.StopTransactionAtUtc ??= transaction.StopTime ?? now;
             reservation.UpdatedAtUtc = now;
 
@@ -1689,28 +1685,166 @@ namespace OCPP.Core.Server.Payments
             if (transaction.TransactionId > 0)
             {
                 reservation = dbContext.ChargePaymentReservations
-                    .FirstOrDefault(r => r.TransactionId == transaction.TransactionId);
+                    .FirstOrDefault(r =>
+                        r.TransactionId == transaction.TransactionId ||
+                        r.StartTransactionId == transaction.TransactionId);
             }
 
             if (reservation != null) return reservation;
 
-            reservation = dbContext.ChargePaymentReservations
-                .Where(r =>
-                    r.TransactionId == null &&
-                    r.ChargePointId == transaction.ChargePointId &&
-                    r.ConnectorId == transaction.ConnectorId &&
-                    (r.OcppIdTag == transaction.StartTagId || r.ChargeTagId == transaction.StartTagId))
-                .OrderByDescending(r => r.CreatedAtUtc)
-                .FirstOrDefault();
+            reservation = FindActiveReservationByTag(
+                dbContext,
+                transaction.ChargePointId,
+                transaction.ConnectorId,
+                transaction.StartTagId);
 
             if (reservation != null)
             {
-                reservation.TransactionId = transaction.TransactionId;
+                RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction.StartTime);
                 reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
             }
 
             return reservation;
+        }
+
+        private ChargePaymentReservation FindActiveReservationByTag(
+            OCPPCoreContext dbContext,
+            string chargePointId,
+            int connectorId,
+            string tagId)
+        {
+            if (dbContext == null ||
+                string.IsNullOrWhiteSpace(chargePointId) ||
+                connectorId <= 0)
+            {
+                return null;
+            }
+
+            var normalizedTag = NormalizeChargeTag(tagId);
+            if (string.IsNullOrWhiteSpace(normalizedTag))
+            {
+                return null;
+            }
+
+            return dbContext.ChargePaymentReservations
+                .Where(r =>
+                    r.ChargePointId == chargePointId &&
+                    r.ConnectorId == connectorId &&
+                    (r.OcppIdTag == normalizedTag || r.ChargeTagId == normalizedTag) &&
+                    (r.Status == PaymentReservationStatus.Authorized ||
+                     r.Status == PaymentReservationStatus.StartRequested ||
+                     r.Status == PaymentReservationStatus.Charging ||
+                     r.Status == PaymentReservationStatus.WaitingForDisconnect))
+                .OrderByDescending(r => r.CreatedAtUtc)
+                .FirstOrDefault();
+        }
+
+        private void RelinkReservationToTransaction(
+            ChargePaymentReservation reservation,
+            int transactionId,
+            DateTime? transactionStartTimeUtc)
+        {
+            if (reservation == null || transactionId <= 0)
+            {
+                return;
+            }
+
+            reservation.TransactionId = transactionId;
+            reservation.StartTransactionId ??= transactionId;
+            if (!reservation.StartTransactionAtUtc.HasValue &&
+                transactionStartTimeUtc.HasValue &&
+                transactionStartTimeUtc.Value != default)
+            {
+                reservation.StartTransactionAtUtc = transactionStartTimeUtc.Value;
+            }
+            else if (!reservation.StartTransactionAtUtc.HasValue)
+            {
+                reservation.StartTransactionAtUtc = _utcNow();
+            }
+        }
+
+        private void CloseSupersededTransactions(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            Transaction currentTransaction)
+        {
+            if (dbContext == null ||
+                reservation == null ||
+                currentTransaction == null ||
+                currentTransaction.TransactionId <= 0)
+            {
+                return;
+            }
+
+            var relatedOpenTransactions = dbContext.Transactions
+                .Where(t =>
+                    t.ChargePointId == currentTransaction.ChargePointId &&
+                    t.ConnectorId == currentTransaction.ConnectorId &&
+                    t.TransactionId != currentTransaction.TransactionId &&
+                    !t.StopTime.HasValue)
+                .OrderBy(t => t.StartTime)
+                .ToList();
+
+            if (relatedOpenTransactions.Count == 0)
+            {
+                return;
+            }
+
+            var relatedTransactionIds = new HashSet<int>();
+            if (reservation.TransactionId.HasValue && reservation.TransactionId.Value != currentTransaction.TransactionId)
+            {
+                relatedTransactionIds.Add(reservation.TransactionId.Value);
+            }
+
+            if (reservation.StartTransactionId.HasValue && reservation.StartTransactionId.Value != currentTransaction.TransactionId)
+            {
+                relatedTransactionIds.Add(reservation.StartTransactionId.Value);
+            }
+
+            var normalizedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddNormalizedTag(normalizedTags, currentTransaction.StartTagId);
+            AddNormalizedTag(normalizedTags, reservation.OcppIdTag);
+            AddNormalizedTag(normalizedTags, reservation.ChargeTagId);
+
+            DateTime stopTimeUtc = currentTransaction.StartTime != default
+                ? currentTransaction.StartTime
+                : (currentTransaction.StopTime ?? _utcNow());
+
+            foreach (var supersededTransaction in relatedOpenTransactions)
+            {
+                bool isLinkedTransaction = relatedTransactionIds.Contains(supersededTransaction.TransactionId);
+                bool matchesTag = normalizedTags.Count > 0 &&
+                                  normalizedTags.Contains(NormalizeChargeTag(supersededTransaction.StartTagId));
+                if (!isLinkedTransaction && !matchesTag)
+                {
+                    continue;
+                }
+
+                supersededTransaction.StopTime = stopTimeUtc;
+                supersededTransaction.MeterStop ??= currentTransaction.MeterStart > 0
+                    ? Math.Max(supersededTransaction.MeterStart, currentTransaction.MeterStart)
+                    : supersededTransaction.MeterStart;
+                supersededTransaction.StopReason ??= $"SupersededByTx{currentTransaction.TransactionId}";
+                supersededTransaction.ChargingEndedAtUtc ??= stopTimeUtc;
+
+                _logger.LogWarning(
+                    "Stripe/Transactions => Closed superseded open transaction oldTx={SupersededTransactionId} newTx={CurrentTransactionId} cp={ChargePointId} connector={ConnectorId} stopAt={StopTimeUtc:u}",
+                    supersededTransaction.TransactionId,
+                    currentTransaction.TransactionId,
+                    currentTransaction.ChargePointId,
+                    currentTransaction.ConnectorId,
+                    stopTimeUtc);
+            }
+        }
+
+        private static void AddNormalizedTag(ISet<string> normalizedTags, string tag)
+        {
+            var normalized = NormalizeChargeTag(tag);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                normalizedTags.Add(normalized);
+            }
         }
 
         private static string NormalizeChargeTag(string tag)

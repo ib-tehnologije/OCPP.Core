@@ -892,6 +892,64 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void MarkTransactionStarted_RelinksActiveReservationAndClosesSupersededTransaction()
+        {
+            using var context = CreateContext();
+            var firstStartUtc = new DateTime(2026, 3, 25, 20, 45, 7, DateTimeKind.Utc);
+            var secondStartUtc = new DateTime(2026, 3, 25, 20, 45, 38, DateTimeKind.Utc);
+
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-HUAWEI",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-HUAWEI",
+                OcppIdTag = "TAG-HUAWEI",
+                Status = PaymentReservationStatus.Charging,
+                TransactionId = 2026,
+                StartTransactionId = 2026,
+                StartTransactionAtUtc = firstStartUtc,
+                Currency = "eur",
+                CreatedAtUtc = firstStartUtc.AddSeconds(-5),
+                UpdatedAtUtc = firstStartUtc
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(new Transaction
+            {
+                TransactionId = 2026,
+                ChargePointId = "CP-HUAWEI",
+                ConnectorId = 1,
+                StartTagId = "TAG-HUAWEI",
+                StartTime = firstStartUtc,
+                MeterStart = 215.575
+            });
+            context.Transactions.Add(new Transaction
+            {
+                TransactionId = 2027,
+                ChargePointId = "CP-HUAWEI",
+                ConnectorId = 1,
+                StartTagId = "TAG-HUAWEI",
+                StartTime = secondStartUtc,
+                MeterStart = 215.575
+            });
+            context.SaveChanges();
+
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), new FakePaymentIntentService());
+
+            coordinator.MarkTransactionStarted(context, "CP-HUAWEI", 1, "TAG-HUAWEI", 2027);
+
+            Assert.Equal(2027, reservation.TransactionId);
+            Assert.Equal(2026, reservation.StartTransactionId);
+            Assert.Equal(firstStartUtc, reservation.StartTransactionAtUtc);
+            Assert.Equal(PaymentReservationStatus.Charging, reservation.Status);
+
+            var supersededTransaction = context.Transactions.Single(t => t.TransactionId == 2026);
+            Assert.Equal(secondStartUtc, supersededTransaction.StopTime);
+            Assert.Equal(215.575, supersededTransaction.MeterStop ?? 0, 3);
+            Assert.Equal("SupersededByTx2027", supersededTransaction.StopReason);
+        }
+
+        [Fact]
         public void RequestR1Invoice_UpdatesStripeMetadataAndSendsNotification()
         {
             using var context = CreateContext();
@@ -1168,6 +1226,93 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
             Assert.Equal(stopAtUtc, reservation.DisconnectedAtUtc);
             Assert.True(intentService.CaptureCalled);
+        }
+
+        [Fact]
+        public void CompleteReservation_RelinksDuplicateTransactionAndClosesSupersededOpenTransaction()
+        {
+            using var context = CreateContext();
+            var firstStartUtc = new DateTime(2026, 3, 25, 20, 45, 7, DateTimeKind.Utc);
+            var secondStartUtc = new DateTime(2026, 3, 25, 20, 45, 38, DateTimeKind.Utc);
+            var stopAtUtc = new DateTime(2026, 3, 25, 21, 41, 28, DateTimeKind.Utc);
+
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-HUAWEI",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-HUAWEI",
+                OcppIdTag = "TAG-HUAWEI",
+                StripePaymentIntentId = "pi_huawei_duplicate",
+                Status = PaymentReservationStatus.Charging,
+                TransactionId = 2026,
+                StartTransactionId = 2026,
+                StartTransactionAtUtc = firstStartUtc,
+                PricePerKwh = 0.39m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.005m,
+                StartUsageFeeAfterMinutes = 5,
+                MaxUsageFeeMinutes = 360,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur",
+                CreatedAtUtc = firstStartUtc.AddSeconds(-5),
+                UpdatedAtUtc = firstStartUtc
+            };
+            var supersededTransaction = new Transaction
+            {
+                TransactionId = 2026,
+                ChargePointId = "CP-HUAWEI",
+                ConnectorId = 1,
+                StartTagId = "TAG-HUAWEI",
+                StartTime = firstStartUtc,
+                MeterStart = 215.575
+            };
+            var completedTransaction = new Transaction
+            {
+                TransactionId = 2027,
+                ChargePointId = "CP-HUAWEI",
+                ConnectorId = 1,
+                StartTagId = "TAG-HUAWEI",
+                StartTime = secondStartUtc,
+                StopTime = stopAtUtc,
+                StopReason = "EVDisconnected",
+                MeterStart = 215.575,
+                MeterStop = 225.6
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(supersededTransaction);
+            context.Transactions.Add(completedTransaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_huawei_duplicate",
+                    Status = "requires_capture",
+                    Amount = 10_000
+                }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => stopAtUtc);
+
+            coordinator.CompleteReservation(context, completedTransaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(2027, reservation.TransactionId);
+            Assert.Equal(2026, reservation.StartTransactionId);
+            Assert.Equal(stopAtUtc, reservation.StopTransactionAtUtc);
+            Assert.Equal(stopAtUtc, reservation.DisconnectedAtUtc);
+            Assert.True(intentService.CaptureCalled);
+            Assert.Equal(467, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
+
+            Assert.Equal(secondStartUtc, supersededTransaction.StopTime);
+            Assert.Equal(215.575, supersededTransaction.MeterStop ?? 0, 3);
+            Assert.Equal("SupersededByTx2027", supersededTransaction.StopReason);
         }
 
         [Fact]
