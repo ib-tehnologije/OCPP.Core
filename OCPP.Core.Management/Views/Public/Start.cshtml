@@ -11,17 +11,20 @@
     var connectorLabel = string.IsNullOrWhiteSpace(Model.ConnectorName)
         ? $"Connector {Model.ConnectorId}"
         : Model.ConnectorName;
+    var selectedConnectorCode = string.IsNullOrWhiteSpace(Model.PublicConnectorCode)
+        ? connectorLabel
+        : Model.PublicConnectorCode;
+    var allowLocalConnectorSwitching = Model.ShowConnectorSelector && !Model.HasRecoveryOptions && !Model.HasError;
     var badgeClass = "waiting";
     if (string.Equals(Model.LastStatus, "Available", StringComparison.OrdinalIgnoreCase)) badgeClass = "available";
-    if (string.Equals(Model.LastStatus, "Faulted", StringComparison.OrdinalIgnoreCase)) badgeClass = "error";
-    if (string.Equals(Model.LastStatus, "Occupied", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(Model.LastStatus, "Charging", StringComparison.OrdinalIgnoreCase))
+    if (string.Equals(Model.LastStatus, "Offline", StringComparison.OrdinalIgnoreCase)) badgeClass = "error";
+    if (string.Equals(Model.LastStatus, "Occupied", StringComparison.OrdinalIgnoreCase))
     {
         badgeClass = "charging";
     }
     var isFree = Model.FreeChargingEnabled || (Model.PricePerKwh <= 0 && Model.ConnectorUsageFeePerMinute <= 0 && Model.UserSessionFee <= 0);
     var mapUrl = Url.Action("Index", "Public");
-    var statusLabel = string.IsNullOrWhiteSpace(Model.LastStatus) ? "Available" : Model.LastStatus;
+    var statusLabel = string.IsNullOrWhiteSpace(Model.LastStatus) ? "Offline" : Model.LastStatus;
     if (isFree && string.Equals(statusLabel, "Available", StringComparison.OrdinalIgnoreCase))
     {
         statusLabel = "Free charging";
@@ -34,14 +37,12 @@
             return "available";
         }
 
-        if (string.Equals(status, "Faulted", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status, "Unavailable", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(status, "Offline", StringComparison.OrdinalIgnoreCase))
         {
             return "error";
         }
 
-        if (string.Equals(status, "Occupied", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status, "Charging", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(status, "Occupied", StringComparison.OrdinalIgnoreCase))
         {
             return "charging";
         }
@@ -63,10 +64,21 @@
             <div class="status-header">
                 <div class="status-badge @badgeClass">
                     <span class="dot"></span>
-                    <span>@statusLabel</span>
+                    <span id="connector-status-text">@statusLabel</span>
                 </div>
                 <h1 class="charger-title">@chargePointLabel</h1>
-                <p class="charger-sub">@connectorLabel</p>
+                @if (!string.IsNullOrWhiteSpace(Model.LocationDescription))
+                {
+                    <p class="charger-sub charger-sub--location" id="charger-location">@Model.LocationDescription</p>
+                }
+                <p class="charger-sub" id="charger-sub">@connectorLabel</p>
+                <div class="public-code-row">
+                    @if (!string.IsNullOrWhiteSpace(Model.PublicDisplayCode))
+                    {
+                        <span class="public-code-pill" id="charge-point-public-code">@Model.PublicDisplayCode</span>
+                    }
+                    <span class="public-code-pill public-code-pill--connector" id="connector-public-code">@selectedConnectorCode</span>
+                </div>
             </div>
 
             @if (Model.ShowConnectorSelector)
@@ -74,24 +86,54 @@
                 <div class="divider"></div>
                 <div class="info-section connector-selector-section">
                             <div class="info-section-title" data-i18n="start.chooseConnector">Choose connector</div>
-                    <div class="connector-selector">
+                    <div class="connector-selector" data-local-switching="@(allowLocalConnectorSwitching ? "true" : "false")">
                         @foreach (var connector in Model.Connectors)
                         {
                             var connectorUrl = Url.RouteUrl("public-start-path", new { cp = Model.ChargePointId, conn = connector.ConnectorId })
                                 ?? Url.Action("Start", "Public", new { cp = Model.ChargePointId, conn = connector.ConnectorId });
                             var connectorBadgeClass = ConnectorBadgeClass(connector.LastStatus);
+                            var connectorPrimaryLabel = !string.IsNullOrWhiteSpace(connector.PublicConnectorShortCode)
+                                ? connector.PublicConnectorShortCode
+                                : connector.Label;
+                            var connectorSecondaryLabel = string.Equals(connector.DisplayName, connectorPrimaryLabel, StringComparison.OrdinalIgnoreCase)
+                                ? null
+                                : connector.DisplayName;
+                            var connectorStatusLabel = string.IsNullOrWhiteSpace(connector.LastStatus) ? "Offline" : connector.LastStatus;
+                            if (isFree && string.Equals(connectorStatusLabel, "Available", StringComparison.OrdinalIgnoreCase))
+                            {
+                                connectorStatusLabel = "Free charging";
+                            }
                             <a class="connector-option @(connector.IsSelected ? "selected" : "")"
                                href="@connectorUrl"
+                               data-connector-id="@connector.ConnectorId"
+                               data-connector-name="@connector.DisplayName"
+                               data-last-status="@connectorStatusLabel"
+                               data-badge-class="@connectorBadgeClass"
+                               data-availability-message="@connector.AvailabilityMessage"
+                               data-public-code="@connector.PublicConnectorCode"
+                               data-public-short-code="@connector.PublicConnectorShortCode"
                                aria-current="@(connector.IsSelected ? "page" : null)">
                                 <div class="connector-option-top">
-                                    <div class="connector-option-label">@connector.Label</div>
+                                    <div>
+                                        <div class="connector-option-label">@connectorPrimaryLabel</div>
+                                        @if (!string.IsNullOrWhiteSpace(connectorSecondaryLabel))
+                                        {
+                                            <div class="connector-option-sub">@connectorSecondaryLabel</div>
+                                        }
+                                    </div>
                                     <div class="status-badge @connectorBadgeClass">
                                         <span class="dot"></span>
-                                        <span>@(string.IsNullOrWhiteSpace(connector.LastStatus) ? "Unknown" : connector.LastStatus)</span>
+                                        <span>@connectorStatusLabel</span>
                                     </div>
                                 </div>
+                                @if (!string.IsNullOrWhiteSpace(connector.PublicConnectorCode))
+                                {
+                                    <div class="connector-option-code">@connector.PublicConnectorCode</div>
+                                }
                                 <div class="connector-option-meta">
-                                    @(connector.IsSelected ? "Selected connector" : "Tap to switch")
+                                    <span data-default-text="Tap to switch" data-selected-text="Selected connector">
+                                        @(connector.IsSelected ? "Selected connector" : "Tap to switch")
+                                    </span>
                                 </div>
                             </a>
                         }
@@ -192,11 +234,11 @@
 
             <div class="divider"></div>
 
-            @if (Model.HasAvailabilityMessage && !Model.HasRecoveryOptions)
+            @if (!Model.HasRecoveryOptions)
             {
-                <div class="alert-box warning" style="margin: 0 24px 16px;">
+                <div class="alert-box warning" id="availability-message" style="margin: 0 24px 16px;" @(!Model.HasAvailabilityMessage ? "hidden" : null)>
                     <span class="alert-icon">⏳</span>
-                    <span>@Model.AvailabilityMessage</span>
+                    <span data-availability-text>@Model.AvailabilityMessage</span>
                 </div>
             }
 
@@ -277,6 +319,95 @@
                     };
                     wantsR1.addEventListener('change', sync);
                     sync();
+                })();
+
+                (function () {
+                    const selector = document.querySelector('.connector-selector[data-local-switching="true"]');
+                    const connectorInput = document.querySelector('input[name="ConnectorId"]');
+                    const badge = document.querySelector('.status-header .status-badge');
+                    const badgeText = document.getElementById('connector-status-text');
+                    const connectorName = document.getElementById('charger-sub');
+                    const connectorCode = document.getElementById('connector-public-code');
+                    const availabilityBox = document.getElementById('availability-message');
+                    const availabilityText = availabilityBox ? availabilityBox.querySelector('[data-availability-text]') : null;
+
+                    if (!selector || !connectorInput || !badge || !badgeText || !connectorName || !connectorCode || !window.history || typeof window.history.replaceState !== 'function') {
+                        return;
+                    }
+
+                    const options = Array.from(selector.querySelectorAll('.connector-option'));
+                    if (options.length === 0) {
+                        return;
+                    }
+
+                    const syncMeta = (activeOption) => {
+                        options.forEach((option) => {
+                            option.classList.toggle('selected', option === activeOption);
+                            if (option === activeOption) {
+                                option.setAttribute('aria-current', 'page');
+                            } else {
+                                option.removeAttribute('aria-current');
+                            }
+
+                            const meta = option.querySelector('.connector-option-meta span');
+                            if (meta) {
+                                meta.textContent = option === activeOption
+                                    ? (meta.dataset.selectedText || meta.textContent)
+                                    : (meta.dataset.defaultText || meta.textContent);
+                            }
+                        });
+                    };
+
+                    const updateAvailability = (message) => {
+                        if (!availabilityBox || !availabilityText) {
+                            return;
+                        }
+
+                        if (message) {
+                            availabilityBox.hidden = false;
+                            availabilityText.textContent = message;
+                        } else {
+                            availabilityBox.hidden = true;
+                            availabilityText.textContent = '';
+                        }
+                    };
+
+                    const applyConnector = (option) => {
+                        if (!option) {
+                            return;
+                        }
+
+                        const connectorId = option.dataset.connectorId || '';
+                        const statusText = option.dataset.lastStatus || 'Offline';
+                        const badgeClass = option.dataset.badgeClass || 'waiting';
+                        const displayName = option.dataset.connectorName || `Connector ${connectorId}`;
+                        const publicCode = option.dataset.publicCode || displayName;
+                        const availabilityMessage = option.dataset.availabilityMessage || '';
+
+                        connectorInput.value = connectorId;
+                        badge.className = `status-badge ${badgeClass}`;
+                        badgeText.textContent = statusText;
+                        connectorName.textContent = displayName;
+                        connectorCode.textContent = publicCode;
+                        updateAvailability(availabilityMessage);
+                        syncMeta(option);
+
+                        const nextUrl = option.getAttribute('href');
+                        if (nextUrl) {
+                            window.history.replaceState({ connectorId }, '', nextUrl);
+                        }
+                    };
+
+                    options.forEach((option) => {
+                        option.addEventListener('click', (event) => {
+                            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                                return;
+                            }
+
+                            event.preventDefault();
+                            applyConnector(option);
+                        });
+                    });
                 })();
             </script>
 

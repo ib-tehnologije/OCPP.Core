@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { packageDir } from "./common.mjs";
+import { packageDir, readRuntimeInfo } from "./common.mjs";
 
 const browserOnly = process.argv.includes("--browser-only");
 const stack = spawn("node", ["./stack.mjs"], {
@@ -40,12 +40,21 @@ while (!ready) {
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
+const runtime = readRuntimeInfo();
+
 const runCommand = (command, args) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: packageDir,
       env: {
         ...process.env,
+        MGMT_HTTP_BASE: runtime.managementBaseUrl,
+        SERVER_HTTP_BASE: runtime.serverBaseUrl,
+        SERVER_API_BASE: runtime.serverApiBaseUrl,
+        SERVER_WS_BASE: runtime.serverWsBaseUrl,
+        SERVER_API_KEY: runtime.apiKey,
+        SQLITE_DB_PATH: runtime.databasePath,
+        EMAIL_SINK_DIR: runtime.emailSinkDir,
         OCPP_PLAYWRIGHT_USE_EXISTING_STACK: "1",
       },
       stdio: "inherit",

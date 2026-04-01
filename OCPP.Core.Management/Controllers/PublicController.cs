@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -217,6 +218,7 @@ namespace OCPP.Core.Management.Controllers
         private PublicMapViewModel BuildMapViewModel()
         {
             var vm = new PublicMapViewModel();
+            var nowUtc = DateTime.UtcNow;
 
             var chargePoints = DbContext.ChargePoints.ToList<ChargePoint>();
             var connectorStatuses = DbContext.ConnectorStatuses.ToList<ConnectorStatus>();
@@ -227,55 +229,51 @@ namespace OCPP.Core.Management.Controllers
                 .ToList();
             var activeReservations = DbContext.ChargePaymentReservations
                 .Where(r => ChargePaymentReservationState.ConnectorLockStatuses.Contains(r.Status))
-                .Select(r => new { r.ChargePointId, r.ConnectorId })
-                .Distinct()
+                .Select(r => new { r.ChargePointId, r.ConnectorId, r.UpdatedAtUtc })
                 .ToList();
 
             foreach (var cp in chargePoints)
             {
-                var statuses = connectorStatuses
+                var chargePointStatuses = connectorStatuses
                     .Where(c => string.Equals(c.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                string aggregatedStatus = "Unknown";
-                DateTime? statusTime = null;
+                var chargePointOpenTransactions = openTransactions
+                    .Where(t => string.Equals(t.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase))
+                    .Select(t => t.ConnectorId)
+                    .ToHashSet();
+                var chargePointActiveReservations = activeReservations
+                    .Where(r => string.Equals(r.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(r => r.ConnectorId)
+                    .ToDictionary(g => g.Key, g => g.Max(r => r.UpdatedAtUtc));
+                var connectorStates = BuildPublicConnectorStates(
+                    chargePointStatuses,
+                    chargePointOpenTransactions,
+                    chargePointActiveReservations,
+                    NormalizePublicDisplayCode(cp.PublicDisplayCode),
+                    nowUtc);
 
-                if (statuses.Any())
-                {
-                    if (statuses.Any(s => string.Equals(s.LastStatus, "Faulted", StringComparison.InvariantCultureIgnoreCase)))
-                    {
-                        aggregatedStatus = "Faulted";
-                    }
-                    else if (openTransactions.Any(t => string.Equals(t.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        aggregatedStatus = "Occupied";
-                    }
-                    else if (activeReservations.Any(r => string.Equals(r.ChargePointId, cp.ChargePointId, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        aggregatedStatus = "Reserved";
-                    }
-                    else if (statuses.Any(s => string.Equals(s.LastStatus, "Occupied", StringComparison.InvariantCultureIgnoreCase)))
-                    {
-                        aggregatedStatus = "Occupied";
-                    }
-                    else if (statuses.All(s => string.Equals(s.LastStatus, "Available", StringComparison.InvariantCultureIgnoreCase)))
-                    {
-                        aggregatedStatus = "Available";
-                    }
-                    else
-                    {
-                        aggregatedStatus = statuses.First().LastStatus;
-                    }
-
-                    statusTime = statuses.Where(s => s.LastStatusTime.HasValue).OrderByDescending(s => s.LastStatusTime).FirstOrDefault()?.LastStatusTime;
-                }
+                int connectorCount = connectorStates.Count;
+                int availableConnectorCount = connectorStates.Count(s => IsAvailableStatus(s.EffectiveStatus));
+                int occupiedConnectorCount = connectorStates.Count(s => string.Equals(s.EffectiveStatus, "Occupied", StringComparison.OrdinalIgnoreCase));
+                int offlineConnectorCount = connectorCount - availableConnectorCount - occupiedConnectorCount;
+                string aggregatedStatus = BuildAggregateConnectorStatus(availableConnectorCount, occupiedConnectorCount);
+                DateTime? statusTime = connectorStates
+                    .Where(s => s.EffectiveStatusTime.HasValue)
+                    .OrderByDescending(s => s.EffectiveStatusTime)
+                    .FirstOrDefault()
+                    ?.EffectiveStatusTime;
 
                 vm.ChargePoints.Add(new PublicMapChargePoint
                 {
                     ChargePointId = cp.ChargePointId,
                     Name = string.IsNullOrWhiteSpace(cp.Name) ? cp.ChargePointId : cp.Name,
-                    ConnectorCount = statuses.Count(),
+                    ConnectorCount = connectorCount,
+                    AvailableConnectorCount = availableConnectorCount,
+                    OccupiedConnectorCount = occupiedConnectorCount,
+                    OfflineConnectorCount = offlineConnectorCount,
                     Status = aggregatedStatus,
                     StatusTime = statusTime,
+                    PublicDisplayCode = NormalizePublicDisplayCode(cp.PublicDisplayCode),
                     Latitude = cp.Latitude,
                     Longitude = cp.Longitude,
                     LocationDescription = cp.LocationDescription,
@@ -297,6 +295,7 @@ namespace OCPP.Core.Management.Controllers
                 ChargePointId = chargePointId,
                 ConnectorId = requestedConnectorId.GetValueOrDefault() > 0 ? requestedConnectorId.Value : 1
             };
+            var nowUtc = DateTime.UtcNow;
 
             if (string.IsNullOrWhiteSpace(chargePointId))
             {
@@ -314,6 +313,8 @@ namespace OCPP.Core.Management.Controllers
             model.ChargePointName = string.IsNullOrWhiteSpace(chargePoint.Name)
                 ? chargePoint.ChargePointId
                 : chargePoint.Name;
+            model.PublicDisplayCode = NormalizePublicDisplayCode(chargePoint.PublicDisplayCode);
+            model.LocationDescription = chargePoint.LocationDescription;
             model.PricePerKwh = chargePoint.PricePerKwh;
             model.UserSessionFee = chargePoint.UserSessionFee;
             model.MaxSessionKwh = chargePoint.MaxSessionKwh;
@@ -343,75 +344,136 @@ namespace OCPP.Core.Management.Controllers
                 .OrderBy(c => c.ConnectorId)
                 .ToList();
 
-            if (connectors.Count > 0)
+            var connectorStates = BuildPublicConnectorStates(
+                connectors,
+                openTransactions,
+                activeReservations,
+                model.PublicDisplayCode,
+                nowUtc);
+
+            if (connectorStates.Count > 0)
             {
-                var connectorStates = connectors
-                    .Select(c =>
-                    {
-                        bool hasOpenTransaction = openTransactions.Contains(c.ConnectorId);
-                        bool hasActiveReservation = activeReservations.ContainsKey(c.ConnectorId);
-                        var effectiveStatus = GetEffectiveConnectorStatus(c.LastStatus, hasOpenTransaction, hasActiveReservation);
-                        var statusTime = c.LastStatusTime;
-                        if (hasActiveReservation && activeReservations.TryGetValue(c.ConnectorId, out var reservationUpdatedAt))
-                        {
-                            statusTime = statusTime.HasValue && statusTime.Value > reservationUpdatedAt
-                                ? statusTime
-                                : reservationUpdatedAt;
-                        }
-
-                        return new
-                        {
-                            Connector = c,
-                            EffectiveStatus = effectiveStatus,
-                            EffectiveStatusTime = statusTime,
-                            OccupancyReason = hasOpenTransaction ? "OpenTransaction" : (hasActiveReservation ? "ActiveReservation" : null)
-                        };
-                    })
-                    .ToList();
-
                 int selectedConnectorId = requestedConnectorId.HasValue && requestedConnectorId.Value > 0 &&
-                    connectorStates.Any(c => c.Connector.ConnectorId == requestedConnectorId.Value)
+                    connectorStates.Any(c => c.ConnectorId == requestedConnectorId.Value)
                     ? requestedConnectorId.Value
-                    : connectorStates.FirstOrDefault(c => IsAvailableStatus(c.EffectiveStatus))?.Connector.ConnectorId ?? connectorStates.First().Connector.ConnectorId;
+                    : connectorStates.FirstOrDefault(c => IsAvailableStatus(c.EffectiveStatus))?.ConnectorId ?? connectorStates.First().ConnectorId;
 
                 model.ConnectorId = selectedConnectorId;
                 model.Connectors = connectorStates
                     .Select(c => new PublicStartConnectorOption
                     {
-                        ConnectorId = c.Connector.ConnectorId,
-                        Label = BuildConnectorLabel(c.Connector),
+                        ConnectorId = c.ConnectorId,
+                        Label = !string.IsNullOrWhiteSpace(c.PublicConnectorShortCode)
+                            ? c.PublicConnectorShortCode
+                            : c.DisplayName,
+                        DisplayName = c.DisplayName,
                         LastStatus = c.EffectiveStatus,
                         LastStatusTime = c.EffectiveStatusTime,
                         OccupancyReason = c.OccupancyReason,
-                        IsSelected = c.Connector.ConnectorId == selectedConnectorId
+                        AvailabilityMessage = c.AvailabilityMessage,
+                        PublicConnectorCode = c.PublicConnectorCode,
+                        PublicConnectorShortCode = c.PublicConnectorShortCode,
+                        IsSelected = c.ConnectorId == selectedConnectorId
                     })
                     .ToList();
 
-                var selectedConnector = connectorStates.First(c => c.Connector.ConnectorId == selectedConnectorId);
-                model.ConnectorName = BuildConnectorLabel(selectedConnector.Connector);
+                var selectedConnector = connectorStates.First(c => c.ConnectorId == selectedConnectorId);
+                model.ConnectorName = selectedConnector.DisplayName;
+                model.PublicConnectorCode = selectedConnector.PublicConnectorCode;
+                model.PublicConnectorShortCode = selectedConnector.PublicConnectorShortCode;
                 model.LastStatus = selectedConnector.EffectiveStatus;
                 model.LastStatusTime = selectedConnector.EffectiveStatusTime;
-                model.AvailabilityMessage = BuildAvailabilityMessage(selectedConnector.EffectiveStatus, selectedConnector.OccupancyReason);
+                model.AvailabilityMessage = selectedConnector.AvailabilityMessage;
             }
             else
             {
+                string displayName = $"Connector {model.ConnectorId}";
+                string publicConnectorCode = BuildPublicConnectorCode(model.PublicDisplayCode, model.ConnectorId);
+                string publicConnectorShortCode = BuildPublicConnectorShortCode(model.PublicDisplayCode, model.ConnectorId);
                 model.Connectors.Add(new PublicStartConnectorOption
                 {
                     ConnectorId = model.ConnectorId,
-                    Label = $"Connector {model.ConnectorId}",
+                    Label = !string.IsNullOrWhiteSpace(publicConnectorShortCode)
+                        ? publicConnectorShortCode
+                        : displayName,
+                    DisplayName = displayName,
+                    PublicConnectorCode = publicConnectorCode,
+                    PublicConnectorShortCode = publicConnectorShortCode,
+                    LastStatus = "Offline",
+                    AvailabilityMessage = BuildAvailabilityMessage("Offline", null),
                     IsSelected = true
                 });
-                model.ConnectorName = $"Connector {model.ConnectorId}";
+                model.ConnectorName = displayName;
+                model.PublicConnectorCode = publicConnectorCode;
+                model.PublicConnectorShortCode = publicConnectorShortCode;
+                model.LastStatus = "Offline";
+                model.AvailabilityMessage = BuildAvailabilityMessage("Offline", null);
             }
 
             return model;
         }
 
-        private static string BuildConnectorLabel(ConnectorStatus connector)
+        private List<PublicConnectorState> BuildPublicConnectorStates(
+            IReadOnlyCollection<ConnectorStatus> connectorStatuses,
+            ISet<int> openTransactions,
+            IReadOnlyDictionary<int, DateTime> activeReservations,
+            string publicDisplayCode,
+            DateTime nowUtc)
+        {
+            connectorStatuses ??= Array.Empty<ConnectorStatus>();
+            openTransactions ??= new HashSet<int>();
+            activeReservations ??= new Dictionary<int, DateTime>();
+
+            var connectorIds = connectorStatuses
+                .Select(c => c.ConnectorId)
+                .Concat(openTransactions)
+                .Concat(activeReservations.Keys)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToList();
+
+            var states = new List<PublicConnectorState>();
+            foreach (int connectorId in connectorIds)
+            {
+                ConnectorStatus connector = connectorStatuses.FirstOrDefault(c => c.ConnectorId == connectorId);
+                bool hasOpenTransaction = openTransactions.Contains(connectorId);
+                bool hasActiveReservation = activeReservations.ContainsKey(connectorId);
+                DateTime? statusTime = connector?.LastStatusTime;
+                if (hasActiveReservation && activeReservations.TryGetValue(connectorId, out var reservationUpdatedAt))
+                {
+                    statusTime = statusTime.HasValue && statusTime.Value > reservationUpdatedAt
+                        ? statusTime
+                        : reservationUpdatedAt;
+                }
+
+                string effectiveStatus = GetEffectiveConnectorStatus(
+                    connector?.LastStatus,
+                    statusTime,
+                    hasOpenTransaction,
+                    hasActiveReservation,
+                    nowUtc);
+
+                states.Add(new PublicConnectorState
+                {
+                    ConnectorId = connectorId,
+                    DisplayName = BuildConnectorDisplayName(connector, connectorId),
+                    PublicConnectorCode = BuildPublicConnectorCode(publicDisplayCode, connectorId),
+                    PublicConnectorShortCode = BuildPublicConnectorShortCode(publicDisplayCode, connectorId),
+                    EffectiveStatus = effectiveStatus,
+                    EffectiveStatusTime = statusTime,
+                    OccupancyReason = hasOpenTransaction ? "OpenTransaction" : (hasActiveReservation ? "ActiveReservation" : null),
+                    AvailabilityMessage = BuildAvailabilityMessage(effectiveStatus, hasOpenTransaction ? "OpenTransaction" : (hasActiveReservation ? "ActiveReservation" : null))
+                });
+            }
+
+            return states;
+        }
+
+        private static string BuildConnectorDisplayName(ConnectorStatus connector, int connectorId)
         {
             if (connector == null)
             {
-                return null;
+                return $"Connector {connectorId}";
             }
 
             return string.IsNullOrWhiteSpace(connector.ConnectorName)
@@ -419,62 +481,142 @@ namespace OCPP.Core.Management.Controllers
                 : connector.ConnectorName;
         }
 
-        private static string GetEffectiveConnectorStatus(string lastStatus, bool hasOpenTransaction, bool hasActiveReservation)
+        private static string NormalizePublicDisplayCode(string value)
         {
+            return string.IsNullOrWhiteSpace(value)
+                ? null
+                : value.Trim();
+        }
+
+        private static string BuildPublicConnectorCode(string publicDisplayCode, int connectorId)
+        {
+            string normalized = NormalizePublicDisplayCode(publicDisplayCode);
+            if (string.IsNullOrWhiteSpace(normalized) || connectorId <= 0)
+            {
+                return null;
+            }
+
+            return $"{normalized}*{connectorId.ToString(CultureInfo.InvariantCulture)}";
+        }
+
+        private static string BuildPublicConnectorShortCode(string publicDisplayCode, int connectorId)
+        {
+            string normalized = NormalizePublicDisplayCode(publicDisplayCode);
+            if (string.IsNullOrWhiteSpace(normalized) || connectorId <= 0)
+            {
+                return null;
+            }
+
+            string lastSegment = normalized
+                .Split(new[] { '*', '-' }, StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault();
+
+            if (string.IsNullOrWhiteSpace(lastSegment))
+            {
+                return null;
+            }
+
+            return $"{lastSegment}*{connectorId.ToString(CultureInfo.InvariantCulture)}";
+        }
+
+        private string GetEffectiveConnectorStatus(string lastStatus, DateTime? lastStatusTime, bool hasOpenTransaction, bool hasActiveReservation, DateTime nowUtc)
+        {
+            if (hasOpenTransaction || hasActiveReservation)
+            {
+                return "Occupied";
+            }
+
+            if (IsConnectorStatusStale(lastStatusTime, nowUtc))
+            {
+                return "Offline";
+            }
+
+            if (string.IsNullOrWhiteSpace(lastStatus))
+            {
+                return "Offline";
+            }
+
+            if (IsAvailableStatus(lastStatus))
+            {
+                return "Available";
+            }
+
             if (string.Equals(lastStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(lastStatus, "Unavailable", StringComparison.OrdinalIgnoreCase))
+                string.Equals(lastStatus, "Unavailable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lastStatus, "Unknown", StringComparison.OrdinalIgnoreCase))
             {
-                return lastStatus;
+                return "Offline";
             }
 
-            if (hasOpenTransaction)
-            {
-                return string.IsNullOrWhiteSpace(lastStatus) ? "Occupied" : lastStatus;
-            }
-
-            if (hasActiveReservation)
-            {
-                return "Reserved";
-            }
-
-            return string.IsNullOrWhiteSpace(lastStatus) ? "Unknown" : lastStatus;
+            return "Occupied";
         }
 
         private static string BuildAvailabilityMessage(string effectiveStatus, string occupancyReason)
         {
             if (string.Equals(occupancyReason, "ActiveReservation", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveStatus, "Reserved", StringComparison.OrdinalIgnoreCase))
+                string.Equals(effectiveStatus, "Occupied", StringComparison.OrdinalIgnoreCase))
             {
-                return "This connector is temporarily reserved during checkout. If it is your session, continue in the same browser or choose another connector.";
+                return string.Equals(occupancyReason, "ActiveReservation", StringComparison.OrdinalIgnoreCase)
+                    ? "This connector is temporarily reserved during checkout. If it is your session, continue in the same browser or choose another connector."
+                    : "This connector is currently in use. Please stop the active session first or choose another connector.";
             }
 
-            if (string.Equals(occupancyReason, "OpenTransaction", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveStatus, "Occupied", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveStatus, "Charging", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveStatus, "SuspendedEV", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveStatus, "SuspendedEVSE", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveStatus, "Finishing", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(effectiveStatus, "Offline", StringComparison.OrdinalIgnoreCase))
             {
-                return "This connector is currently in use. Please stop the active session first or choose another connector.";
-            }
-
-            if (string.Equals(effectiveStatus, "Unavailable", StringComparison.OrdinalIgnoreCase))
-            {
-                return "This connector is unavailable right now. Please choose another connector.";
-            }
-
-            if (string.Equals(effectiveStatus, "Faulted", StringComparison.OrdinalIgnoreCase))
-            {
-                return "This connector is currently faulted. Please choose another connector.";
+                return "This connector is currently offline. Please try again later or choose another connector.";
             }
 
             return null;
+        }
+
+        private static string BuildAggregateConnectorStatus(int availableConnectorCount, int occupiedConnectorCount)
+        {
+            if (availableConnectorCount > 0)
+            {
+                return "Available";
+            }
+
+            if (occupiedConnectorCount > 0)
+            {
+                return "Occupied";
+            }
+
+            return "Offline";
+        }
+
+        private int GetPublicStatusFreshnessMinutes()
+        {
+            int heartbeatIntervalSeconds = Config?.GetValue<int?>("HeartBeatInterval") ?? 300;
+            int derivedThreshold = (int)Math.Ceiling(Math.Max(heartbeatIntervalSeconds, 300) * 3 / 60d);
+            return Math.Max(15, derivedThreshold);
+        }
+
+        private bool IsConnectorStatusStale(DateTime? lastStatusTime, DateTime nowUtc)
+        {
+            if (!lastStatusTime.HasValue)
+            {
+                return true;
+            }
+
+            return lastStatusTime.Value < nowUtc.AddMinutes(-GetPublicStatusFreshnessMinutes());
         }
 
         private static bool IsAvailableStatus(string status)
         {
             return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(status, "Preparing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private sealed class PublicConnectorState
+        {
+            public int ConnectorId { get; set; }
+            public string DisplayName { get; set; }
+            public string PublicConnectorCode { get; set; }
+            public string PublicConnectorShortCode { get; set; }
+            public string EffectiveStatus { get; set; }
+            public DateTime? EffectiveStatusTime { get; set; }
+            public string OccupancyReason { get; set; }
+            public string AvailabilityMessage { get; set; }
         }
 
         private async Task<IActionResult> ApplyRecoveryAsync(PublicStartViewModel model, PublicPaymentRecoveryPayload recovery)

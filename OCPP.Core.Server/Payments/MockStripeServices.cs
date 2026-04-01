@@ -2,7 +2,9 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Stripe;
 using Stripe.Checkout;
@@ -11,8 +13,74 @@ namespace OCPP.Core.Server.Payments
 {
     internal sealed class MockStripeStore
     {
+        private readonly object _snapshotLock = new();
+        private readonly string _snapshotFilePath;
+
+        public MockStripeStore(IConfiguration configuration)
+        {
+            string diagnosticsDirectory = configuration?.GetValue<string>("Stripe:MockDiagnosticsDirectory");
+            if (!string.IsNullOrWhiteSpace(diagnosticsDirectory))
+            {
+                Directory.CreateDirectory(diagnosticsDirectory);
+                _snapshotFilePath = Path.Combine(diagnosticsDirectory, "mock-stripe-store.json");
+            }
+        }
+
         public ConcurrentDictionary<string, Session> Sessions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public ConcurrentDictionary<string, PaymentIntent> PaymentIntents { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public void PersistSnapshot()
+        {
+            if (string.IsNullOrWhiteSpace(_snapshotFilePath))
+            {
+                return;
+            }
+
+            var snapshot = new
+            {
+                generatedAtUtc = DateTime.UtcNow,
+                sessions = Sessions.Values
+                    .OrderBy(session => session?.Id, StringComparer.OrdinalIgnoreCase)
+                    .Select(session => new
+                    {
+                        id = session?.Id,
+                        url = session?.Url,
+                        paymentIntentId = session?.PaymentIntentId,
+                        status = session?.Status,
+                        paymentStatus = session?.PaymentStatus,
+                        metadata = session?.Metadata == null
+                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, string>(session.Metadata, StringComparer.OrdinalIgnoreCase)
+                    })
+                    .ToList(),
+                paymentIntents = PaymentIntents.Values
+                    .OrderBy(intent => intent?.Id, StringComparer.OrdinalIgnoreCase)
+                    .Select(intent => new
+                    {
+                        id = intent?.Id,
+                        status = intent?.Status,
+                        amount = intent?.Amount,
+                        amountReceived = intent?.AmountReceived,
+                        metadata = intent?.Metadata == null
+                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, string>(intent.Metadata, StringComparer.OrdinalIgnoreCase)
+                    })
+                    .ToList()
+            };
+
+            string tempFilePath = $"{_snapshotFilePath}.tmp";
+            lock (_snapshotLock)
+            {
+                System.IO.File.WriteAllText(
+                    tempFilePath,
+                    JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    }));
+
+                System.IO.File.Move(tempFilePath, _snapshotFilePath, true);
+            }
+        }
     }
 
     internal sealed class MockStripeSessionService : IStripeSessionService
@@ -62,6 +130,7 @@ namespace OCPP.Core.Server.Payments
                 Amount = amount,
                 Metadata = CloneDictionary(options?.PaymentIntentData?.Metadata ?? options?.Metadata)
             };
+            _store.PersistSnapshot();
 
             return CloneSession(session);
         }
@@ -86,6 +155,7 @@ namespace OCPP.Core.Server.Payments
             }
 
             _store.Sessions[id] = session;
+            _store.PersistSnapshot();
             return CloneSession(session);
         }
 
@@ -188,6 +258,7 @@ namespace OCPP.Core.Server.Payments
             }
 
             _store.PaymentIntents[id] = intent;
+            _store.PersistSnapshot();
             return CloneIntent(intent);
         }
 
@@ -201,6 +272,7 @@ namespace OCPP.Core.Server.Payments
             intent.Status = "succeeded";
             intent.AmountReceived = options?.AmountToCapture ?? intent.Amount;
             _store.PaymentIntents[id] = intent;
+            _store.PersistSnapshot();
             return CloneIntent(intent);
         }
 
@@ -210,6 +282,7 @@ namespace OCPP.Core.Server.Payments
             {
                 intent.Status = "canceled";
                 _store.PaymentIntents[id] = intent;
+                _store.PersistSnapshot();
             }
         }
 

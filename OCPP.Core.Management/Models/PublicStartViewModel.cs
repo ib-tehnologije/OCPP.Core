@@ -7,6 +7,10 @@ namespace OCPP.Core.Management.Models
     {
         public string ChargePointId { get; set; }
         public string ChargePointName { get; set; }
+        public string PublicDisplayCode { get; set; }
+        public string PublicConnectorCode { get; set; }
+        public string PublicConnectorShortCode { get; set; }
+        public string LocationDescription { get; set; }
         public int ConnectorId { get; set; }
         public string ConnectorName { get; set; }
         public string LastStatus { get; set; }
@@ -45,9 +49,13 @@ namespace OCPP.Core.Management.Models
     {
         public int ConnectorId { get; set; }
         public string Label { get; set; }
+        public string DisplayName { get; set; }
         public string LastStatus { get; set; }
         public DateTime? LastStatusTime { get; set; }
         public string OccupancyReason { get; set; }
+        public string AvailabilityMessage { get; set; }
+        public string PublicConnectorCode { get; set; }
+        public string PublicConnectorShortCode { get; set; }
         public bool IsSelected { get; set; }
     }
 }

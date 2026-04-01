@@ -80,6 +80,22 @@
             <div class="row">
                 <div class="col-sm-2 align-self-center">
                     <div class="form-group">
+                        <label class="inline-label" for="PublicDisplayCode">Public display code</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" id="PublicDisplayCode" maxlength="200" name="PublicDisplayCode" placeholder="HR*TTK*052009*01" type="text" value="@Model.PublicDisplayCode" />
+                        <small class="form-text text-muted">Shown in the public portal and QR flow. Connector labels are derived from the last segment plus connector number, for example <code>01*1</code>.</small>
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="PublicDisplayCode" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
                         <label class="inline-label" for="Comment">@Localizer["CommentLabel"]</label>
                     </div>
                 </div>

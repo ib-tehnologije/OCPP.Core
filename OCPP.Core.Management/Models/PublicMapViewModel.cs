@@ -14,9 +14,13 @@ namespace OCPP.Core.Management.Models
         public string ChargePointId { get; set; }
         public string Name { get; set; }
         public int ConnectorCount { get; set; }
+        public int AvailableConnectorCount { get; set; }
+        public int OccupiedConnectorCount { get; set; }
+        public int OfflineConnectorCount { get; set; }
         public bool HasMultipleConnectors => ConnectorCount > 1;
         public string Status { get; set; }
         public DateTime? StatusTime { get; set; }
+        public string PublicDisplayCode { get; set; }
         public double? Latitude { get; set; }
         public double? Longitude { get; set; }
         public string LocationDescription { get; set; }

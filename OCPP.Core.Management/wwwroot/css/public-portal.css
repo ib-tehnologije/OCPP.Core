@@ -428,6 +428,7 @@ html {
   padding: 10px 14px;
   transition: transform 0.15s ease, box-shadow 0.2s ease;
   box-shadow: 0 8px 24px rgba(0, 212, 170, 0.22);
+  white-space: nowrap;
 }
 
 .public-btn:hover {
@@ -820,6 +821,86 @@ html {
   }
 }
 
+@media (max-width: 640px) {
+  .public-shell {
+    padding: 12px 12px 28px;
+  }
+
+  .public-header {
+    padding: 12px 14px;
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: flex-start;
+  }
+
+  .public-brand-title {
+    font-size: 0.98rem;
+  }
+
+  .public-brand-sub {
+    display: none;
+  }
+
+  .public-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    font-size: 0.92rem;
+  }
+
+  .public-brand-image,
+  .public-footer-image {
+    max-height: 30px;
+    max-width: 140px;
+  }
+
+  .public-topbar-actions {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .public-topbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .public-btn,
+  .public-btn.ghost {
+    min-height: 34px;
+    padding: 7px 10px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    box-shadow: none;
+  }
+
+  .public-portal-nav {
+    margin-bottom: 8px;
+  }
+
+  .public-nav-link {
+    padding: 9px 6px;
+    font-size: 0.76rem;
+  }
+
+  .public-lang-bar {
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    gap: 3px;
+  }
+
+  .public-lang-label {
+    display: none;
+  }
+
+  .public-lang-btn {
+    padding: 3px 8px;
+    font-size: 0.72rem;
+  }
+}
+
 /* ==========================================================================
    Mockup-derived session UI (tehnocharge-ui-mockup.html)
    These styles intentionally mirror the mockup structure: card, tiles, alerts,
@@ -1075,6 +1156,35 @@ html {
   margin-top: 2px;
 }
 
+.charger-sub--location {
+  margin-top: 6px;
+}
+
+.public-code-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.public-code-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 12px;
+  border: 1px solid rgba(0, 212, 170, 0.18);
+  background: rgba(0, 212, 170, 0.08);
+  color: var(--accent);
+  font: 600 0.78rem var(--mono);
+  letter-spacing: 0.02em;
+}
+
+.public-code-pill--connector {
+  color: var(--text);
+  border-color: var(--border-2);
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .divider {
   height: 1px;
   background: var(--border);
@@ -1138,6 +1248,19 @@ html {
   font-size: 0.96rem;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.connector-option-sub {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+
+.connector-option-code {
+  margin-top: 10px;
+  font: 600 0.78rem var(--mono);
+  color: var(--accent);
+  letter-spacing: 0.02em;
 }
 
 .connector-option-meta {
@@ -1387,6 +1510,16 @@ html {
 
   .connector-option-top {
     flex-direction: column;
+  }
+
+  .public-code-row {
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .public-code-pill {
+    padding: 5px 10px;
+    font-size: 0.72rem;
   }
 }
 
@@ -1761,6 +1894,13 @@ html {
   line-height: 1.5;
 }
 
+.charger-card .cc-code {
+  margin-bottom: 4px;
+  font: 600 0.8rem var(--mono);
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
 .charger-card .cc-detail .cc-power {
   color: var(--accent);
   font-weight: 500;
@@ -1852,6 +1992,13 @@ html {
 .leaflet-popup-content .popup-status {
   margin-top: 4px;
   font-size: 0.78rem;
+}
+
+.popup-code {
+  margin-top: 4px;
+  color: var(--accent);
+  font: 600 0.78rem var(--public-mono);
+  letter-spacing: 0.02em;
 }
 
 /* Search bar */

@@ -114,12 +114,15 @@ export function createRuntimeMetadata() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ocpp-playwright-"));
   const databasePath = path.join(tempRoot, "OCPP.Core.playwright.sqlite");
   const emailSinkDir = path.join(tempRoot, "email-sink");
+  const stripeDiagnosticsDir = path.join(tempRoot, "stripe-diagnostics");
   ensureCleanDirectory(emailSinkDir);
+  ensureCleanDirectory(stripeDiagnosticsDir);
 
   return {
     ...resolveStackDefaults(),
     tempRoot,
     databasePath,
     emailSinkDir,
+    stripeDiagnosticsDir,
   };
 }

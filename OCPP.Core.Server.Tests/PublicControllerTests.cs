@@ -100,18 +100,27 @@ namespace OCPP.Core.Server.Tests
                 Assert.True(model.ShowConnectorSelector);
                 Assert.Equal(2, model.ConnectorId);
                 Assert.Equal("Right side", model.ConnectorName);
+                Assert.Null(model.PublicDisplayCode);
+                Assert.Null(model.PublicConnectorCode);
+                Assert.Null(model.PublicConnectorShortCode);
                 Assert.Collection(
                     model.Connectors.OrderBy(c => c.ConnectorId),
                     connector =>
                     {
                         Assert.Equal(1, connector.ConnectorId);
                         Assert.Equal("Connector 1", connector.Label);
+                        Assert.Equal("Connector 1", connector.DisplayName);
+                        Assert.Null(connector.PublicConnectorCode);
+                        Assert.Null(connector.PublicConnectorShortCode);
                         Assert.False(connector.IsSelected);
                     },
                     connector =>
                     {
                         Assert.Equal(2, connector.ConnectorId);
                         Assert.Equal("Right side", connector.Label);
+                        Assert.Equal("Right side", connector.DisplayName);
+                        Assert.Null(connector.PublicConnectorCode);
+                        Assert.Null(connector.PublicConnectorShortCode);
                         Assert.True(connector.IsSelected);
                     });
             }
@@ -136,13 +145,15 @@ namespace OCPP.Core.Server.Tests
                         {
                             ChargePointId = "CP-FALLBACK",
                             ConnectorId = 1,
-                            LastStatus = "Occupied"
+                            LastStatus = "Occupied",
+                            LastStatusTime = DateTime.UtcNow
                         },
                         new ConnectorStatus
                         {
                             ChargePointId = "CP-FALLBACK",
                             ConnectorId = 2,
-                            LastStatus = "Available"
+                            LastStatus = "Available",
+                            LastStatusTime = DateTime.UtcNow
                         });
                     setupContext.SaveChanges();
                 }
@@ -179,13 +190,15 @@ namespace OCPP.Core.Server.Tests
                         {
                             ChargePointId = "CP-GENERIC",
                             ConnectorId = 1,
-                            LastStatus = "Occupied"
+                            LastStatus = "Occupied",
+                            LastStatusTime = DateTime.UtcNow
                         },
                         new ConnectorStatus
                         {
                             ChargePointId = "CP-GENERIC",
                             ConnectorId = 2,
-                            LastStatus = "Available"
+                            LastStatus = "Available",
+                            LastStatusTime = DateTime.UtcNow
                         });
                     setupContext.SaveChanges();
                 }
@@ -200,6 +213,70 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal(2, model.ConnectorId);
                 Assert.Equal("Connector 2", model.ConnectorName);
                 Assert.True(model.ShowConnectorSelector);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_PublicDisplayCode_UsesDerivedPublicConnectorLabels()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-public-code-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-PUBLIC-CODE", "Delmar Emotion", "HR*TTK*052009*01");
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-PUBLIC-CODE",
+                            ConnectorId = 1,
+                            ConnectorName = "Lijevi",
+                            LastStatus = "Available"
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-PUBLIC-CODE",
+                            ConnectorId = 2,
+                            ConnectorName = "Desni",
+                            LastStatus = "Available"
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("CP-PUBLIC-CODE", 2);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("HR*TTK*052009*01", model.PublicDisplayCode);
+                Assert.Equal("HR*TTK*052009*01*2", model.PublicConnectorCode);
+                Assert.Equal("01*2", model.PublicConnectorShortCode);
+                Assert.Equal("Desni", model.ConnectorName);
+                Assert.Collection(
+                    model.Connectors.OrderBy(c => c.ConnectorId),
+                    connector =>
+                    {
+                        Assert.Equal(1, connector.ConnectorId);
+                        Assert.Equal("01*1", connector.Label);
+                        Assert.Equal("Lijevi", connector.DisplayName);
+                        Assert.Equal("HR*TTK*052009*01*1", connector.PublicConnectorCode);
+                        Assert.Equal("01*1", connector.PublicConnectorShortCode);
+                    },
+                    connector =>
+                    {
+                        Assert.Equal(2, connector.ConnectorId);
+                        Assert.Equal("01*2", connector.Label);
+                        Assert.Equal("Desni", connector.DisplayName);
+                        Assert.Equal("HR*TTK*052009*01*2", connector.PublicConnectorCode);
+                        Assert.Equal("01*2", connector.PublicConnectorShortCode);
+                    });
             }
             finally
             {
@@ -245,7 +322,7 @@ namespace OCPP.Core.Server.Tests
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
-                Assert.Equal("Reserved", model.LastStatus);
+                Assert.Equal("Occupied", model.LastStatus);
                 Assert.Contains("temporarily reserved", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
                 Assert.Equal("ActiveReservation", model.Connectors.Single().OccupancyReason);
             }
@@ -282,7 +359,7 @@ namespace OCPP.Core.Server.Tests
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
-                Assert.Equal("SuspendedEV", model.LastStatus);
+                Assert.Equal("Occupied", model.LastStatus);
                 Assert.Contains("currently in use", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
             }
             finally
@@ -318,7 +395,7 @@ namespace OCPP.Core.Server.Tests
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
-                Assert.Equal("SuspendedEVSE", model.LastStatus);
+                Assert.Equal("Occupied", model.LastStatus);
                 Assert.Contains("currently in use", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
             }
             finally
@@ -399,13 +476,15 @@ namespace OCPP.Core.Server.Tests
                         {
                             ChargePointId = "CP-MAP",
                             ConnectorId = 1,
-                            LastStatus = "Available"
+                            LastStatus = "Available",
+                            LastStatusTime = DateTime.UtcNow
                         },
                         new ConnectorStatus
                         {
                             ChargePointId = "CP-MAP",
                             ConnectorId = 2,
-                            LastStatus = "Occupied"
+                            LastStatus = "Occupied",
+                            LastStatusTime = DateTime.UtcNow
                         });
                     setupContext.SaveChanges();
                 }
@@ -420,8 +499,94 @@ namespace OCPP.Core.Server.Tests
 
                 Assert.Equal("CP-MAP", chargePoint.ChargePointId);
                 Assert.Equal(2, chargePoint.ConnectorCount);
+                Assert.Equal(1, chargePoint.AvailableConnectorCount);
+                Assert.Equal(1, chargePoint.OccupiedConnectorCount);
+                Assert.Equal(0, chargePoint.OfflineConnectorCount);
                 Assert.True(chargePoint.HasMultipleConnectors);
-                Assert.Equal("Occupied", chargePoint.Status);
+                Assert.Equal("Available", chargePoint.Status);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public void Map_UnknownOrStaleStatuses_AreRenderedAsOffline()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-offline-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-OFFLINE", "Offline test");
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-OFFLINE",
+                            ConnectorId = 1,
+                            LastStatus = "Unknown",
+                            LastStatusTime = DateTime.UtcNow
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-OFFLINE",
+                            ConnectorId = 2,
+                            LastStatus = "Available",
+                            LastStatusTime = DateTime.UtcNow.AddMinutes(-20)
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("Offline", chargePoint.Status);
+                Assert.Equal(0, chargePoint.AvailableConnectorCount);
+                Assert.Equal(0, chargePoint.OccupiedConnectorCount);
+                Assert.Equal(2, chargePoint.OfflineConnectorCount);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public void Map_PublicDisplayCode_IsExposedForPublicPortalRendering()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-public-code-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-MAP-CODE", "Delmar Banjole", "HR*TTK*052009*02");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-MAP-CODE",
+                        ConnectorId = 1,
+                        LastStatus = "Available"
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("Delmar Banjole", chargePoint.Name);
+                Assert.Equal("HR*TTK*052009*02", chargePoint.PublicDisplayCode);
             }
             finally
             {
@@ -443,7 +608,8 @@ namespace OCPP.Core.Server.Tests
                     {
                         ChargePointId = "ns2571148979",
                         ConnectorId = 1,
-                        LastStatus = "Available"
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
                     });
                     setupContext.SaveChanges();
                 }
@@ -475,6 +641,44 @@ namespace OCPP.Core.Server.Tests
 
                 Assert.Equal("ns2571148979", chargePoint.ChargePointId);
                 Assert.Equal("Available", chargePoint.Status);
+                Assert.Equal(1, chargePoint.AvailableConnectorCount);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_UnknownConnectorStatus_IsNormalizedToOffline()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-start-offline-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-START-OFFLINE", "Offline start test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-START-OFFLINE",
+                        ConnectorId = 1,
+                        LastStatus = "Unknown",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("CP-START-OFFLINE", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("Offline", model.LastStatus);
+                Assert.Equal("Offline", model.Connectors.Single().LastStatus);
+                Assert.Contains("offline", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
             }
             finally
             {
@@ -559,12 +763,13 @@ namespace OCPP.Core.Server.Tests
             return context;
         }
 
-        private static void SeedChargePoint(OCPPCoreContext context, string chargePointId, string chargePointName)
+        private static void SeedChargePoint(OCPPCoreContext context, string chargePointId, string chargePointName, string? publicDisplayCode = null)
         {
             context.ChargePoints.Add(new ChargePoint
             {
                 ChargePointId = chargePointId,
                 Name = chargePointName,
+                PublicDisplayCode = publicDisplayCode,
                 PricePerKwh = 0.45m,
                 UserSessionFee = 0.50m,
                 MaxSessionKwh = 20,

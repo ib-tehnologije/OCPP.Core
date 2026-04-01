@@ -60,8 +60,17 @@ export async function withDriver(target, scenario, callback) {
   }
 }
 
-export async function startPublicSession(page, target) {
+export async function startPublicSession(page, target, options = {}) {
   await page.goto(`/Public/Start?cp=${encodeURIComponent(target.chargePointId)}&conn=${encodeURIComponent(target.connectorId)}`);
+  if (options.requestR1Invoice) {
+    await page.locator("#wantsR1").check();
+    if (options.buyerCompanyName !== undefined) {
+      await page.locator("#buyerCompanyName").fill(options.buyerCompanyName);
+    }
+    if (options.buyerOib !== undefined) {
+      await page.locator("#buyerOib").fill(options.buyerOib);
+    }
+  }
   await page.getByRole("button", { name: /Start charging/i }).click();
   await page.locator("#mock-pay-now").click();
   await page.waitForURL(/\/Payments\/Status\?/);

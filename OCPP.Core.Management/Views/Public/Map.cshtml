@@ -74,12 +74,15 @@
                         foreach (var cp in Model.ChargePoints)
                         {
                             var statusClass = "busy";
+                            var publicStationCode = string.IsNullOrWhiteSpace(cp.PublicDisplayCode) ? cp.ChargePointId : cp.PublicDisplayCode;
+                            var availabilitySummary = cp.ConnectorCount > 0
+                                ? $"{cp.AvailableConnectorCount}/{cp.ConnectorCount}"
+                                : "0/0";
                             if (string.Equals(cp.Status, "Available", StringComparison.InvariantCultureIgnoreCase))
                             {
                                 statusClass = "online";
                             }
-                            else if (string.Equals(cp.Status, "Faulted", StringComparison.InvariantCultureIgnoreCase) ||
-                                     string.Equals(cp.Status, "Unavailable", StringComparison.InvariantCultureIgnoreCase))
+                            else if (string.Equals(cp.Status, "Offline", StringComparison.InvariantCultureIgnoreCase))
                             {
                                 statusClass = "offline";
                             }
@@ -90,14 +93,23 @@
                                 : Url.RouteUrl("public-start-path", new { cp = cp.ChargePointId, conn = 1 })
                                     ?? Url.Action("Start", "Public", new { cp = cp.ChargePointId, conn = 1 });
                             var startLabel = cp.HasMultipleConnectors ? "Choose connector" : "Start session";
-                            var searchText = $"{cp.Name} {cp.LocationDescription} {cp.ChargePointId}";
+                            var searchText = $"{cp.Name} {cp.LocationDescription} {publicStationCode}";
                             <div class="charger-card cp-card" data-search="@searchText" data-cp-id="@cp.ChargePointId">
                                 <div class="cc-top">
                                     <div class="cc-name">@cp.Name</div>
                                     <div class="cc-status @statusClass">@cp.Status</div>
                                 </div>
+                                <div class="cc-code">@publicStationCode</div>
                                 <div class="cc-detail">@cp.LocationDescription</div>
                                 <div class="cc-detail">@cp.ConnectorCount <span data-i18n="map.connectors">connector(s)</span></div>
+                                @if (string.Equals(cp.Status, "Offline", StringComparison.InvariantCultureIgnoreCase))
+                                {
+                                    <div class="cc-detail"><span data-i18n="map.offline">Offline</span></div>
+                                }
+                                else
+                                {
+                                    <div class="cc-detail">@availabilitySummary <span data-i18n="map.available">Available</span></div>
+                                }
                                 <div class="cc-detail">
                                     @if (cp.PricePerKwh > 0)
                                     {
@@ -217,9 +229,16 @@
                 const chargePointId = pick(p, 'ChargePointId', 'chargePointId');
                 const name = (pick(p, 'Name', 'name') || '').trim() || '(Unnamed station)';
                 const status = (pick(p, 'Status', 'status') || '').toLowerCase();
+                const publicDisplayCode = (pick(p, 'PublicDisplayCode', 'publicDisplayCode') || '').trim();
+                const publicStationCode = publicDisplayCode || chargePointId;
+                const connectorCount = Number(pick(p, 'ConnectorCount', 'connectorCount')) || 0;
+                const availableConnectorCount = Number(pick(p, 'AvailableConnectorCount', 'availableConnectorCount')) || 0;
+                const availabilitySummary = status === 'offline'
+                    ? 'Offline'
+                    : `${availableConnectorCount}/${connectorCount} available`;
                 let color = '#00d4aa';
-                let statusLabel = pick(p, 'Status', 'status') || 'Unknown';
-                if (status.includes('fault') || status.includes('unavail') || status.includes('offline')) {
+                let statusLabel = pick(p, 'Status', 'status') || 'Offline';
+                if (status.includes('offline')) {
                     color = '#ff6b81';
                 } else if (!status.includes('avail')) {
                     color = '#a78bfa';
@@ -250,8 +269,10 @@
                 const addr = (pick(p, 'LocationDescription', 'locationDescription') || '').trim();
                 const popupHtml = [
                     `<div class="popup-name">${escapeHtml(name)}</div>`,
+                    publicStationCode ? `<div class="popup-code">${escapeHtml(publicStationCode)}</div>` : '',
                     addr ? `<div class="popup-addr">${escapeHtml(addr)}</div>` : '',
                     `<div class="popup-status">${escapeHtml(statusLabel)}</div>`,
+                    `<div class="popup-status">${escapeHtml(availabilitySummary)}</div>`,
                     `<div><span class="popup-power">${escapeHtml(safePrice)}</span></div>`,
                     idleText ? `<div class="popup-status">${escapeHtml(idleText)}</div>` : '',
                     `<div style="margin-top: 10px;"><a class="btn-secondary" style="margin-top:0;" href="${startUrl}">${startLabel}</a></div>`
@@ -390,7 +411,8 @@
                 });
             }
 
-            function locateUser() {
+            function locateUser(options) {
+                const config = options || {};
                 if (!navigator.geolocation) return;
                 navigator.geolocation.getCurrentPosition(pos => {
                     const lat = pos.coords.latitude;
@@ -407,8 +429,29 @@
                     }).addTo(map);
                     map.flyTo([lat, lng], 15, { animate: true, duration: 0.45 });
                 }, err => {
-                    console.error('Public map: geolocation failed', err);
+                    if (!config.silent) {
+                        console.error('Public map: geolocation failed', err);
+                    }
                 }, { enableHighAccuracy: true, timeout: 10000 });
+            }
+
+            async function autoLocateUser() {
+                if (!window.isSecureContext || !navigator.geolocation) {
+                    return;
+                }
+
+                if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+                    try {
+                        const permission = await navigator.permissions.query({ name: 'geolocation' });
+                        if (permission && permission.state === 'denied') {
+                            return;
+                        }
+                    } catch (_error) {
+                        // Ignore unsupported permission queries and fall through to the direct attempt.
+                    }
+                }
+
+                locateUser({ silent: true });
             }
 
             if (mapExpandBtn) {
@@ -416,7 +459,7 @@
             }
 
             if (gpsBtn) {
-                gpsBtn.addEventListener('click', locateUser);
+                gpsBtn.addEventListener('click', () => locateUser({ silent: false }));
             }
 
             const hasFiniteCoordinates = Object.keys(markerLookup).length > 0;
@@ -438,6 +481,7 @@
             });
 
             filterMapAndList(searchInput ? searchInput.value : '');
+            void autoLocateUser();
             window.addEventListener('resize', () => {
                 map.invalidateSize();
                 filterMapAndList();

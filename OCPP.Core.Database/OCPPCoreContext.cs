@@ -69,6 +69,8 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.Name).HasMaxLength(100);
 
+                entity.Property(e => e.PublicDisplayCode).HasMaxLength(200);
+
                 entity.Property(e => e.Username).HasMaxLength(50);
 
                 entity.Property(e => e.Password).HasMaxLength(50);

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { expect } from "@playwright/test";
 import { createTempFilePath, readRuntimeInfo, sleep } from "../common.mjs";
 
@@ -102,4 +102,87 @@ export function readLatestSinkEmail(eventName) {
   }
 
   return matching.at(-1);
+}
+
+function sqlQuote(value) {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function executeSqlite(dbPath, sql) {
+  return execFileSync("sqlite3", [dbPath, sql], {
+    cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", ".."),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+export function readMockStripeSnapshot() {
+  const runtime = runtimeInfo();
+  const snapshotPath = runtime.stripeDiagnosticsDir
+    ? path.join(runtime.stripeDiagnosticsDir, "mock-stripe-store.json")
+    : "";
+
+  if (!snapshotPath || !fs.existsSync(snapshotPath)) {
+    return null;
+  }
+
+  return JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+}
+
+export function findMockStripeArtifactsByReservationId(reservationId) {
+  const snapshot = readMockStripeSnapshot();
+  if (!snapshot || !reservationId) {
+    return { session: null, paymentIntent: null };
+  }
+
+  const session = (snapshot.sessions || []).find((entry) =>
+    entry?.metadata?.reservation_id === reservationId);
+  const paymentIntent = session?.paymentIntentId
+    ? (snapshot.paymentIntents || []).find((entry) => entry?.id === session.paymentIntentId)
+    : null;
+
+  return { session: session ?? null, paymentIntent: paymentIntent ?? null };
+}
+
+export function readLatestInvoiceSubmissionLog(reservationId) {
+  if (!reservationId) {
+    return null;
+  }
+
+  const runtime = runtimeInfo();
+  const sql = `
+SELECT json_object(
+  'invoiceSubmissionLogId', InvoiceSubmissionLogId,
+  'reservationId', ReservationId,
+  'transactionId', TransactionId,
+  'provider', Provider,
+  'mode', Mode,
+  'status', Status,
+  'invoiceKind', InvoiceKind,
+  'stripeCheckoutSessionId', StripeCheckoutSessionId,
+  'stripePaymentIntentId', StripePaymentIntentId,
+  'httpStatusCode', HttpStatusCode,
+  'externalDocumentId', ExternalDocumentId,
+  'externalInvoiceNumber', ExternalInvoiceNumber,
+  'externalPublicUrl', ExternalPublicUrl,
+  'externalPdfUrl', ExternalPdfUrl,
+  'providerResponseStatus', ProviderResponseStatus,
+  'requestPayloadJson', RequestPayloadJson,
+  'responseBody', ResponseBody,
+  'error', Error,
+  'createdAtUtc', CreatedAtUtc,
+  'completedAtUtc', CompletedAtUtc
+)
+FROM InvoiceSubmissionLog
+WHERE UPPER(ReservationId) = UPPER(${sqlQuote(reservationId)})
+ORDER BY COALESCE(CompletedAtUtc, CreatedAtUtc) DESC, InvoiceSubmissionLogId DESC
+LIMIT 1
+`;
+
+  const raw = executeSqlite(runtime.databasePath, sql);
+  return raw ? JSON.parse(raw) : null;
 }

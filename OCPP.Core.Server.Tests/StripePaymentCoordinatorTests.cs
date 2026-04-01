@@ -1016,6 +1016,7 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("12345678903", sessionService.LastUpdateOptions?.Metadata?["buyer_oib"]);
             Assert.NotNull(intentService.LastUpdateOptions);
             Assert.Equal("R1", intentService.LastUpdateOptions?.Metadata?["invoice_type"]);
+            Assert.Equal("Acme d.o.o.", intentService.LastUpdateOptions?.Metadata?["buyer_company"]);
             Assert.Equal("12345678903", intentService.LastUpdateOptions?.Metadata?["buyer_oib"]);
             Assert.Equal(1, emailService.R1InvoiceRequestedCount);
             Assert.Equal("billing@example.com", emailService.LastToEmail);

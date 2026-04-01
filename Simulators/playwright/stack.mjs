@@ -2,28 +2,47 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  assert,
   createRuntimeMetadata,
   nowIsoUtc,
-  runSqlite,
   waitForUrl,
   writeRuntimeInfo,
   packageDir,
   repoRoot,
 } from "./common.mjs";
+import { seedTestStack } from "../lib/sqlite_helpers.mjs";
 
 const runtime = createRuntimeMetadata();
+const invoicesEnabled = process.env.OCPP_PLAYWRIGHT_ENABLE_INVOICES === "1";
+runtime.invoicesEnabled = invoicesEnabled;
 writeRuntimeInfo(runtime);
 
 const childProcesses = [];
+let stopStackResolve = () => {};
+const stopStack = new Promise((resolve) => {
+  stopStackResolve = resolve;
+});
 
 function spawnDotnet(projectPath, extraEnv) {
+  const sqliteConnectionString = `Filename=${runtime.databasePath};foreign keys=True`;
+  const invoiceEnv = invoicesEnabled
+    ? {
+        Invoices__Enabled: process.env.Invoices__Enabled ?? "true",
+        Invoices__ERacuni__DocumentStatus: process.env.Invoices__ERacuni__DocumentStatus ?? "Draft",
+        Invoices__ERacuni__LineItems__Energy__ProductCode: process.env.Invoices__ERacuni__LineItems__Energy__ProductCode ?? "EV-ENERGY",
+        Invoices__ERacuni__LineItems__SessionFee__ProductCode: process.env.Invoices__ERacuni__LineItems__SessionFee__ProductCode ?? "EV-SESSION",
+        Invoices__ERacuni__LineItems__UsageFee__ProductCode: process.env.Invoices__ERacuni__LineItems__UsageFee__ProductCode ?? "EV-OCCUPANCY",
+        Invoices__ERacuni__LineItems__IdleFee__ProductCode: process.env.Invoices__ERacuni__LineItems__IdleFee__ProductCode ?? "EV-IDLE",
+      }
+    : {
+        Invoices__Enabled: "false",
+      };
+
   const child = spawn("dotnet", ["run", "--project", projectPath], {
     cwd: repoRoot,
     env: {
       ...process.env,
       ASPNETCORE_ENVIRONMENT: "Development",
-      ConnectionStrings__SQLite: runtime.databasePath,
+      ConnectionStrings__SQLite: sqliteConnectionString,
       ConnectionStrings__SqlServer: "",
       AutoMigrateDB: "true",
       ApiKey: runtime.apiKey,
@@ -32,11 +51,12 @@ function spawnDotnet(projectPath, extraEnv) {
       Stripe__Enabled: "true",
       Stripe__UseMockServices: "true",
       Stripe__MockCustomerEmail: "driver@example.test",
+      Stripe__MockDiagnosticsDirectory: runtime.stripeDiagnosticsDir,
       Stripe__ApiKey: "mock_test_key",
       Stripe__ReturnBaseUrl: runtime.managementBaseUrl,
-      Invoices__Enabled: "false",
       Payments__IdleFeeExcludedWindow: "",
       Payments__IdleFeeExcludedTimeZoneId: "UTC",
+      ...invoiceEnv,
       ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -51,6 +71,8 @@ function spawnDotnet(projectPath, extraEnv) {
 }
 
 function shutdown(exitCode = 0) {
+  stopStackResolve();
+
   for (const child of childProcesses) {
     if (!child.killed) {
       child.kill("SIGTERM");
@@ -67,21 +89,12 @@ function shutdown(exitCode = 0) {
   }, 2_000).unref();
 }
 
-function seedDatabase() {
-  const sql = [
-    "BEGIN TRANSACTION",
-    "INSERT OR REPLACE INTO ChargePoint (ChargePointId, Name, FreeChargingEnabled, PricePerKwh, UserSessionFee, OwnerSessionFee, OwnerCommissionPercent, OwnerCommissionFixedPerKwh, MaxSessionKwh, StartUsageFeeAfterMinutes, MaxUsageFeeMinutes, ConnectorUsageFeePerMinute, UsageFeeAfterChargingEnds) VALUES " +
-      "('Test1234', 'Playwright OCPP 1.6', 0, 0.38, 0.50, 0.00, 0.00, 0.00, 80.0, 1, 120, 0.20, 1)," +
-      "('TestAAA', 'Playwright OCPP 2.x', 0, 0.38, 0.50, 0.00, 0.00, 0.00, 80.0, 1, 120, 0.20, 1)",
-    "INSERT OR REPLACE INTO ConnectorStatus (ChargePointId, ConnectorId, ConnectorName, LastStatus, LastStatusTime) VALUES " +
-      "('Test1234', 1, 'Connector 1', 'Available', datetime('now'))," +
-      "('TestAAA', 2, 'Connector 2', 'Available', datetime('now'))",
-    "INSERT OR REPLACE INTO PublicPortalSettings (PublicPortalSettingsId, BrandName, Tagline, SupportEmail, QrScannerEnabled, CreatedAtUtc, UpdatedAtUtc, IdleFeeExcludedWindowEnabled, IdleFeeExcludedWindow) VALUES " +
-      "(1, 'OCPP Core', 'Local E2E portal', 'support@example.test', 1, datetime('now'), datetime('now'), 0, NULL)",
-    "COMMIT",
-  ].join(";");
-
-  runSqlite(runtime.databasePath, sql);
+async function seedDatabase() {
+  await seedTestStack(runtime.databasePath, {
+    cp16Id: "Test1234",
+    cp20Id: "TestAAA",
+    cp21Id: "TestBBB",
+  });
 }
 
 process.on("SIGINT", () => shutdown(0));
@@ -112,7 +125,7 @@ for (const child of [server, management]) {
 
 await waitForUrl(`${runtime.serverBaseUrl}/`);
 await waitForUrl(`${runtime.managementBaseUrl}/Public/Map`);
-seedDatabase();
+await seedDatabase();
 
 const readyPayload = {
   ...runtime,
@@ -123,4 +136,4 @@ writeRuntimeInfo(readyPayload);
 console.log("OCPP_PLAYWRIGHT_STACK_READY");
 console.log(JSON.stringify(readyPayload, null, 2));
 
-await new Promise(() => {});
+await stopStack;

@@ -5,7 +5,11 @@ const channel = process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || undefined;
 
 export default defineConfig({
   testDir: "./tests",
-  testMatch: ["public-status-lifecycle.spec.js", "public-status-ui.spec.js"],
+  testMatch: [
+    "public-status-lifecycle.spec.js",
+    "public-status-ui.spec.js",
+    "public-urgent-validation.spec.js",
+  ],
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,

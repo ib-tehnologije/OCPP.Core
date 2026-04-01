@@ -141,6 +141,7 @@ namespace OCPP.Core.Management.Controllers
                             ChargePoint newChargePoint = new ChargePoint();
                             newChargePoint.ChargePointId = cpvm.ChargePointId;
                             newChargePoint.Name = cpvm.Name;
+                            newChargePoint.PublicDisplayCode = NormalizePublicDisplayCode(cpvm.PublicDisplayCode);
                             newChargePoint.Comment = cpvm.Comment;
                             newChargePoint.Description = cpvm.Description;
                             newChargePoint.Username = cpvm.Username;
@@ -233,6 +234,7 @@ namespace OCPP.Core.Management.Controllers
                         // Save existing charge point
                         Logger.LogTrace("ChargePoint: Saving charge point '{0}'", Id);
                         currentChargePoint.Name = cpvm.Name;
+                        currentChargePoint.PublicDisplayCode = NormalizePublicDisplayCode(cpvm.PublicDisplayCode);
                         currentChargePoint.Comment = cpvm.Comment;
                         currentChargePoint.Description = cpvm.Description;
                         currentChargePoint.Username = cpvm.Username;
@@ -273,6 +275,7 @@ namespace OCPP.Core.Management.Controllers
                         cpvm = new ChargePointViewModel();
                         cpvm.ChargePointId = currentChargePoint.ChargePointId;
                         cpvm.Name = currentChargePoint.Name;
+                        cpvm.PublicDisplayCode = currentChargePoint.PublicDisplayCode;
                         cpvm.Comment = currentChargePoint.Comment;
                         cpvm.Description = currentChargePoint.Description;
                         cpvm.Username = currentChargePoint.Username;
@@ -337,6 +340,13 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return null;
+        }
+
+        private static string NormalizePublicDisplayCode(string publicDisplayCode)
+        {
+            return string.IsNullOrWhiteSpace(publicDisplayCode)
+                ? null
+                : publicDisplayCode.Trim();
         }
     }
 }

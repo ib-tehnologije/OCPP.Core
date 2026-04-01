@@ -33,6 +33,7 @@ namespace OCPP.Core.Database
 
         public string ChargePointId { get; set; }
         public string Name { get; set; }
+        public string PublicDisplayCode { get; set; }
         public string Comment { get; set; }
         public string Description { get; set; }
         public string Username { get; set; }
