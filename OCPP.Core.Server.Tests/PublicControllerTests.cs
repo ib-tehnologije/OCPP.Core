@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -462,7 +466,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Map_MultiConnectorChargePoint_ReportsConnectorCountForChooserFlow()
+        public async Task Map_MultiConnectorChargePoint_ReportsConnectorCountForChooserFlow()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-{Guid.NewGuid():N}.sqlite");
 
@@ -492,7 +496,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Map();
+                var result = await controller.Map();
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
                 var chargePoint = Assert.Single(model.ChargePoints);
@@ -512,7 +516,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Map_UnknownOrStaleStatuses_AreRenderedAsOffline()
+        public async Task Map_UnknownOrStaleStatuses_AreRenderedAsOffline()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-offline-{Guid.NewGuid():N}.sqlite");
 
@@ -542,7 +546,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Map();
+                var result = await controller.Map();
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
                 var chargePoint = Assert.Single(model.ChargePoints);
@@ -559,7 +563,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Map_PublicDisplayCode_IsExposedForPublicPortalRendering()
+        public async Task Map_PublicDisplayCode_IsExposedForPublicPortalRendering()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-public-code-{Guid.NewGuid():N}.sqlite");
 
@@ -580,7 +584,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Map();
+                var result = await controller.Map();
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
                 var chargePoint = Assert.Single(model.ChargePoints);
@@ -595,7 +599,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Map_ChargePointIdCaseMismatch_StillUsesConnectorStatus()
+        public async Task Map_ChargePointIdCaseMismatch_StillUsesConnectorStatus()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-case-{Guid.NewGuid():N}.sqlite");
 
@@ -634,7 +638,7 @@ namespace OCPP.Core.Server.Tests
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = controller.Map();
+                var result = await controller.Map();
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
                 var chargePoint = Assert.Single(model.ChargePoints);
@@ -679,6 +683,98 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal("Offline", model.LastStatus);
                 Assert.Equal("Offline", model.Connectors.Single().LastStatus);
                 Assert.Contains("offline", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Map_LiveChargePointStatus_PreventsStaleAvailableConnectorFromRenderingOffline()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-live-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-LIVE", "Live test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-LIVE",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow.AddHours(-2)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                string payload = "[{\"id\":\"CP-LIVE\",\"onlineConnectors\":{\"1\":{\"status\":\"Available\",\"ocppStatus\":\"Available\"}}}]";
+                using var server = TestHttpServer.Start(_ => TestHttpResponse.Json(payload));
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API",
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var result = await controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("Available", chargePoint.Status);
+                Assert.Equal(1, chargePoint.AvailableConnectorCount);
+                Assert.Equal(0, chargePoint.OfflineConnectorCount);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_LiveChargePointStatus_PreventsStaleAvailableConnectorFromRenderingOffline()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-start-live-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-START-LIVE", "Live start test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-START-LIVE",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow.AddHours(-2)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                string payload = "[{\"id\":\"CP-START-LIVE\",\"onlineConnectors\":{\"1\":{\"status\":\"Available\",\"ocppStatus\":\"Available\"}}}]";
+                using var server = TestHttpServer.Start(request =>
+                {
+                    Assert.Equal("/API/Status", request.Path);
+                    Assert.Equal("test-api-key", request.Headers["X-API-Key"]);
+                    return TestHttpResponse.Json(payload);
+                });
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API",
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var result = await controller.Start("CP-START-LIVE", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("Available", model.LastStatus);
+                Assert.Equal("Available", model.Connectors.Single().LastStatus);
+                Assert.Null(model.AvailabilityMessage);
             }
             finally
             {
@@ -732,10 +828,10 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
-        private static PublicController CreateController(OCPPCoreContext dbContext)
+        private static PublicController CreateController(OCPPCoreContext dbContext, IDictionary<string, string?>? configValues = null)
         {
             IConfiguration config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>())
+                .AddInMemoryCollection(configValues ?? new Dictionary<string, string?>())
                 .Build();
 
             IDataProtectionProvider dataProtectionProvider = DataProtectionProvider.Create(
@@ -800,6 +896,107 @@ namespace OCPP.Core.Server.Tests
             Assert.NotNull(method);
 
             return Assert.IsType<string>(method!.Invoke(null, new object[] { reason }));
+        }
+
+        private sealed class TestHttpServer : IDisposable
+        {
+            private readonly HttpListener _listener;
+            private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+            private readonly Task _serverTask;
+            private readonly Func<TestHttpRequest, TestHttpResponse> _responseFactory;
+
+            private TestHttpServer(Func<TestHttpRequest, TestHttpResponse> responseFactory)
+            {
+                _responseFactory = responseFactory;
+                int port = ReservePort();
+                BaseUri = new Uri($"http://127.0.0.1:{port}/");
+                _listener = new HttpListener();
+                _listener.Prefixes.Add(BaseUri.ToString());
+                _listener.Start();
+                _serverTask = Task.Run(ServeSingleRequestAsync);
+            }
+
+            public Uri BaseUri { get; }
+
+            public static TestHttpServer Start(Func<TestHttpRequest, TestHttpResponse> responseFactory) =>
+                new TestHttpServer(responseFactory);
+
+            public void Dispose()
+            {
+                _cts.Cancel();
+                if (_listener.IsListening)
+                {
+                    _listener.Stop();
+                }
+
+                _listener.Close();
+
+                try
+                {
+                    _serverTask.GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // ignore shutdown races for tests
+                }
+
+                _cts.Dispose();
+            }
+
+            private async Task ServeSingleRequestAsync()
+            {
+                try
+                {
+                    HttpListenerContext context = await _listener.GetContextAsync();
+                    var headers = context.Request.Headers.AllKeys
+                        .Where(key => !string.IsNullOrWhiteSpace(key))
+                        .ToDictionary(
+                            key => key!,
+                            key => context.Request.Headers[key!] ?? string.Empty,
+                            StringComparer.OrdinalIgnoreCase);
+
+                    var response = _responseFactory(new TestHttpRequest(
+                        context.Request.HttpMethod,
+                        context.Request.RawUrl ?? "/",
+                        headers));
+
+                    byte[] bodyBytes = Encoding.UTF8.GetBytes(response.Body);
+                    context.Response.StatusCode = response.StatusCode;
+                    context.Response.ContentType = $"{response.ContentType}; charset=utf-8";
+                    context.Response.ContentLength64 = bodyBytes.LongLength;
+                    await context.Response.OutputStream.WriteAsync(bodyBytes, 0, bodyBytes.Length, _cts.Token);
+                    await context.Response.OutputStream.FlushAsync(_cts.Token);
+                    context.Response.Close();
+                }
+                catch (OperationCanceledException)
+                {
+                    // normal shutdown
+                }
+                catch (ObjectDisposedException)
+                {
+                    // normal shutdown
+                }
+            }
+
+            private static int ReservePort()
+            {
+                var listener = new TcpListener(IPAddress.Loopback, 0);
+                listener.Start();
+                int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                listener.Stop();
+                return port;
+            }
+        }
+
+        private readonly record struct TestHttpRequest(
+            string Method,
+            string Path,
+            IReadOnlyDictionary<string, string> Headers);
+
+        private readonly record struct TestHttpResponse(int StatusCode, string ContentType, string Body)
+        {
+            public static TestHttpResponse Json(string body, int statusCode = StatusCodes.Status200OK) =>
+                new TestHttpResponse(statusCode, "application/json", body);
         }
     }
 }

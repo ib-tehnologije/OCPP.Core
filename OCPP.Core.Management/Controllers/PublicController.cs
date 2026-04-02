@@ -52,7 +52,7 @@ namespace OCPP.Core.Management.Controllers
                 conn = recovery.ConnectorId;
             }
 
-            var model = BuildViewModel(cp, conn);
+            var model = await BuildViewModelAsync(cp, conn);
             var redirect = await ApplyRecoveryAsync(model, recovery);
             if (redirect != null)
             {
@@ -67,7 +67,7 @@ namespace OCPP.Core.Management.Controllers
         public async Task<IActionResult> Start(PublicStartViewModel request)
         {
             int requestedConnectorId = request?.ConnectorId ?? 1;
-            var model = BuildViewModel(request?.ChargePointId, requestedConnectorId);
+            var model = await BuildViewModelAsync(request?.ChargePointId, requestedConnectorId);
             model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
             model.BuyerCompanyName = request?.BuyerCompanyName;
             model.BuyerOib = request?.BuyerOib;
@@ -192,9 +192,9 @@ namespace OCPP.Core.Management.Controllers
         }
 
         [HttpGet]
-        public IActionResult Map()
+        public async Task<IActionResult> Map()
         {
-            var vm = BuildMapViewModel();
+            var vm = await BuildMapViewModelAsync();
             return View(vm);
         }
 
@@ -215,10 +215,11 @@ namespace OCPP.Core.Management.Controllers
             return RedirectToAction(nameof(Start), new { cp = chargePointId, conn = connectorId });
         }
 
-        private PublicMapViewModel BuildMapViewModel()
+        private async Task<PublicMapViewModel> BuildMapViewModelAsync()
         {
             var vm = new PublicMapViewModel();
             var nowUtc = DateTime.UtcNow;
+            var onlineStatuses = await LoadOnlineChargePointStatusesAsync();
 
             var chargePoints = DbContext.ChargePoints.ToList<ChargePoint>();
             var connectorStatuses = DbContext.ConnectorStatuses.ToList<ConnectorStatus>();
@@ -249,6 +250,9 @@ namespace OCPP.Core.Management.Controllers
                     chargePointStatuses,
                     chargePointOpenTransactions,
                     chargePointActiveReservations,
+                    onlineStatuses.TryGetValue(cp.ChargePointId, out var liveChargePointStatus)
+                        ? liveChargePointStatus
+                        : null,
                     NormalizePublicDisplayCode(cp.PublicDisplayCode),
                     nowUtc);
 
@@ -288,7 +292,7 @@ namespace OCPP.Core.Management.Controllers
             return vm;
         }
 
-        private PublicStartViewModel BuildViewModel(string chargePointId, int? requestedConnectorId)
+        private async Task<PublicStartViewModel> BuildViewModelAsync(string chargePointId, int? requestedConnectorId)
         {
             var model = new PublicStartViewModel
             {
@@ -296,6 +300,7 @@ namespace OCPP.Core.Management.Controllers
                 ConnectorId = requestedConnectorId.GetValueOrDefault() > 0 ? requestedConnectorId.Value : 1
             };
             var nowUtc = DateTime.UtcNow;
+            var onlineStatuses = await LoadOnlineChargePointStatusesAsync();
 
             if (string.IsNullOrWhiteSpace(chargePointId))
             {
@@ -348,6 +353,9 @@ namespace OCPP.Core.Management.Controllers
                 connectors,
                 openTransactions,
                 activeReservations,
+                onlineStatuses.TryGetValue(chargePointId, out var liveChargePointStatus)
+                    ? liveChargePointStatus
+                    : null,
                 model.PublicDisplayCode,
                 nowUtc);
 
@@ -417,6 +425,7 @@ namespace OCPP.Core.Management.Controllers
             IReadOnlyCollection<ConnectorStatus> connectorStatuses,
             ISet<int> openTransactions,
             IReadOnlyDictionary<int, DateTime> activeReservations,
+            ChargePointStatus liveChargePointStatus,
             string publicDisplayCode,
             DateTime nowUtc)
         {
@@ -438,6 +447,7 @@ namespace OCPP.Core.Management.Controllers
                 ConnectorStatus connector = connectorStatuses.FirstOrDefault(c => c.ConnectorId == connectorId);
                 bool hasOpenTransaction = openTransactions.Contains(connectorId);
                 bool hasActiveReservation = activeReservations.ContainsKey(connectorId);
+                string liveRawStatus = GetLiveConnectorRawStatus(liveChargePointStatus, connectorId);
                 DateTime? statusTime = connector?.LastStatusTime;
                 if (hasActiveReservation && activeReservations.TryGetValue(connectorId, out var reservationUpdatedAt))
                 {
@@ -448,9 +458,11 @@ namespace OCPP.Core.Management.Controllers
 
                 string effectiveStatus = GetEffectiveConnectorStatus(
                     connector?.LastStatus,
+                    liveRawStatus,
                     statusTime,
                     hasOpenTransaction,
                     hasActiveReservation,
+                    liveChargePointStatus != null,
                     nowUtc);
 
                 states.Add(new PublicConnectorState
@@ -467,6 +479,73 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return states;
+        }
+
+        private async Task<Dictionary<string, ChargePointStatus>> LoadOnlineChargePointStatusesAsync()
+        {
+            var dictOnlineStatus = new Dictionary<string, ChargePointStatus>(StringComparer.OrdinalIgnoreCase);
+
+            string serverApiUrl = Config?.GetValue<string>("ServerApiUrl");
+            if (string.IsNullOrWhiteSpace(serverApiUrl))
+            {
+                return dictOnlineStatus;
+            }
+
+            string apiKeyConfig = Config?.GetValue<string>("ApiKey");
+
+            try
+            {
+                using var httpClient = new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(4)
+                };
+
+                if (!serverApiUrl.EndsWith('/'))
+                {
+                    serverApiUrl += "/";
+                }
+
+                if (!string.IsNullOrWhiteSpace(apiKeyConfig))
+                {
+                    httpClient.DefaultRequestHeaders.Add("X-API-Key", apiKeyConfig);
+                }
+
+                Uri uri = new Uri(new Uri(serverApiUrl), "Status");
+                HttpResponseMessage response = await httpClient.GetAsync(uri);
+                if (response.StatusCode != System.Net.HttpStatusCode.OK)
+                {
+                    Logger.LogWarning("PublicController => Online status request returned {StatusCode}", response.StatusCode);
+                    return dictOnlineStatus;
+                }
+
+                string jsonData = await response.Content.ReadAsStringAsync();
+                if (string.IsNullOrWhiteSpace(jsonData))
+                {
+                    return dictOnlineStatus;
+                }
+
+                var onlineStatusList = JsonConvert.DeserializeObject<ChargePointStatus[]>(jsonData);
+                if (onlineStatusList == null)
+                {
+                    return dictOnlineStatus;
+                }
+
+                foreach (var status in onlineStatusList)
+                {
+                    if (status?.Id == null)
+                    {
+                        continue;
+                    }
+
+                    dictOnlineStatus[status.Id] = status;
+                }
+            }
+            catch (Exception exp)
+            {
+                Logger.LogWarning(exp, "PublicController => Error loading online status feed: {Message}", exp.Message);
+            }
+
+            return dictOnlineStatus;
         }
 
         private static string BuildConnectorDisplayName(ConnectorStatus connector, int connectorId)
@@ -519,31 +598,55 @@ namespace OCPP.Core.Management.Controllers
             return $"{lastSegment}*{connectorId.ToString(CultureInfo.InvariantCulture)}";
         }
 
-        private string GetEffectiveConnectorStatus(string lastStatus, DateTime? lastStatusTime, bool hasOpenTransaction, bool hasActiveReservation, DateTime nowUtc)
+        private static string GetLiveConnectorRawStatus(ChargePointStatus liveChargePointStatus, int connectorId)
+        {
+            if (liveChargePointStatus?.OnlineConnectors != null &&
+                liveChargePointStatus.OnlineConnectors.TryGetValue(connectorId, out var liveConnectorStatus))
+            {
+                return !string.IsNullOrWhiteSpace(liveConnectorStatus.OcppStatus)
+                    ? liveConnectorStatus.OcppStatus
+                    : liveConnectorStatus.Status.ToString();
+            }
+
+            return null;
+        }
+
+        private string GetEffectiveConnectorStatus(
+            string lastStatus,
+            string liveRawStatus,
+            DateTime? lastStatusTime,
+            bool hasOpenTransaction,
+            bool hasActiveReservation,
+            bool isChargePointOnline,
+            DateTime nowUtc)
         {
             if (hasOpenTransaction || hasActiveReservation)
             {
                 return "Occupied";
             }
 
-            if (IsConnectorStatusStale(lastStatusTime, nowUtc))
+            string effectiveRawStatus = !string.IsNullOrWhiteSpace(liveRawStatus)
+                ? liveRawStatus
+                : lastStatus;
+
+            if (!isChargePointOnline && IsConnectorStatusStale(lastStatusTime, nowUtc))
             {
                 return "Offline";
             }
 
-            if (string.IsNullOrWhiteSpace(lastStatus))
+            if (string.IsNullOrWhiteSpace(effectiveRawStatus))
             {
                 return "Offline";
             }
 
-            if (IsAvailableStatus(lastStatus))
+            if (IsAvailableStatus(effectiveRawStatus))
             {
                 return "Available";
             }
 
-            if (string.Equals(lastStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(lastStatus, "Unavailable", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(lastStatus, "Unknown", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(effectiveRawStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveRawStatus, "Unavailable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(effectiveRawStatus, "Unknown", StringComparison.OrdinalIgnoreCase))
             {
                 return "Offline";
             }
