@@ -11,7 +11,7 @@
       "lang.label": "Jezik",
       "qr.title": "Skeniraj QR kod punjača",
       "qr.subtitle": "Skeniraj naljepnicu na punjaču i otvori postojeću stranicu za pokretanje punjenja.",
-      "qr.unsupported": "QR kod nije prepoznat. Koristite postojeći /cp/... ili /Public/Start link.",
+      "qr.unsupported": "QR kod nije prepoznat. Koristite postojeći /cp/..., /evse/... ili /Public/Start link.",
       "qr.camera": "Kamera nije dostupna ili dozvola nije odobrena.",
       "map.title": "Karta punjača",
       "map.stations": "punjača",
@@ -58,7 +58,7 @@
       "lang.label": "Language",
       "qr.title": "Scan charger QR code",
       "qr.subtitle": "Use the QR code printed on the charger sticker to open its existing start page.",
-      "qr.unsupported": "The scanned QR code is not supported. Use an existing /cp/... or /Public/Start link.",
+      "qr.unsupported": "The scanned QR code is not supported. Use an existing /cp/..., /evse/... or /Public/Start link.",
       "qr.camera": "Camera is unavailable or permission was denied.",
       "map.title": "Charging map",
       "map.stations": "station(s)",
@@ -105,7 +105,7 @@
       "lang.label": "Jezik",
       "qr.title": "Skeniraj QR kodo polnilnice",
       "qr.subtitle": "Skenirajte kodo na polnilnici in odprite obstoječo stran za začetek polnjenja.",
-      "qr.unsupported": "Skenirana QR koda ni podprta. Uporabite obstoječo povezavo /cp/... ali /Public/Start.",
+      "qr.unsupported": "Skenirana QR koda ni podprta. Uporabite obstoječo povezavo /cp/..., /evse/... ali /Public/Start.",
       "qr.camera": "Kamera ni na voljo ali dovoljenje ni bilo odobreno.",
       "map.title": "Zemljevid polnilnic",
       "map.stations": "postaj",
@@ -152,7 +152,7 @@
       "lang.label": "Lingua",
       "qr.title": "Scansiona il QR del caricatore",
       "qr.subtitle": "Usa il QR sul caricatore per aprire la pagina esistente di avvio ricarica.",
-      "qr.unsupported": "Il QR scansionato non è supportato. Usa un link esistente /cp/... o /Public/Start.",
+      "qr.unsupported": "Il QR scansionato non è supportato. Usa un link esistente /cp/..., /evse/... o /Public/Start.",
       "qr.camera": "La fotocamera non è disponibile o il permesso è stato negato.",
       "map.title": "Mappa di ricarica",
       "map.stations": "stazioni",
@@ -199,7 +199,7 @@
       "lang.label": "Sprache",
       "qr.title": "QR-Code der Ladestation scannen",
       "qr.subtitle": "Scannen Sie den QR-Code am Ladepunkt, um die vorhandene Startseite zu öffnen.",
-      "qr.unsupported": "Der gescannte QR-Code wird nicht unterstützt. Verwenden Sie einen vorhandenen /cp/...- oder /Public/Start-Link.",
+      "qr.unsupported": "Der gescannte QR-Code wird nicht unterstützt. Verwenden Sie einen vorhandenen /cp/...-, /evse/...- oder /Public/Start-Link.",
       "qr.camera": "Kamera nicht verfügbar oder Berechtigung verweigert.",
       "map.title": "Ladekarte",
       "map.stations": "Stationen",
@@ -246,7 +246,7 @@
       "lang.label": "Langue",
       "qr.title": "Scanner le QR du chargeur",
       "qr.subtitle": "Scannez le QR imprimé sur la borne pour ouvrir sa page de démarrage existante.",
-      "qr.unsupported": "Le QR scanné n'est pas pris en charge. Utilisez un lien /cp/... ou /Public/Start existant.",
+      "qr.unsupported": "Le QR scanné n'est pas pris en charge. Utilisez un lien /cp/..., /evse/... ou /Public/Start existant.",
       "qr.camera": "La caméra n'est pas disponible ou l'autorisation a été refusée.",
       "map.title": "Carte de recharge",
       "map.stations": "stations",
@@ -514,8 +514,9 @@
 
       const path = url.pathname || "";
       const isCpPath = /^\/cp\/[^/]+(?:\/\d+)?\/?$/i.test(path);
+      const isEvsePath = /^\/evse\/[^/]+\/?$/i.test(path);
       const isLegacyStart = /^\/Public\/Start$/i.test(path) && !!url.searchParams.get("cp");
-      if (!isCpPath && !isLegacyStart) {
+      if (!isCpPath && !isEvsePath && !isLegacyStart) {
         return null;
       }
 
