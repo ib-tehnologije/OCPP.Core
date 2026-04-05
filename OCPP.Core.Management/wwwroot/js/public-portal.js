@@ -513,11 +513,16 @@
         : new URL(trimmed, window.location.origin);
 
       const path = url.pathname || "";
-      const isCpPath = /^\/cp\/[^/]+(?:\/\d+)?\/?$/i.test(path);
-      const isEvsePath = /^\/evse\/[^/]+\/?$/i.test(path);
+      const cpOrEvseMatch = path.match(/^\/(cp|evse)\/([^/]+)(?:\/(\d+))?\/?$/i);
       const isLegacyStart = /^\/Public\/Start$/i.test(path) && !!url.searchParams.get("cp");
-      if (!isCpPath && !isEvsePath && !isLegacyStart) {
+      if (!cpOrEvseMatch && !isLegacyStart) {
         return null;
+      }
+
+      if (cpOrEvseMatch) {
+        const id = cpOrEvseMatch[2];
+        const connectorId = cpOrEvseMatch[3];
+        url.pathname = connectorId ? `/cp/${id}/${connectorId}` : `/cp/${id}`;
       }
 
       return url.toString();
