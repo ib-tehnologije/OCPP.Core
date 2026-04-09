@@ -155,3 +155,31 @@ test("reopens the public session from the payment email link", async ({ page, ba
   await expect(page.locator("#status-badge-text")).toHaveText("Charging stopped, unplug vehicle");
   await expect(page.locator("#stat-energy")).toHaveText("24.6");
 });
+
+test("estimates live cost breakdown while the persisted transaction total is still zero", async ({ page }) =>
+{
+  const reservationId = "33333333-3333-3333-3333-333333333333";
+  await mockStatusSequence(page, reservationId, [
+    buildPayload({
+      reservationId,
+      liveSessionEnergyKwh: 1.5,
+      liveMeterKwh: 1.5,
+      pricePerKwh: 0.4,
+      transactionEnergyKwh: 0,
+      transactionEnergyCost: 0,
+      transactionSessionFeeAmount: 0,
+      userSessionFee: 0.5,
+      transactionIdleFeeAmount: 0,
+      liveIdleFeeAmount: 0,
+      liveIdleFeeMinutes: 0,
+    }),
+  ]);
+
+  await page.goto(`/Payments/Status?reservationId=${reservationId}&origin=public&lang=en`);
+
+  await expect(page.locator("#stat-energy")).toHaveText("1.5");
+  await expect(page.locator('[data-i18n="status.label.currentTotal"]')).toHaveText("Estimated total");
+  await expect(page.locator("#stat-cost")).toHaveText("1.10 EUR");
+  await expect(page.locator("#bd-energy")).toHaveText("0.60 EUR");
+  await expect(page.locator("#bd-session-fee")).toHaveText("0.50 EUR");
+});

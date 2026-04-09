@@ -311,6 +311,7 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.Currency).HasMaxLength(10);
                 entity.Property(e => e.FreeReason).HasMaxLength(200);
+                entity.Property(e => e.MaxEnergyKwh).HasColumnType("float");
                 entity.Property(e => e.EnergyCost).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.UserSessionFeeAmount).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.OwnerSessionFeeAmount).HasColumnType("decimal(18,4)");

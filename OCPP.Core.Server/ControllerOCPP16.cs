@@ -78,7 +78,7 @@ namespace OCPP.Core.Server
                     errorCode = HandleStopTransaction(msgIn, msgOut, ocppMiddleware);
                     break;
                 case "MeterValues":
-                    errorCode = HandleMeterValues(msgIn, msgOut);
+                    errorCode = HandleMeterValues(msgIn, msgOut, ocppMiddleware);
                     break;
                 case "StatusNotification":
                     errorCode = HandleStatusNotification(msgIn, msgOut, ocppMiddleware);

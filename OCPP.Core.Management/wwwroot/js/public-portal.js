@@ -306,7 +306,7 @@
       "status.label.status": "Status",
       "status.label.connector": "Priključak",
       "status.label.authorized": "Autorizirano",
-      "status.label.currentTotal": "Potrošnja",
+      "status.label.currentTotal": "Procijenjeni iznos",
       "status.label.sessionDuration": "Trajanje sesije",
       "status.section.progress": "Napredak",
       "status.section.costBreakdown": "Pregled troškova",
@@ -338,6 +338,8 @@
       "status.hint.stopPendingQuiet": "Punjenje je zaustavljeno. Sesija završava nakon ištekavanja, a idle naplata je trenutno pauzirana zbog mirnog razdoblja.",
       "status.hint.notReady": "Punjač još nije spreman. Provjerite kabel i pokušajte ponovno.",
       "status.hint.stopFailed": "Punjač još nije potvrdio zahtjev za zaustavljanje. Pričekajte trenutak i pokušajte ponovno.",
+      "status.hint.maxEnergyStopping": "Dosegnut je konfigurirani limit sesije od {energy} kWh. Zaustavljanje punjenja je zatraženo.",
+      "status.hint.maxEnergyReached": "Sesija je završila nakon dosezanja konfiguriranog limita od {energy} kWh.",
       "status.hint.errorDefault": "Punjač je trenutno nedostupan ili zauzet. Provjerite kabel i pokušajte ponovno.",
       "status.idlePausedByWindow": "Naplata zauzeća je pauzirana tijekom mirnog razdoblja.",
       "status.done.thankYou": "Hvala!",
@@ -387,7 +389,7 @@
       "status.label.status": "Status",
       "status.label.connector": "Connector",
       "status.label.authorized": "Authorized",
-      "status.label.currentTotal": "Consumption",
+      "status.label.currentTotal": "Estimated total",
       "status.label.sessionDuration": "Session duration",
       "status.section.progress": "Progress",
       "status.section.costBreakdown": "Cost breakdown",
@@ -419,6 +421,8 @@
       "status.hint.stopPendingQuiet": "Charging has stopped. The session finishes after unplug, and idle billing is currently paused because of the quiet-hours window.",
       "status.hint.notReady": "Charger is not ready yet. Please check the cable and try again.",
       "status.hint.stopFailed": "The charger did not confirm the stop request yet. Please wait a moment and try again.",
+      "status.hint.maxEnergyStopping": "The configured session cap of {energy} kWh has been reached. A charging stop was requested.",
+      "status.hint.maxEnergyReached": "This session ended after reaching the configured energy cap of {energy} kWh.",
       "status.hint.errorDefault": "The charger is currently offline or occupied. Check the cable and try again.",
       "status.idlePausedByWindow": "Occupancy billing is paused during the quiet-hours window.",
       "status.done.thankYou": "Thank you!",
@@ -447,6 +451,18 @@
       "status.r1.saved": "R1 details saved successfully.",
       "status.r1.failed": "Unable to save R1 details right now. Please try again.",
       "status.refundCalc": "Pre-auth {authorized} - charged {captured} = refund {refund}"
+    },
+    sl: {
+      "status.label.currentTotal": "Ocenjeni znesek"
+    },
+    it: {
+      "status.label.currentTotal": "Importo stimato"
+    },
+    de: {
+      "status.label.currentTotal": "Geschätzter Betrag"
+    },
+    fr: {
+      "status.label.currentTotal": "Montant estimé"
     }
   };
 

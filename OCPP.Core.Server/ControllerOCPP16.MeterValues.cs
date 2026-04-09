@@ -56,7 +56,7 @@ namespace OCPP.Core.Server
 {
     public partial class ControllerOCPP16
     {
-        public string HandleMeterValues(OCPPMessage msgIn, OCPPMessage msgOut)
+        public string HandleMeterValues(OCPPMessage msgIn, OCPPMessage msgOut, OCPPMiddleware ocppMiddleware)
         {
             string errorCode = null;
             MeterValuesResponse meterValuesResponse = new MeterValuesResponse();
@@ -192,6 +192,13 @@ namespace OCPP.Core.Server
                             UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
                             UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime, currentChargeKW, currentImportA, stateOfCharge);
                             UpdateOpenTransactionMeterStop(connectorId, meterKWH);
+                            ocppMiddleware?.NotifyTransactionMeterUpdated(
+                                DbContext,
+                                ChargePointStatus,
+                                connectorId,
+                                meterValueRequest.TransactionId,
+                                meterKWH,
+                                "OCPP16.MeterValues");
                         }
                     }
                 }

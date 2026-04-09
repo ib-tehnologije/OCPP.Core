@@ -74,6 +74,16 @@ namespace OCPP.Core.Server
                         startTransactionResponse.TransactionId = transaction.TransactionId;
 
                         ocppMiddleware?.NotifyTransactionStarted(DbContext, ChargePointStatus, transaction.ConnectorId, idTag, transaction.TransactionId);
+                        if (transaction.MeterStart >= 0)
+                        {
+                            ocppMiddleware?.NotifyTransactionMeterUpdated(
+                                DbContext,
+                                ChargePointStatus,
+                                transaction.ConnectorId,
+                                transaction.TransactionId,
+                                transaction.MeterStart,
+                                "OCPP16.StartTransaction");
+                        }
                     }
                     catch (Exception exp)
                     {

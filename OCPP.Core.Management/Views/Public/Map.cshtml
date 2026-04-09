@@ -10,24 +10,22 @@
 @section Head {
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 }
-    <div class="page-wrap" style="align-items: flex-start; padding-top: 20px;">
+    <div class="page-wrap page-wrap--top">
         <div class="map-container">
-            <div class="card" style="width: 100%; max-width: none;">
+            <div class="card card--wide">
                 <div class="map-header">
                     <h2 data-i18n="map.title">Charging map</h2>
                     <div class="charger-count"><span>@Model.ChargePoints.Count</span> <span data-i18n="map.stations">station(s)</span></div>
                 </div>
 
-                <div style="padding: 0 24px;">
+                <div class="map-canvas-wrap">
                     @if (hasCoords)
                     {
-                        <div style="position: relative;">
-                            <button id="gpsBtn" type="button" title="Center on your location"
-                                    style="position:absolute;right:10px;top:10px;z-index:999;padding:7px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent);font:500 0.82rem var(--font);cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+                        <div class="map-stage">
+                            <button id="gpsBtn" type="button" title="Center on your location" class="map-control-btn map-control-btn--gps">
                                 <span data-i18n="map.gps">GPS</span>
                             </button>
-                            <button id="mapExpandBtn" type="button" title="Expand map"
-                                    style="position:absolute;right:10px;top:48px;z-index:999;padding:7px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--accent);font:500 0.82rem var(--font);cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+                            <button id="mapExpandBtn" type="button" title="Expand map" class="map-control-btn map-control-btn--expand">
                                 <span data-i18n="map.expand">Expand</span>
                             </button>
                             <div id="map"></div>
@@ -35,7 +33,7 @@
                     }
                     else
                     {
-                        <div class="alert-box warning" style="margin: 0 0 16px;">
+                        <div class="alert-box warning map-alert-box">
                             <span class="alert-icon">🗺️</span>
                             <span data-i18n="map.noCoords">No map data available (missing coordinates).</span>
                         </div>
@@ -58,14 +56,14 @@
 
                 <div class="divider"></div>
 
-                <div style="padding: 16px 24px 8px;">
+                <div class="map-section-header">
                     <div class="info-section-title" data-i18n="map.stationsOnMap">Stations on map</div>
                 </div>
 
                 <div class="charger-list" id="charger-list">
                     @if (Model.ChargePoints.Count == 0)
                     {
-                        <div class="tile full" style="grid-column: 1 / -1;">
+                        <div class="tile full">
                             <div class="label" data-i18n="map.noStations">No stations configured yet.</div>
                         </div>
                     }
@@ -136,7 +134,7 @@
                     }
                     @if (Model.ChargePoints.Count > 0)
                     {
-                        <div class="tile full" id="charger-list-empty" style="grid-column: 1 / -1; display: none;">
+                        <div class="tile full" id="charger-list-empty" hidden>
                             <div class="label" data-i18n="map.noVisibleStations">No stations match the current map view.</div>
                         </div>
                     }
@@ -275,7 +273,7 @@
                     `<div class="popup-status">${escapeHtml(availabilitySummary)}</div>`,
                     `<div><span class="popup-power">${escapeHtml(safePrice)}</span></div>`,
                     idleText ? `<div class="popup-status">${escapeHtml(idleText)}</div>` : '',
-                    `<div style="margin-top: 10px;"><a class="btn-secondary" style="margin-top:0;" href="${startUrl}">${startLabel}</a></div>`
+                    `<div class="map-popup-actions"><a class="btn-secondary btn-secondary--compact" href="${startUrl}">${startLabel}</a></div>`
                 ].filter(Boolean).join('');
                 marker.bindPopup(popupHtml);
                 markerLookup[chargePointId] = marker;
@@ -351,7 +349,7 @@
                 }
 
                 if (emptyStateEl) {
-                    emptyStateEl.style.display = visibleCount === 0 ? '' : 'none';
+                    emptyStateEl.hidden = visibleCount !== 0;
                 }
             }
 
