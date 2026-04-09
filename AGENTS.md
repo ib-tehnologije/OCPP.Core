@@ -23,8 +23,15 @@ Commit messages stay short, capitalized, and action-oriented (e.g., `Start trans
 Do not commit real certificates or secrets; `localhost.pfx` and `appsettings.Development.json` are development placeholders. Store SQL Server passwords, API keys, and similar values in user secrets or environment variables as outlined in `Installation.md`. When sharing configuration examples, redact the secrets but preserve the shape of the connection strings for clarity.
 
 ## Migration Policy
-- Do not generate or commit EF Core migration files manually. Schema changes must be handled through the agreed automation or by the maintainers; leave existing migrations untouched.
-- The models can be changed, but tell the user to run the actual migrations for you instead.
+- When EF Core model changes affect the SQL Server schema, create and commit the matching migration in the same change.
+- Use the repo Make targets for migration workflow instead of ad-hoc `dotnet ef` commands:
+  - `make migrate` for a timestamped migration
+  - `make add-migration NAME=MeaningfulName` for a named migration
+  - `make check-migration-metadata` after scaffolding to validate SQL Server migration metadata
+  - `make dbupdate` to apply the latest migration to a local SQL Server database when needed
+- Do not hand-edit generated migration files unless there is a clear reason.
+- For local SQLite, use `make migrate-sqlite`; SQLite schema is recreated via `EnsureCreated()` rather than EF migrations.
+- Existing SQL Server migrations are applied automatically by the server at startup when `AutoMigrateDB=true`, but that only works for migrations that already exist in the repo.
 
 ## Other
 - `dotnet` commands are allowed when they help validate or complete the work.

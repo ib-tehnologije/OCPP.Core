@@ -133,11 +133,15 @@ when a public code exists.
 
 ### 5.2 Data migration and backfill
 
-Do not manually generate EF migrations in this repo.
+Use the repo migration flow for schema changes in this repo:
+
+1. scaffold the migration with `make migrate` or `make add-migration NAME=...`
+2. run `make check-migration-metadata`
+3. apply it locally with `make dbupdate` when needed
 
 Required follow-up outside the code patch:
 
-1. maintainer migration flow adds/applies the `PublicDisplayCode` column where needed
+1. add/apply the `PublicDisplayCode` column where needed
 2. one backfill pass copies `Comment -> PublicDisplayCode` for rows where:
    - `PublicDisplayCode` is empty
    - `Comment` contains the approved public EVSE/station code
@@ -173,4 +177,3 @@ This spec does not change:
 - the payment start POST contracts
 - public translation completeness
 - the public visual redesign/PWA pass
-
