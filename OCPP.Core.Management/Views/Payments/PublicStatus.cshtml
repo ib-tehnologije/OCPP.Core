@@ -33,17 +33,25 @@
                 </div>
                 <h1 class="charger-title" id="charger-title">-</h1>
                 <p class="charger-sub" id="charger-sub">Reservation <span class="mono">@Model.ReservationId</span></p>
+                <div class="public-code-row" id="status-connector-code-row" hidden>
+                    <span class="public-code-pill public-code-pill--connector" id="status-connector-code"></span>
+                </div>
             </div>
 
             <div class="divider"></div>
 
+            <div class="alert-box warning public-cap-alert" id="max-energy-alert" hidden>
+                <span class="alert-icon">⚡</span>
+                <span id="max-energy-alert-text"></span>
+            </div>
+
             <div id="view-waiting" class="session-view active">
-                <div class="info-section" style="padding-bottom:12px;">
+                <div class="info-section info-section--tight-bottom">
                     <div class="info-section-title" data-i18n="status.reservation">Reservation</div>
                     <div class="info-row">
                         <div class="tile">
                             <div class="label" data-i18n="status.label.status">Status</div>
-                            <div class="value" style="color: var(--warning);" id="wait-status">Starting...</div>
+                            <div class="value public-status-value--warning" id="wait-status">Starting...</div>
                         </div>
                         <div class="tile">
                             <div class="label" data-i18n="status.label.authorized">Authorized</div>
@@ -77,7 +85,7 @@
                     </div>
                     <div class="live-stat">
                         <div class="stat-value" id="stat-cost">-</div>
-                        <div class="stat-label" data-i18n="status.label.currentTotal">CONSUMPTION</div>
+                        <div class="stat-label" data-i18n="status.label.currentTotal">ESTIMATED TOTAL</div>
                     </div>
                     <div class="live-stat">
                         <div class="stat-value" id="stat-power">-</div>
@@ -85,7 +93,7 @@
                     </div>
                 </div>
 
-                <div class="info-section" style="padding-bottom: 8px;">
+                <div class="info-section info-section--compact-bottom">
                     <div class="info-section-title" data-i18n="status.section.progress">Progress</div>
                     <div>
                         <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%;"></div></div>
@@ -127,8 +135,8 @@
                     </div>
                 </div>
 
-                <div class="form-section" style="padding-top: 0;">
-                    <button type="button" id="stop-charging" class="btn-secondary" disabled style="border-color: var(--danger-border); color: var(--danger); opacity: 0.65;">
+                <div class="form-section form-section--flush-top">
+                    <button type="button" id="stop-charging" class="btn-secondary btn-secondary--danger" disabled>
                         <span>⏹</span> <span data-i18n="status.action.stopCharging">Stop charging</span>
                     </button>
                 </div>
@@ -137,10 +145,10 @@
             </div>
 
             <div id="view-done" class="session-view">
-                <div style="text-align:center; padding: 24px 24px 8px;">
-                    <div style="font-size: 2.8rem;">✅</div>
-                    <div style="font-size: 1.5rem; font-weight: 700; margin-top: 8px;" data-i18n="status.done.thankYou">Thank you!</div>
-                    <div style="color: var(--text-3); margin-top: 4px;" data-i18n="status.done.completed">Session completed successfully</div>
+                <div class="session-complete-summary">
+                    <div class="session-complete-summary__icon">✅</div>
+                    <div class="session-complete-summary__title" data-i18n="status.done.thankYou">Thank you!</div>
+                    <div class="session-complete-summary__subtitle" data-i18n="status.done.completed">Session completed successfully</div>
                 </div>
 
                 <div class="live-stats">
@@ -211,12 +219,12 @@
                             <div class="value mono" id="done-invoice-updated">-</div>
                         </div>
                     </div>
-                    <div class="form-section" style="padding-top: 0; display:none;" id="done-invoice-actions">
+                    <div class="form-section form-section--flush-top" style="display:none;" id="done-invoice-actions">
                         <a class="btn-secondary" id="done-invoice-link" href="#" target="_blank" rel="noopener" data-i18n="status.action.openInvoice">Open invoice</a>
                     </div>
                 </div>
 
-                <div class="form-section" style="padding-top: 0;">
+                <div class="form-section form-section--flush-top">
                     <a class="btn-primary" href="@mapUrl">
                         <span data-i18n="status.action.backToMap">Back to map</span>
                         <span class="arrow">→</span>
@@ -227,11 +235,11 @@
             </div>
 
             <div id="view-error" class="session-view">
-                <div class="alert-box danger" style="margin-top: 20px;">
+                <div class="alert-box danger alert-box--top">
                     <span class="alert-icon">⚠️</span>
                     <div>
                         <strong id="error-title" data-i18n="status.error.title">Charger failed to start the session</strong><br>
-                        <span style="color: var(--text-3); font-size: 0.82rem;" id="error-desc" data-i18n="status.hint.errorDefault">The charger is offline or occupied. Check the cable and try again.</span>
+                        <span class="error-desc-secondary" id="error-desc" data-i18n="status.hint.errorDefault">The charger is offline or occupied. Check the cable and try again.</span>
                     </div>
                 </div>
 
@@ -239,7 +247,7 @@
                     <div class="info-row">
                         <div class="tile">
                             <div class="label" data-i18n="status.label.paymentStatus">Payment status</div>
-                            <div class="value" style="color: var(--danger);" id="error-payment-status">-</div>
+                            <div class="value public-status-value--danger" id="error-payment-status">-</div>
                             <div class="sub" id="error-no-charge" data-i18n="status.error.noFunds">No funds were charged</div>
                         </div>
                         <div class="tile">
@@ -249,7 +257,7 @@
                     </div>
                 </div>
 
-                <div class="form-section" style="padding-top: 0;">
+                <div class="form-section form-section--flush-top">
                     <a class="btn-primary" id="try-again" href="@startUrlBase">
                         <span data-i18n="status.action.tryAgain">Try again</span>
                         <span class="arrow">→</span>
@@ -269,10 +277,10 @@
                 </div>
             </div>
 
-            <div id="r1-panel" class="info-section" style="padding-top: 0;">
+            <div id="r1-panel" class="info-section info-section--flush-top">
                 <div class="divider"></div>
-                <div class="info-section-title" style="padding-top: 12px;" data-i18n="status.r1.title">R1 invoice (company)</div>
-                <div class="field-help" style="margin-bottom: 12px;" data-i18n="status.r1.subtitle">
+                <div class="info-section-title info-section-title--top-pad" data-i18n="status.r1.title">R1 invoice (company)</div>
+                <div class="field-help field-help--spaced" data-i18n="status.r1.subtitle">
                     Need an R1 invoice? You can submit company details now or later using this secure session link.
                 </div>
                 <div class="info-row">
@@ -285,7 +293,7 @@
                                placeholder="Company / organization name"
                                autocomplete="organization" />
 
-                        <label for="r1-oib" class="field-label" style="margin-top: 10px;" data-i18n="status.r1.oib">OIB (required for R1)</label>
+                        <label for="r1-oib" class="field-label field-label--spaced" data-i18n="status.r1.oib">OIB (required for R1)</label>
                         <input type="text"
                                class="field-input"
                                id="r1-oib"
@@ -297,10 +305,10 @@
                                maxlength="11" />
                         <div class="field-help" data-i18n="status.r1.oibHelp">OIB is validated before the request is saved.</div>
 
-                        <div class="form-section" style="padding: 10px 0 0;">
+                        <div class="form-section form-section--inline">
                             <button type="button" id="r1-submit" class="btn-secondary" data-i18n="status.action.saveR1">Save R1 details</button>
                         </div>
-                        <div id="r1-result" class="field-help" style="margin-top: 8px;"></div>
+                        <div id="r1-result" class="field-help field-help--result"></div>
                     </div>
                 </div>
             </div>
@@ -322,6 +330,10 @@
         const badgeText = document.getElementById("status-badge-text");
         const title = document.getElementById("charger-title");
         const sub = document.getElementById("charger-sub");
+        const connectorCodeRow = document.getElementById("status-connector-code-row");
+        const connectorCode = document.getElementById("status-connector-code");
+        const maxEnergyAlert = document.getElementById("max-energy-alert");
+        const maxEnergyAlertText = document.getElementById("max-energy-alert-text");
 
         const viewWaiting = document.getElementById("view-waiting");
         const viewCharging = document.getElementById("view-charging");
@@ -402,6 +414,23 @@
             if (normalized === "available") return t("map.available");
             if (normalized === "occupied") return t("map.busy");
             return value;
+        };
+
+        const resolveConnectorLabel = (data) => {
+            const connectorName = String(data?.connectorName || "").trim();
+            const shortCode = String(data?.publicConnectorShortCode || "").trim();
+            const connectorId = data?.connectorId != null ? String(data.connectorId).trim() : "";
+            const genericConnectorLabel = connectorId ? `Connector ${connectorId}` : "";
+
+            if (connectorName && connectorName.toLowerCase() !== genericConnectorLabel.toLowerCase()) {
+                return connectorName;
+            }
+
+            if (shortCode) {
+                return shortCode;
+            }
+
+            return genericConnectorLabel || "-";
         };
 
         const fmtMoney = (cents, currency) => {
@@ -550,11 +579,22 @@
 
         const setHeader = (state, data) => {
             const cp = data?.chargePointId || "-";
-            const conn = data?.connectorId != null ? String(data.connectorId) : "-";
+            const connectorLabel = resolveConnectorLabel(data);
             const liveStatus = data?.liveOcppStatus || data?.liveStatus || data?.persistedStatus || "-";
             const liveOcpp = toLower(data?.liveOcppStatus || data?.liveStatus);
             title.textContent = cp;
-            sub.textContent = `${t("status.label.connector")} ${conn} · ${translateLiveStatus(liveStatus)}`;
+            sub.textContent = `${connectorLabel} · ${translateLiveStatus(liveStatus)}`;
+
+            const fullConnectorCode = String(data?.publicConnectorCode || "").trim();
+            if (connectorCodeRow && connectorCode) {
+                if (fullConnectorCode) {
+                    connectorCode.textContent = fullConnectorCode;
+                    connectorCodeRow.hidden = false;
+                } else {
+                    connectorCode.textContent = "";
+                    connectorCodeRow.hidden = true;
+                }
+            }
 
             badge.className = "status-badge";
             if (state === "waitingForDisconnect") {
@@ -607,6 +647,27 @@
                 doneInvoiceLink.removeAttribute("href");
                 doneInvoiceActions.style.display = "none";
             }
+        };
+
+        const renderMaxEnergyNotice = (state, data, maxEnergyKwh) => {
+            if (!maxEnergyAlert || !maxEnergyAlertText) {
+                return;
+            }
+
+            const stopRequested = data?.serverMaxEnergyStopRequested === true;
+            const limitReached = data?.serverMaxEnergyLimitReached === true;
+            if (!(stopRequested || limitReached) || !Number.isFinite(maxEnergyKwh) || maxEnergyKwh <= 0) {
+                maxEnergyAlert.hidden = true;
+                maxEnergyAlertText.textContent = "";
+                maxEnergyAlert.className = "alert-box warning public-cap-alert";
+                return;
+            }
+
+            maxEnergyAlert.hidden = false;
+            maxEnergyAlert.className = `alert-box ${state === "done" ? "info" : "warning"} public-cap-alert`;
+            maxEnergyAlertText.textContent = stopRequested && state !== "done"
+                ? fillTemplate("status.hint.maxEnergyStopping", { energy: fmtNumber(maxEnergyKwh, 1) })
+                : fillTemplate("status.hint.maxEnergyReached", { energy: fmtNumber(maxEnergyKwh, 1) });
         };
 
         const render = (state, data) => {
@@ -678,14 +739,23 @@
             else if (txEnergyKwh != null) sessionEnergy = Number(txEnergyKwh);
             else if (txMeterStop != null && txMeterStart != null) sessionEnergy = Number(txMeterStop) - Number(txMeterStart);
             else if (liveMeterKwh != null && txMeterStart != null) sessionEnergy = Number(liveMeterKwh) - Number(txMeterStart);
+            renderMaxEnergyNotice(state, data, maxEnergyKwh);
 
             statEnergy.textContent = Number.isFinite(sessionEnergy) ? fmtNumber(sessionEnergy, 1) : "-";
             const pricePerKwh = parseAmount(data?.pricePerKwh);
             const liveEnergyCost = Number.isFinite(sessionEnergy) && pricePerKwh !== null
                 ? roundAmount(sessionEnergy * pricePerKwh)
                 : null;
-            const energyCost = parseAmount(data?.transactionEnergyCost) ?? liveEnergyCost;
-            const sessionFeeAmount = parseAmount(data?.transactionSessionFeeAmount) ?? parseAmount(data?.userSessionFee);
+            const persistedEnergyCost = parseAmount(data?.transactionEnergyCost);
+            const preferLiveEnergyCost = state === "charging" || state === "waitingForDisconnect";
+            const energyCost = preferLiveEnergyCost
+                ? (liveEnergyCost ?? persistedEnergyCost)
+                : (persistedEnergyCost ?? liveEnergyCost);
+            const configuredSessionFeeAmount = parseAmount(data?.userSessionFee);
+            const persistedSessionFeeAmount = parseAmount(data?.transactionSessionFeeAmount);
+            const sessionFeeAmount = preferLiveEnergyCost
+                ? (configuredSessionFeeAmount ?? persistedSessionFeeAmount)
+                : (persistedSessionFeeAmount ?? configuredSessionFeeAmount);
             const idleFeeAmount = parseAmount(data?.liveIdleFeeAmount) ?? parseAmount(data?.transactionIdleFeeAmount);
             const currentTotalAmount = sumAmounts(energyCost, sessionFeeAmount, idleFeeAmount);
             statCost.textContent = currentTotalAmount !== null ? fmtAmount(currentTotalAmount, currency) : "-";
@@ -882,6 +952,7 @@
                 errorDesc.textContent = t("status.hint.errorDefault");
                 errorPaymentStatus.textContent = "-";
                 errorLastStatus.textContent = "-";
+                renderMaxEnergyNotice("error", null, NaN);
                 renderInvoice(null);
             }
         }

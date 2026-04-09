@@ -368,25 +368,14 @@ namespace OCPP.Core.Management.Controllers
 
                 model.ConnectorId = selectedConnectorId;
                 model.Connectors = connectorStates
-                    .Select(c => new PublicStartConnectorOption
-                    {
-                        ConnectorId = c.ConnectorId,
-                        Label = !string.IsNullOrWhiteSpace(c.PublicConnectorShortCode)
-                            ? c.PublicConnectorShortCode
-                            : c.DisplayName,
-                        DisplayName = c.DisplayName,
-                        LastStatus = c.EffectiveStatus,
-                        LastStatusTime = c.EffectiveStatusTime,
-                        OccupancyReason = c.OccupancyReason,
-                        AvailabilityMessage = c.AvailabilityMessage,
-                        PublicConnectorCode = c.PublicConnectorCode,
-                        PublicConnectorShortCode = c.PublicConnectorShortCode,
-                        IsSelected = c.ConnectorId == selectedConnectorId
-                    })
+                    .Select(c => BuildPublicStartConnectorOption(c, c.ConnectorId == selectedConnectorId))
                     .ToList();
 
                 var selectedConnector = connectorStates.First(c => c.ConnectorId == selectedConnectorId);
-                model.ConnectorName = selectedConnector.DisplayName;
+                model.ConnectorName = ResolvePublicConnectorPrimaryLabel(
+                    selectedConnector.DisplayName,
+                    selectedConnector.PublicConnectorShortCode,
+                    selectedConnector.ConnectorId);
                 model.PublicConnectorCode = selectedConnector.PublicConnectorCode;
                 model.PublicConnectorShortCode = selectedConnector.PublicConnectorShortCode;
                 model.LastStatus = selectedConnector.EffectiveStatus;
@@ -401,9 +390,7 @@ namespace OCPP.Core.Management.Controllers
                 model.Connectors.Add(new PublicStartConnectorOption
                 {
                     ConnectorId = model.ConnectorId,
-                    Label = !string.IsNullOrWhiteSpace(publicConnectorShortCode)
-                        ? publicConnectorShortCode
-                        : displayName,
+                    Label = ResolvePublicConnectorPrimaryLabel(displayName, publicConnectorShortCode, model.ConnectorId),
                     DisplayName = displayName,
                     PublicConnectorCode = publicConnectorCode,
                     PublicConnectorShortCode = publicConnectorShortCode,
@@ -411,7 +398,7 @@ namespace OCPP.Core.Management.Controllers
                     AvailabilityMessage = BuildAvailabilityMessage("Offline", null),
                     IsSelected = true
                 });
-                model.ConnectorName = displayName;
+                model.ConnectorName = ResolvePublicConnectorPrimaryLabel(displayName, publicConnectorShortCode, model.ConnectorId);
                 model.PublicConnectorCode = publicConnectorCode;
                 model.PublicConnectorShortCode = publicConnectorShortCode;
                 model.LastStatus = "Offline";
@@ -479,6 +466,26 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return states;
+        }
+
+        private static PublicStartConnectorOption BuildPublicStartConnectorOption(PublicConnectorState connectorState, bool isSelected)
+        {
+            return new PublicStartConnectorOption
+            {
+                ConnectorId = connectorState.ConnectorId,
+                Label = ResolvePublicConnectorPrimaryLabel(
+                    connectorState.DisplayName,
+                    connectorState.PublicConnectorShortCode,
+                    connectorState.ConnectorId),
+                DisplayName = connectorState.DisplayName,
+                LastStatus = connectorState.EffectiveStatus,
+                LastStatusTime = connectorState.EffectiveStatusTime,
+                OccupancyReason = connectorState.OccupancyReason,
+                AvailabilityMessage = connectorState.AvailabilityMessage,
+                PublicConnectorCode = connectorState.PublicConnectorCode,
+                PublicConnectorShortCode = connectorState.PublicConnectorShortCode,
+                IsSelected = isSelected
+            };
         }
 
         private async Task<Dictionary<string, ChargePointStatus>> LoadOnlineChargePointStatusesAsync()
@@ -558,6 +565,24 @@ namespace OCPP.Core.Management.Controllers
             return string.IsNullOrWhiteSpace(connector.ConnectorName)
                 ? $"Connector {connector.ConnectorId}"
                 : connector.ConnectorName;
+        }
+
+        private static string ResolvePublicConnectorPrimaryLabel(string displayName, string publicConnectorShortCode, int connectorId)
+        {
+            if (!string.IsNullOrWhiteSpace(displayName) &&
+                !string.Equals(displayName, $"Connector {connectorId}", StringComparison.OrdinalIgnoreCase))
+            {
+                return displayName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(publicConnectorShortCode))
+            {
+                return publicConnectorShortCode;
+            }
+
+            return string.IsNullOrWhiteSpace(displayName)
+                ? $"Connector {connectorId}"
+                : displayName;
         }
 
         private static string NormalizePublicDisplayCode(string value)

@@ -133,6 +133,16 @@ namespace OCPP.Core.Server
 
                                 ocppMiddleware?.NotifyTransactionStarted(DbContext, ChargePointStatus, transaction.ConnectorId, idTag, transaction.TransactionId);
                                 ocppMiddleware?.LinkReservationToTransaction(DbContext, ChargePointStatus.Id, connectorId, idTag, transaction.TransactionId, transaction.StartTime);
+                                if (meterKWH >= 0)
+                                {
+                                    ocppMiddleware?.NotifyTransactionMeterUpdated(
+                                        DbContext,
+                                        ChargePointStatus,
+                                        connectorId,
+                                        transaction.TransactionId,
+                                        meterKWH,
+                                        "OCPP20.TransactionEvent.Started");
+                                }
                             }
                             catch (Exception exp)
                             {
@@ -170,6 +180,13 @@ namespace OCPP.Core.Server
                                 Logger.LogInformation("UpdateTransaction => Meter='{0}' (kWh)", meterKWH);
                                 transaction.MeterStop = meterKWH;
                                 DbContext.SaveChanges();
+                                ocppMiddleware?.NotifyTransactionMeterUpdated(
+                                    DbContext,
+                                    ChargePointStatus,
+                                    connectorId,
+                                    transaction.TransactionId,
+                                    meterKWH,
+                                    "OCPP20.TransactionEvent.Updated");
                             }
                         }
                         else

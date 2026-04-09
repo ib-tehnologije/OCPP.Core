@@ -268,7 +268,7 @@ namespace OCPP.Core.Server.Tests
                     connector =>
                     {
                         Assert.Equal(1, connector.ConnectorId);
-                        Assert.Equal("01*1", connector.Label);
+                        Assert.Equal("Lijevi", connector.Label);
                         Assert.Equal("Lijevi", connector.DisplayName);
                         Assert.Equal("HR*TTK*052009*01*1", connector.PublicConnectorCode);
                         Assert.Equal("01*1", connector.PublicConnectorShortCode);
@@ -276,7 +276,7 @@ namespace OCPP.Core.Server.Tests
                     connector =>
                     {
                         Assert.Equal(2, connector.ConnectorId);
-                        Assert.Equal("01*2", connector.Label);
+                        Assert.Equal("Desni", connector.Label);
                         Assert.Equal("Desni", connector.DisplayName);
                         Assert.Equal("HR*TTK*052009*01*2", connector.PublicConnectorCode);
                         Assert.Equal("01*2", connector.PublicConnectorShortCode);
@@ -683,6 +683,63 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal("Offline", model.LastStatus);
                 Assert.Equal("Offline", model.Connectors.Single().LastStatus);
                 Assert.Contains("offline", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_PublicDisplayCode_WithoutFriendlyConnectorName_FallsBackToPublicShortCode()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-public-code-fallback-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-PUBLIC-FALLBACK", "Fallback public code", "HR*TTK*052009*02");
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-PUBLIC-FALLBACK",
+                            ConnectorId = 1,
+                            LastStatus = "Available"
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-PUBLIC-FALLBACK",
+                            ConnectorId = 2,
+                            LastStatus = "Available"
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("CP-PUBLIC-FALLBACK", 2);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("02*2", model.ConnectorName);
+                Assert.Collection(
+                    model.Connectors.OrderBy(c => c.ConnectorId),
+                    connector =>
+                    {
+                        Assert.Equal(1, connector.ConnectorId);
+                        Assert.Equal("02*1", connector.Label);
+                        Assert.Equal("Connector 1", connector.DisplayName);
+                        Assert.Equal("02*1", connector.PublicConnectorShortCode);
+                    },
+                    connector =>
+                    {
+                        Assert.Equal(2, connector.ConnectorId);
+                        Assert.Equal("02*2", connector.Label);
+                        Assert.Equal("Connector 2", connector.DisplayName);
+                        Assert.Equal("02*2", connector.PublicConnectorShortCode);
+                    });
             }
             finally
             {

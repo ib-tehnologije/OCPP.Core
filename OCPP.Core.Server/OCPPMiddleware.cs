@@ -57,6 +57,7 @@ namespace OCPP.Core.Server
         private int TimoutWaitForCharger = 60 * 1000;   // 60 seconds
 
         private static readonly TimeSpan PersistedStatusStaleAfter = TimeSpan.FromMinutes(10);
+        private const double MaxEnergyComparisonToleranceKwh = 0.0001d;
 
         private readonly RequestDelegate _next;
         private readonly ILoggerFactory _logFactory;
@@ -71,6 +72,7 @@ namespace OCPP.Core.Server
         // Reservation profile disabled: Remove charger-side ReserveNow/CancelReservation to avoid flaky stations.
         private bool ReservationProfileEnabled => false;
         private readonly ConcurrentDictionary<int, DateTime> _idleAutoStopTransactions = new ConcurrentDictionary<int, DateTime>();
+        private readonly ConcurrentDictionary<int, DateTime> _maxEnergyAutoStopTransactions = new ConcurrentDictionary<int, DateTime>();
 
         // Dictionary with status objects for each charge point
         private static readonly ConcurrentDictionary<string, ChargePointStatus> _chargePointStatusDict =
@@ -359,6 +361,189 @@ namespace OCPP.Core.Server
             return null;
         }
 
+        private static bool IsMaxEnergyReached(double sessionEnergyKwh, double maxEnergyKwh)
+        {
+            return maxEnergyKwh > 0 &&
+                   sessionEnergyKwh >= 0 &&
+                   sessionEnergyKwh + MaxEnergyComparisonToleranceKwh >= maxEnergyKwh;
+        }
+
+        private ChargePaymentReservation ResolveReservationForTransaction(OCPPCoreContext dbContext, Transaction transaction)
+        {
+            if (dbContext == null || transaction == null)
+            {
+                return null;
+            }
+
+            IQueryable<ChargePaymentReservation> baseQuery = dbContext.ChargePaymentReservations
+                .Where(r => r.ChargePointId == transaction.ChargePointId && r.ConnectorId == transaction.ConnectorId);
+
+            if (transaction.TransactionId > 0)
+            {
+                var byTransactionId = baseQuery
+                    .Where(r => r.TransactionId == transaction.TransactionId || r.StartTransactionId == transaction.TransactionId)
+                    .OrderByDescending(r => r.CreatedAtUtc)
+                    .FirstOrDefault();
+                if (byTransactionId != null)
+                {
+                    return byTransactionId;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(transaction.StartTagId))
+            {
+                var byTag = baseQuery
+                    .Where(r => r.OcppIdTag == transaction.StartTagId || r.ChargeTagId == transaction.StartTagId)
+                    .OrderByDescending(r => r.CreatedAtUtc)
+                    .FirstOrDefault();
+                if (byTag != null)
+                {
+                    return byTag;
+                }
+            }
+
+            DateTime referenceUtc = transaction.StopTime ?? transaction.StartTime;
+            return baseQuery
+                .Where(r => r.CreatedAtUtc <= referenceUtc.AddHours(6))
+                .OrderByDescending(r => r.CreatedAtUtc)
+                .FirstOrDefault();
+        }
+
+        private double DetermineTransactionMaxEnergyKwh(OCPPCoreContext dbContext, Transaction transaction)
+        {
+            if (transaction == null)
+            {
+                return 0;
+            }
+
+            if (transaction.MaxEnergyKwh > 0)
+            {
+                return transaction.MaxEnergyKwh;
+            }
+
+            var reservation = ResolveReservationForTransaction(dbContext, transaction);
+            if (reservation?.MaxEnergyKwh > 0)
+            {
+                return reservation.MaxEnergyKwh;
+            }
+
+            var chargePoint = dbContext?.ChargePoints?.Find(transaction.ChargePointId);
+            return Math.Max(0, chargePoint?.MaxSessionKwh ?? 0);
+        }
+
+        private void ApplyTransactionMaxEnergySnapshot(OCPPCoreContext dbContext, int transactionId)
+        {
+            if (dbContext == null || transactionId <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var transaction = dbContext.Transactions.Find(transactionId);
+                if (transaction == null || transaction.MaxEnergyKwh > 0)
+                {
+                    return;
+                }
+
+                double maxEnergyKwh = DetermineTransactionMaxEnergyKwh(dbContext, transaction);
+                if (maxEnergyKwh <= 0)
+                {
+                    return;
+                }
+
+                transaction.MaxEnergyKwh = maxEnergyKwh;
+                dbContext.SaveChanges();
+
+                _logger.LogInformation(
+                    "ApplyTransactionMaxEnergySnapshot => tx={TransactionId} cp={ChargePointId} connector={ConnectorId} maxEnergyKwh={MaxEnergyKwh:0.###}",
+                    transaction.TransactionId,
+                    transaction.ChargePointId,
+                    transaction.ConnectorId,
+                    transaction.MaxEnergyKwh);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ApplyTransactionMaxEnergySnapshot => Failed for tx={TransactionId}", transactionId);
+            }
+        }
+
+        public void NotifyTransactionMeterUpdated(
+            OCPPCoreContext dbContext,
+            ChargePointStatus chargePointStatus,
+            int connectorId,
+            int? transactionId,
+            double meterKwh,
+            string source)
+        {
+            if (dbContext == null ||
+                chargePointStatus == null ||
+                connectorId <= 0 ||
+                meterKwh < 0)
+            {
+                return;
+            }
+
+            Transaction transaction = null;
+            if (transactionId.HasValue && transactionId.Value > 0)
+            {
+                transaction = dbContext.Transactions.Find(transactionId.Value);
+                if (transaction != null &&
+                    (transaction.StopTime.HasValue ||
+                     !string.Equals(transaction.ChargePointId, chargePointStatus.Id, StringComparison.OrdinalIgnoreCase) ||
+                     transaction.ConnectorId != connectorId))
+                {
+                    transaction = null;
+                }
+            }
+
+            transaction ??= dbContext.Transactions
+                .Where(t => t.ChargePointId == chargePointStatus.Id &&
+                            t.ConnectorId == connectorId &&
+                            !t.StopTime.HasValue)
+                .OrderByDescending(t => t.TransactionId)
+                .FirstOrDefault();
+
+            if (transaction == null || transaction.StopTime.HasValue)
+            {
+                return;
+            }
+
+            double maxEnergyKwh = DetermineTransactionMaxEnergyKwh(dbContext, transaction);
+            if (maxEnergyKwh <= 0)
+            {
+                return;
+            }
+
+            if (transaction.MaxEnergyKwh <= 0)
+            {
+                transaction.MaxEnergyKwh = maxEnergyKwh;
+                dbContext.SaveChanges();
+            }
+
+            double sessionEnergyKwh = Math.Max(0, meterKwh - transaction.MeterStart);
+            if (!IsMaxEnergyReached(sessionEnergyKwh, maxEnergyKwh))
+            {
+                return;
+            }
+
+            if (!_maxEnergyAutoStopTransactions.TryAdd(transaction.TransactionId, _utcNow()))
+            {
+                return;
+            }
+
+            _logger.LogWarning(
+                "NotifyTransactionMeterUpdated => Max energy reached cp={ChargePointId} connector={ConnectorId} tx={TransactionId} sessionEnergyKwh={SessionEnergyKwh:0.###} maxEnergyKwh={MaxEnergyKwh:0.###} source={Source}",
+                chargePointStatus.Id,
+                connectorId,
+                transaction.TransactionId,
+                sessionEnergyKwh,
+                maxEnergyKwh,
+                source ?? "(none)");
+
+            _ = Task.Run(() => TryAutoStopMaxEnergyTransactionAsync(chargePointStatus.Id, connectorId, transaction.TransactionId, source));
+        }
+
         private static string ResolveSessionStage(
             ChargePaymentReservation reservation,
             Transaction transaction,
@@ -414,6 +599,48 @@ namespace OCPP.Core.Server
 
             var digits = new string(input.Where(char.IsDigit).ToArray());
             return digits.Length == 0 ? null : digits;
+        }
+
+        private static string NormalizePublicDisplayCode(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? null
+                : value.Trim();
+        }
+
+        private static string BuildPublicConnectorCode(string publicDisplayCode, int connectorId)
+        {
+            if (connectorId <= 0)
+            {
+                return null;
+            }
+
+            string normalized = NormalizePublicDisplayCode(publicDisplayCode);
+            return string.IsNullOrWhiteSpace(normalized)
+                ? null
+                : $"{normalized}*{connectorId}";
+        }
+
+        private static string BuildPublicConnectorShortCode(string publicDisplayCode, int connectorId)
+        {
+            if (connectorId <= 0)
+            {
+                return null;
+            }
+
+            string normalized = NormalizePublicDisplayCode(publicDisplayCode);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return null;
+            }
+
+            string lastSegment = normalized
+                .Split(new[] { '*', '-' }, StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault();
+
+            return string.IsNullOrWhiteSpace(lastSegment)
+                ? null
+                : $"{lastSegment}*{connectorId}";
         }
 
         /// <summary>
@@ -728,6 +955,79 @@ namespace OCPP.Core.Server
             finally
             {
                 _idleAutoStopTransactions.TryRemove(transactionId, out _);
+            }
+        }
+
+        private async Task TryAutoStopMaxEnergyTransactionAsync(string chargePointId, int connectorId, int transactionId, string source)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+
+                var transaction = await dbContext.Transactions.FindAsync(transactionId);
+                if (transaction == null || transaction.StopTime.HasValue)
+                {
+                    _maxEnergyAutoStopTransactions.TryRemove(transactionId, out _);
+                    return;
+                }
+
+                double maxEnergyKwh = DetermineTransactionMaxEnergyKwh(dbContext, transaction);
+                if (maxEnergyKwh <= 0)
+                {
+                    _maxEnergyAutoStopTransactions.TryRemove(transactionId, out _);
+                    return;
+                }
+
+                double? meterKwh = transaction.MeterStop;
+                if ((!meterKwh.HasValue || meterKwh.Value < 0) &&
+                    _chargePointStatusDict.TryGetValue(chargePointId, out var liveStatus) &&
+                    liveStatus.OnlineConnectors != null &&
+                    liveStatus.OnlineConnectors.TryGetValue(connectorId, out var onlineConnector))
+                {
+                    meterKwh = onlineConnector.MeterKWH;
+                }
+
+                double sessionEnergyKwh = meterKwh.HasValue
+                    ? Math.Max(0, meterKwh.Value - transaction.MeterStart)
+                    : -1;
+                if (!meterKwh.HasValue || !IsMaxEnergyReached(sessionEnergyKwh, maxEnergyKwh))
+                {
+                    _maxEnergyAutoStopTransactions.TryRemove(transactionId, out _);
+                    return;
+                }
+
+                if (!TryResolveLiveChargePointStatus(chargePointId, "TryAutoStopMaxEnergyTransaction", out var chargePointStatus))
+                {
+                    _logger.LogInformation(
+                        "TryAutoStopMaxEnergyTransaction => Skipping because charger is offline cp={ChargePointId} connector={ConnectorId} tx={TransactionId} source={Source}",
+                        chargePointId,
+                        connectorId,
+                        transactionId,
+                        source ?? "(none)");
+                    return;
+                }
+
+                string apiResult = await ExecuteRemoteStopAsync(chargePointStatus, dbContext, transaction);
+                _logger.LogInformation(
+                    "TryAutoStopMaxEnergyTransaction => Auto-stop attempted cp={ChargePointId} connector={ConnectorId} tx={TransactionId} source={Source} sessionEnergyKwh={SessionEnergyKwh:0.###} maxEnergyKwh={MaxEnergyKwh:0.###} result={Result}",
+                    chargePointId,
+                    connectorId,
+                    transactionId,
+                    source ?? "(none)",
+                    sessionEnergyKwh,
+                    maxEnergyKwh,
+                    ExtractStatusFromApiResult(apiResult) ?? apiResult ?? "(null)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "TryAutoStopMaxEnergyTransaction => Failed cp={ChargePointId} connector={ConnectorId} tx={TransactionId} source={Source}",
+                    chargePointId,
+                    connectorId,
+                    transactionId,
+                    source ?? "(none)");
             }
         }
 
@@ -1967,6 +2267,10 @@ namespace OCPP.Core.Server
             double? liveMeterKwh = null;
             double? liveSoC = null;
             DateTime? liveMeterValueAtUtc = null;
+            string connectorName = null;
+            string publicDisplayCode = null;
+            string publicConnectorShortCode = null;
+            string publicConnectorCode = null;
             bool activeTx = false;
             bool activeReservation = false;
             StartabilityResult startability = null;
@@ -1998,8 +2302,19 @@ namespace OCPP.Core.Server
             var persisted = dbContext.ConnectorStatuses.Find(reservation.ChargePointId, reservation.ConnectorId);
             if (persisted != null)
             {
+                connectorName = string.IsNullOrWhiteSpace(persisted.ConnectorName)
+                    ? null
+                    : persisted.ConnectorName.Trim();
                 persistedStatus = persisted.LastStatus;
                 persistedStatusTime = persisted.LastStatusTime;
+            }
+
+            var chargePoint = dbContext.ChargePoints.Find(reservation.ChargePointId);
+            if (chargePoint != null)
+            {
+                publicDisplayCode = NormalizePublicDisplayCode(chargePoint.PublicDisplayCode);
+                publicConnectorShortCode = BuildPublicConnectorShortCode(publicDisplayCode, reservation.ConnectorId);
+                publicConnectorCode = BuildPublicConnectorCode(publicDisplayCode, reservation.ConnectorId);
             }
 
             transaction = ResolveReservationTransaction(dbContext, reservation);
@@ -2051,6 +2366,30 @@ namespace OCPP.Core.Server
             }
 
             double? liveSessionEnergyKwh = ResolveLiveSessionEnergyKwh(transaction, reservation, liveMeterKwh);
+            double effectiveMaxEnergyKwh = transaction?.MaxEnergyKwh > 0
+                ? transaction.MaxEnergyKwh
+                : reservation.MaxEnergyKwh;
+            DateTime? serverMaxEnergyStopRequestedAtUtc = null;
+            bool serverMaxEnergyStopRequested = false;
+            if (transaction != null &&
+                _maxEnergyAutoStopTransactions.TryGetValue(transaction.TransactionId, out var maxEnergyStopRequestedAtUtcRaw))
+            {
+                serverMaxEnergyStopRequested = true;
+                serverMaxEnergyStopRequestedAtUtc = maxEnergyStopRequestedAtUtcRaw;
+            }
+            bool serverMaxEnergyLimitReached = false;
+            if (effectiveMaxEnergyKwh > 0)
+            {
+                if (serverMaxEnergyStopRequested ||
+                    (transaction?.StopReason?.IndexOf("EnergyLimitReached", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    serverMaxEnergyLimitReached = true;
+                }
+                else if (liveSessionEnergyKwh.HasValue && IsMaxEnergyReached(liveSessionEnergyKwh.Value, effectiveMaxEnergyKwh))
+                {
+                    serverMaxEnergyLimitReached = true;
+                }
+            }
             string sessionStage = ResolveSessionStage(reservation, transaction, activeTx, liveStatus, liveOcppStatus, persistedStatus);
 
             var payload = new
@@ -2060,6 +2399,9 @@ namespace OCPP.Core.Server
                 reservationId = reservation.ReservationId,
                 chargePointId = reservation.ChargePointId,
                 connectorId = reservation.ConnectorId,
+                connectorName,
+                publicConnectorShortCode,
+                publicConnectorCode,
                 transactionId = transaction?.TransactionId ?? reservation.TransactionId,
                 startTransactionId = reservation.StartTransactionId,
                 lastError = reservation.LastError,
@@ -2079,7 +2421,8 @@ namespace OCPP.Core.Server
                 stopTransactionAtUtc = reservation.StopTransactionAtUtc,
                 disconnectedAtUtc = reservation.DisconnectedAtUtc,
                 lastOcppEventAtUtc = reservation.LastOcppEventAtUtc,
-                maxEnergyKwh = reservation.MaxEnergyKwh,
+                maxEnergyKwh = effectiveMaxEnergyKwh,
+                transactionMaxEnergyKwh = transaction?.MaxEnergyKwh,
                 pricePerKwh = reservation.PricePerKwh,
                 userSessionFee = reservation.UserSessionFee,
                 usageFeePerMinute = reservation.UsageFeePerMinute,
@@ -2114,6 +2457,9 @@ namespace OCPP.Core.Server
                 transactionIdleFeeMinutes = transaction?.IdleUsageFeeMinutes,
                 transactionIdleFeeAmount = transaction?.IdleUsageFeeAmount,
                 transactionSessionFeeAmount = transaction?.UserSessionFeeAmount,
+                serverMaxEnergyStopRequested,
+                serverMaxEnergyStopRequestedAtUtc,
+                serverMaxEnergyLimitReached,
                 suspendedEvSinceUtc = idleFeeSnapshot?.SuspendedSinceUtc,
                 idleFeeStartsAtUtc = idleFeeSnapshot?.IdleFeeStartAtUtc,
                 idleBillingPausedByWindow = idleFeeSnapshot?.BillingPausedByExcludedWindow ?? false,
@@ -2737,8 +3083,10 @@ namespace OCPP.Core.Server
         {
             if (chargePointStatus == null) return;
             _idleAutoStopTransactions.TryRemove(transactionId, out _);
+            _maxEnergyAutoStopTransactions.TryRemove(transactionId, out _);
             _paymentCoordinator?.MarkTransactionStarted(dbContext, chargePointStatus.Id, connectorId, chargeTagId, transactionId);
             LinkReservationToTransaction(dbContext, chargePointStatus.Id, connectorId, chargeTagId, transactionId, _utcNow());
+            ApplyTransactionMaxEnergySnapshot(dbContext, transactionId);
         }
 
         public void LinkReservationToTransaction(OCPPCoreContext dbContext, string chargePointId, int connectorId, string idTag, int transactionId, DateTime startTime)
@@ -2752,6 +3100,7 @@ namespace OCPP.Core.Server
             if (transaction != null)
             {
                 _idleAutoStopTransactions.TryRemove(transaction.TransactionId, out _);
+                _maxEnergyAutoStopTransactions.TryRemove(transaction.TransactionId, out _);
             }
         }
 

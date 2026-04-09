@@ -38,6 +38,7 @@ namespace OCPP.Core.Database
         public DateTime? StopTime { get; set; }
         public double? MeterStop { get; set; }
         public string StopReason { get; set; }
+        public double MaxEnergyKwh { get; set; }
         public double EnergyKwh { get; set; }
         public decimal EnergyCost { get; set; }
         public int UsageFeeMinutes { get; set; }

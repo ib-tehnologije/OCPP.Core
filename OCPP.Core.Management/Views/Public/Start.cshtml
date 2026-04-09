@@ -9,7 +9,9 @@
         ? Model.ChargePointId
         : Model.ChargePointName;
     var connectorLabel = string.IsNullOrWhiteSpace(Model.ConnectorName)
-        ? $"Connector {Model.ConnectorId}"
+        ? (!string.IsNullOrWhiteSpace(Model.PublicConnectorShortCode)
+            ? Model.PublicConnectorShortCode
+            : $"Connector {Model.ConnectorId}")
         : Model.ConnectorName;
     var selectedConnectorCode = string.IsNullOrWhiteSpace(Model.PublicConnectorCode)
         ? connectorLabel
@@ -92,12 +94,11 @@
                             var connectorUrl = Url.RouteUrl("public-start-path", new { cp = Model.ChargePointId, conn = connector.ConnectorId })
                                 ?? Url.Action("Start", "Public", new { cp = Model.ChargePointId, conn = connector.ConnectorId });
                             var connectorBadgeClass = ConnectorBadgeClass(connector.LastStatus);
-                            var connectorPrimaryLabel = !string.IsNullOrWhiteSpace(connector.PublicConnectorShortCode)
+                            var connectorPrimaryLabel = connector.Label;
+                            var connectorSecondaryLabel = !string.IsNullOrWhiteSpace(connector.PublicConnectorShortCode) &&
+                                !string.Equals(connector.PublicConnectorShortCode, connectorPrimaryLabel, StringComparison.OrdinalIgnoreCase)
                                 ? connector.PublicConnectorShortCode
-                                : connector.Label;
-                            var connectorSecondaryLabel = string.Equals(connector.DisplayName, connectorPrimaryLabel, StringComparison.OrdinalIgnoreCase)
-                                ? null
-                                : connector.DisplayName;
+                                : null;
                             var connectorStatusLabel = string.IsNullOrWhiteSpace(connector.LastStatus) ? "Offline" : connector.LastStatus;
                             if (isFree && string.Equals(connectorStatusLabel, "Available", StringComparison.OrdinalIgnoreCase))
                             {
@@ -106,6 +107,7 @@
                             <a class="connector-option @(connector.IsSelected ? "selected" : "")"
                                href="@connectorUrl"
                                data-connector-id="@connector.ConnectorId"
+                               data-connector-label="@connector.Label"
                                data-connector-name="@connector.DisplayName"
                                data-last-status="@connectorStatusLabel"
                                data-badge-class="@connectorBadgeClass"
@@ -236,7 +238,7 @@
 
             @if (!Model.HasRecoveryOptions)
             {
-                <div class="alert-box warning" id="availability-message" style="margin: 0 24px 16px;" @(!Model.HasAvailabilityMessage ? "hidden" : null)>
+                <div class="alert-box warning alert-box--section" id="availability-message" @(!Model.HasAvailabilityMessage ? "hidden" : null)>
                     <span class="alert-icon">⏳</span>
                     <span data-availability-text>@Model.AvailabilityMessage</span>
                 </div>
@@ -245,12 +247,12 @@
             @if (Model.HasRecoveryOptions)
             {
                 <div class="form-section">
-                    <div class="alert-box warning" style="margin-bottom: 16px;">
+                    <div class="alert-box warning alert-box--stack">
                         <span class="alert-icon">⏳</span>
                         <span>@Model.RecoveryMessage</span>
                     </div>
 
-                    <div class="field-help" style="margin-bottom: 12px;">Reservation <span class="mono">@Model.RecoveryReservationId</span> · status @Model.RecoveryReservationStatus</div>
+                    <div class="field-help field-help--spaced">Reservation <span class="mono">@Model.RecoveryReservationId</span> · status @Model.RecoveryReservationStatus</div>
 
                     @if (Model.CanResumeRecovery)
                     {
@@ -260,7 +262,7 @@
                         </a>
                     }
 
-                    <form method="post" asp-action="CancelRecovery" style="margin-top: 12px;">
+                    <form method="post" asp-action="CancelRecovery" class="stack-gap-sm">
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="chargePointId" value="@Model.ChargePointId" />
                         <input type="hidden" name="connectorId" value="@Model.ConnectorId" />
@@ -268,7 +270,7 @@
                         <button type="submit" class="btn-secondary">Cancel previous attempt</button>
                     </form>
 
-                    <a class="btn-secondary" style="margin-top: 12px;" href="@mapUrl">Back to map</a>
+                    <a class="btn-secondary stack-gap-sm" href="@mapUrl">Back to map</a>
                 </div>
             }
             else
@@ -291,7 +293,7 @@
                         <label for="buyerCompanyName" class="field-label" data-i18n="start.companyName">Company name (optional)</label>
                         <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" data-i18n-placeholder="start.companyNamePlaceholder" autocomplete="organization" />
 
-                        <label for="buyerOib" class="field-label" style="margin-top: 10px;" data-i18n="start.oib">OIB (required for R1)</label>
+                        <label for="buyerOib" class="field-label field-label--spaced" data-i18n="start.oib">OIB (required for R1)</label>
                         <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" data-i18n-placeholder="start.oibPlaceholder" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
                         <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
                     </div>
@@ -380,14 +382,14 @@
                         const connectorId = option.dataset.connectorId || '';
                         const statusText = option.dataset.lastStatus || 'Offline';
                         const badgeClass = option.dataset.badgeClass || 'waiting';
-                        const displayName = option.dataset.connectorName || `Connector ${connectorId}`;
-                        const publicCode = option.dataset.publicCode || displayName;
+                        const displayLabel = option.dataset.connectorLabel || option.dataset.connectorName || `Connector ${connectorId}`;
+                        const publicCode = option.dataset.publicCode || displayLabel;
                         const availabilityMessage = option.dataset.availabilityMessage || '';
 
                         connectorInput.value = connectorId;
                         badge.className = `status-badge ${badgeClass}`;
                         badgeText.textContent = statusText;
-                        connectorName.textContent = displayName;
+                        connectorName.textContent = displayLabel;
                         connectorCode.textContent = publicCode;
                         updateAvailability(availabilityMessage);
                         syncMeta(option);
@@ -413,21 +415,21 @@
 
             @if (Model.HasError)
             {
-                <div class="alert-box danger" style="margin-bottom:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
+                <div class="alert-box danger alert-box--flush">
                     <span class="alert-icon">⚠️</span>
                     <span>@Model.ErrorMessage</span>
                 </div>
             }
             else if (Model.HasRecoveryOptions)
             {
-                <div class="alert-box warning" style="margin-bottom:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
+                <div class="alert-box warning alert-box--flush">
                     <span class="alert-icon">⏳</span>
                     <span data-i18n="start.finishPreviousCheckout">Finish or cancel the previous checkout before starting a new session on this connector.</span>
                 </div>
             }
             else
             {
-                <div class="alert-box info" style="margin-bottom:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
+                <div class="alert-box info alert-box--flush">
                     <span class="alert-icon">🔒</span>
                     <span data-i18n="@(Model.FreeChargingEnabled ? "start.freeInfo" : "start.secureInfo")">@(Model.FreeChargingEnabled ? "Free charging enabled. No payment will be charged." : "Secure payment via Stripe. Only the actual cost is charged.")</span>
                 </div>

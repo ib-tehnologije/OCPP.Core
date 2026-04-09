@@ -181,6 +181,70 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task HandlePaymentStatusAsync_IncludesPublicConnectorPresentationFields()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-public-connector-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-PUBLIC-CONNECTOR",
+                        Name = "Public connector test",
+                        PublicDisplayCode = "HR*TTK*052009*01"
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-PUBLIC-CONNECTOR",
+                        ConnectorId = 2,
+                        ConnectorName = "Desni",
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-PUBLIC-CONNECTOR",
+                        ConnectorId = 2,
+                        ChargeTagId = "TAG-PUBLIC-CONNECTOR",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Authorized,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.Method = "GET";
+                httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                httpContext.Response.Body = new MemoryStream();
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                }
+
+                httpContext.Response.Body.Position = 0;
+                using var reader = new StreamReader(httpContext.Response.Body);
+                var json = await reader.ReadToEndAsync();
+                var payload = JObject.Parse(json);
+
+                Assert.Equal("Desni", payload["connectorName"]?.Value<string>());
+                Assert.Equal("01*2", payload["publicConnectorShortCode"]?.Value<string>());
+                Assert.Equal("HR*TTK*052009*01*2", payload["publicConnectorCode"]?.Value<string>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task HandlePaymentStatusAsync_UsesCanonicalLifecycleAndLiveEnergyFields()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-canonical-{Guid.NewGuid():N}.sqlite");
@@ -1193,6 +1257,225 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void NotifyTransactionMeterUpdated_SnapshotsChargePointLimit_AndDeduplicatesOverCapTicks()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-max-energy-track-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                int transactionId;
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-MAX-TRACK",
+                        Name = "CP-MAX-TRACK",
+                        MaxSessionKwh = 80
+                    });
+                    var transaction = new Transaction
+                    {
+                        ChargePointId = "CP-MAX-TRACK",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-MAX-TRACK",
+                        StartTime = DateTime.UtcNow.AddMinutes(-20),
+                        MeterStart = 100
+                    };
+                    setupContext.Transactions.Add(transaction);
+                    setupContext.SaveChanges();
+                    transactionId = transaction.TransactionId;
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var middleware = CreateMiddleware(serviceProvider: CreateServiceProvider(databasePath));
+                var chargePointStatus = new ChargePointStatus
+                {
+                    Id = "CP-MAX-TRACK",
+                    Protocol = "ocpp1.6"
+                };
+
+                middleware.NotifyTransactionMeterUpdated(actionContext, chargePointStatus, 1, transactionId, 179.9, "BelowCap");
+                Assert.Empty(GetMaxEnergyAutoStopTransactions(middleware));
+
+                actionContext.Entry(actionContext.Transactions.Single(t => t.TransactionId == transactionId)).Reload();
+                Assert.Equal(80, actionContext.Transactions.Single(t => t.TransactionId == transactionId).MaxEnergyKwh);
+
+                middleware.NotifyTransactionMeterUpdated(actionContext, chargePointStatus, 1, transactionId, 180.0, "AtCap");
+                var tracked = GetMaxEnergyAutoStopTransactions(middleware);
+                Assert.True(tracked.ContainsKey(transactionId));
+                var firstRequestedAt = tracked[transactionId];
+
+                middleware.NotifyTransactionMeterUpdated(actionContext, chargePointStatus, 1, transactionId, 181.4, "AboveCapAgain");
+                Assert.Single(tracked);
+                Assert.Equal(firstRequestedAt, tracked[transactionId]);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task TryAutoStopMaxEnergyTransactionAsync_RemoteStopsReachedTransaction()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-max-energy-stop-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                int transactionId;
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-MAX-STOP",
+                        Name = "CP-MAX-STOP"
+                    });
+                    var transaction = new Transaction
+                    {
+                        ChargePointId = "CP-MAX-STOP",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-MAX-STOP",
+                        StartTime = DateTime.UtcNow.AddMinutes(-25),
+                        MeterStart = 5.0,
+                        MeterStop = 85.2,
+                        MaxEnergyKwh = 80
+                    };
+                    setupContext.Transactions.Add(transaction);
+                    setupContext.SaveChanges();
+                    transactionId = transaction.TransactionId;
+                }
+
+                bool remoteStopAttempted = false;
+                var middleware = CreateMiddleware(serviceProvider: CreateServiceProvider(databasePath));
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    remoteStopAttempted = true;
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.NotNull(queuedMessage?.TaskCompletionSource);
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-MAX-STOP"] = new ChargePointStatus
+                    {
+                        Id = "CP-MAX-STOP",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket,
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Occupied,
+                                MeterKWH = 85.2
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    await InvokeTryAutoStopMaxEnergyTransactionAsync(middleware, "CP-MAX-STOP", 1, transactionId, "UnitTest");
+                    Assert.True(remoteStopAttempted);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task HandlePaymentStatusAsync_IncludesMaxEnergyMetadata()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-max-energy-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            DateTime requestedAtUtc = DateTime.UtcNow.AddSeconds(-30);
+
+            try
+            {
+                int transactionId;
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-STATUS-MAX",
+                        Name = "CP-STATUS-MAX",
+                        MaxSessionKwh = 80
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-STATUS-MAX",
+                        ConnectorId = 1,
+                        ConnectorName = "Connector A",
+                        LastStatus = "Charging",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    var transaction = new Transaction
+                    {
+                        ChargePointId = "CP-STATUS-MAX",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-STATUS-MAX",
+                        StartTime = DateTime.UtcNow.AddMinutes(-15),
+                        StopTime = DateTime.UtcNow.AddMinutes(-1),
+                        MeterStart = 10,
+                        MeterStop = 85.4,
+                        MaxEnergyKwh = 75
+                    };
+                    setupContext.Transactions.Add(transaction);
+                    setupContext.SaveChanges();
+                    transactionId = transaction.TransactionId;
+
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-STATUS-MAX",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-STATUS-MAX",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Completed,
+                        TransactionId = transactionId,
+                        MaxEnergyKwh = 80,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20),
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(serviceProvider: CreateServiceProvider(databasePath));
+                GetMaxEnergyAutoStopTransactions(middleware)[transactionId] = requestedAtUtc;
+
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.Method = "GET";
+                httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                httpContext.Response.Body = new MemoryStream();
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                }
+
+                httpContext.Response.Body.Position = 0;
+                using var reader = new StreamReader(httpContext.Response.Body);
+                var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                Assert.Equal(75, payload["maxEnergyKwh"]?.Value<double>());
+                Assert.Equal(75, payload["transactionMaxEnergyKwh"]?.Value<double>());
+                Assert.True(payload["serverMaxEnergyStopRequested"]?.Value<bool>());
+                Assert.True(payload["serverMaxEnergyLimitReached"]?.Value<bool>());
+                Assert.NotNull(payload["serverMaxEnergyStopRequestedAtUtc"]?.Value<DateTime>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public void NotifyConnectorOcppStatus_DoesNotTrackIdleAutoStop_WhenDisabled()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-auto-stop-disabled-{Guid.NewGuid():N}.sqlite");
@@ -1846,6 +2129,22 @@ namespace OCPP.Core.Server.Tests
             await task;
         }
 
+        private static async Task InvokeTryAutoStopMaxEnergyTransactionAsync(
+            OCPPMiddleware middleware,
+            string chargePointId,
+            int connectorId,
+            int transactionId,
+            string source)
+        {
+            var method = typeof(OCPPMiddleware)
+                .GetMethod("TryAutoStopMaxEnergyTransactionAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            var task = Assert.IsAssignableFrom<Task>(method.Invoke(middleware, new object[] { chargePointId, connectorId, transactionId, source }));
+            await task;
+        }
+
         private static async Task<string> InvokeExecuteRequestStartTransaction20Async(
             OCPPMiddleware middleware,
             ChargePointStatus chargePointStatus,
@@ -1945,6 +2244,15 @@ namespace OCPP.Core.Server.Tests
         {
             var field = typeof(OCPPMiddleware)
                 .GetField("_idleAutoStopTransactions", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(field);
+            return Assert.IsType<ConcurrentDictionary<int, DateTime>>(field.GetValue(middleware));
+        }
+
+        private static ConcurrentDictionary<int, DateTime> GetMaxEnergyAutoStopTransactions(OCPPMiddleware middleware)
+        {
+            var field = typeof(OCPPMiddleware)
+                .GetField("_maxEnergyAutoStopTransactions", BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.NotNull(field);
             return Assert.IsType<ConcurrentDictionary<int, DateTime>>(field.GetValue(middleware));
