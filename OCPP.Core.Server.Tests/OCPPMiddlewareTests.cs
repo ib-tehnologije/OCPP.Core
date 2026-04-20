@@ -1528,6 +1528,211 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task NotifyConnectorPreparing_AutoReassignsSingleAwaitingPlugReservationToPreparingConnector()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-misplug-remap-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            var remoteStartSent = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-MISPLUG",
+                        ConnectorId = 1,
+                        ChargeTagId = "WEB-MISPLUG",
+                        OcppIdTag = "MISPLUG001",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Authorized,
+                        AwaitingPlug = true,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                        UpdatedAtUtc = DateTime.UtcNow,
+                        StartDeadlineAtUtc = DateTime.UtcNow.AddMinutes(10)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(serviceProvider: CreateServiceProvider(databasePath));
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.NotNull(queuedMessage?.TaskCompletionSource);
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    remoteStartSent.TrySetResult(true);
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-MISPLUG"] = new ChargePointStatus
+                    {
+                        Id = "CP-MISPLUG",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket,
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Available,
+                                OcppStatus = "Available"
+                            },
+                            [2] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Preparing,
+                                OcppStatus = "Preparing"
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    middleware.NotifyConnectorPreparing("CP-MISPLUG", 2);
+
+                    var sentTask = await Task.WhenAny(remoteStartSent.Task, Task.Delay(3000));
+                    Assert.Same(remoteStartSent.Task, sentTask);
+
+                    await WaitUntilAsync(() =>
+                    {
+                        using var verificationContext = CreateContext(databasePath);
+                        var reservation = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                        return reservation.ConnectorId == 2 &&
+                               reservation.Status == PaymentReservationStatus.StartRequested &&
+                               reservation.AwaitingPlug == false &&
+                               reservation.RemoteStartResult == "Accepted";
+                    });
+
+                    using var finalContext = CreateContext(databasePath);
+                    var persisted = finalContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+
+                    Assert.Equal(2, persisted.ConnectorId);
+                    Assert.Equal(PaymentReservationStatus.StartRequested, persisted.Status);
+                    Assert.False(persisted.AwaitingPlug ?? true);
+                    Assert.Equal("Accepted", persisted.RemoteStartResult);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task NotifyConnectorPreparing_DoesNotAutoReassignWhenMultipleAwaitingReservationsExist()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-misplug-ambiguous-{Guid.NewGuid():N}.sqlite");
+            int sendCount = 0;
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.AddRange(
+                        new ChargePaymentReservation
+                        {
+                            ReservationId = Guid.NewGuid(),
+                            ChargePointId = "CP-AMBIG",
+                            ConnectorId = 1,
+                            ChargeTagId = "WEB-AMBIG-1",
+                            OcppIdTag = "AMBIG001",
+                            Currency = "eur",
+                            Status = PaymentReservationStatus.Authorized,
+                            AwaitingPlug = true,
+                            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-2),
+                            UpdatedAtUtc = DateTime.UtcNow,
+                            StartDeadlineAtUtc = DateTime.UtcNow.AddMinutes(10)
+                        },
+                        new ChargePaymentReservation
+                        {
+                            ReservationId = Guid.NewGuid(),
+                            ChargePointId = "CP-AMBIG",
+                            ConnectorId = 3,
+                            ChargeTagId = "WEB-AMBIG-3",
+                            OcppIdTag = "AMBIG003",
+                            Currency = "eur",
+                            Status = PaymentReservationStatus.Authorized,
+                            AwaitingPlug = true,
+                            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                            UpdatedAtUtc = DateTime.UtcNow,
+                            StartDeadlineAtUtc = DateTime.UtcNow.AddMinutes(10)
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(serviceProvider: CreateServiceProvider(databasePath));
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    Interlocked.Increment(ref sendCount);
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    queuedMessage?.TaskCompletionSource?.SetResult("{\"status\":\"Accepted\"}");
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-AMBIG"] = new ChargePointStatus
+                    {
+                        Id = "CP-AMBIG",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket,
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [2] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Preparing,
+                                OcppStatus = "Preparing"
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    middleware.NotifyConnectorPreparing("CP-AMBIG", 2);
+                    await Task.Delay(500);
+
+                    Assert.Equal(0, Volatile.Read(ref sendCount));
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var reservations = verificationContext.ChargePaymentReservations
+                        .Where(r => r.ChargePointId == "CP-AMBIG")
+                        .OrderBy(r => r.ConnectorId)
+                        .ToList();
+
+                    Assert.Collection(
+                        reservations,
+                        reservation =>
+                        {
+                            Assert.Equal(1, reservation.ConnectorId);
+                            Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
+                            Assert.True(reservation.AwaitingPlug);
+                        },
+                        reservation =>
+                        {
+                            Assert.Equal(3, reservation.ConnectorId);
+                            Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
+                            Assert.True(reservation.AwaitingPlug);
+                        });
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         [Theory]
         [InlineData("Preparing", true, "Startable")]
         [InlineData("SuspendedEV", false, "Status:SuspendedEV")]
@@ -2175,6 +2380,22 @@ namespace OCPP.Core.Server.Tests
 
             var task = Assert.IsAssignableFrom<Task<string>>(method.Invoke(middleware, new object[] { chargePointStatus, dbContext, connectorId, idTag }));
             return await task;
+        }
+
+        private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 3000, int pollDelayMs = 25)
+        {
+            var startedAt = DateTime.UtcNow;
+            while ((DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+            {
+                if (predicate())
+                {
+                    return;
+                }
+
+                await Task.Delay(pollDelayMs);
+            }
+
+            Assert.True(predicate(), $"Condition was not met within {timeoutMs} ms.");
         }
 
         private static OCPPMessage GetQueuedRequest(OCPPMiddleware middleware)

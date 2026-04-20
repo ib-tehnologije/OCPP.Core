@@ -20,10 +20,10 @@ namespace OCPP.Core.Server.Tests
 {
     public class StripePaymentCoordinatorTests
     {
-        private static OCPPCoreContext CreateContext()
+        private static OCPPCoreContext CreateContext(string? databaseName = null)
         {
             var options = new DbContextOptionsBuilder<OCPPCoreContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .UseInMemoryDatabase(databaseName ?? Guid.NewGuid().ToString())
                 .Options;
             return new OCPPCoreContext(options);
         }
@@ -1170,6 +1170,84 @@ namespace OCPP.Core.Server.Tests
             Assert.Null(reservation.DisconnectedAtUtc);
             Assert.Equal(transaction.StopTime, transaction.ChargingEndedAtUtc);
             Assert.False(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+        }
+
+        [Fact]
+        public void CompleteReservation_CompletesWhenConnectorAlreadyBecameAvailable_InAnotherContext()
+        {
+            string databaseName = Guid.NewGuid().ToString();
+            var now = new DateTime(2026, 3, 12, 12, 20, 0, DateTimeKind.Utc);
+            Guid reservationId = Guid.NewGuid();
+
+            using var context = CreateContext(databaseName);
+            context.ConnectorStatuses.Add(new ConnectorStatus
+            {
+                ChargePointId = "CP-RACE",
+                ConnectorId = 1,
+                LastStatus = "Occupied",
+                LastStatusTime = now.AddMinutes(-3)
+            });
+
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-RACE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-RACE",
+                StripePaymentIntentId = "pi_race",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 30,
+                UsageFeeAnchorMinutes = 1,
+                Currency = "eur",
+                StartTransactionAtUtc = now.AddMinutes(-20)
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 318,
+                ChargePointId = "CP-RACE",
+                ConnectorId = 1,
+                StartTagId = "TAG-RACE",
+                StartTime = now.AddMinutes(-20),
+                StopTime = now.AddMinutes(-2),
+                MeterStart = 1.0,
+                MeterStop = 2.0
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            Assert.Equal("Occupied", context.ConnectorStatuses.Find("CP-RACE", 1)?.LastStatus);
+
+            using (var refreshContext = CreateContext(databaseName))
+            {
+                var connector = refreshContext.ConnectorStatuses.Find("CP-RACE", 1);
+                Assert.NotNull(connector);
+                connector.LastStatus = "Available";
+                connector.LastStatusTime = now.AddMinutes(-1);
+                refreshContext.SaveChanges();
+            }
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_race", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => now);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(now.AddMinutes(-1), reservation.DisconnectedAtUtc);
+            Assert.True(intentService.CaptureCalled);
             Assert.False(intentService.CancelCalled);
         }
 

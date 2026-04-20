@@ -1,0 +1,15 @@
+{
+  "serverBaseUrl": "http://127.0.0.1:18081",
+  "managementBaseUrl": "http://127.0.0.1:18082",
+  "serverApiBaseUrl": "http://127.0.0.1:18081/API",
+  "serverWsBaseUrl": "ws://127.0.0.1:18081/OCPP",
+  "apiKey": "36029A5F-B736-4DA9-AE46-D66847C9062C",
+  "runtimeDir": "/Users/igbenic/Projects/OCPP.Core/Simulators/playwright/.runtime",
+  "tempRoot": "/var/folders/_7/7ql53ntd7rxdzhr8cmcb5ps00000gn/T/ocpp-playwright-xnvnxJ",
+  "databasePath": "/var/folders/_7/7ql53ntd7rxdzhr8cmcb5ps00000gn/T/ocpp-playwright-xnvnxJ/OCPP.Core.playwright.sqlite",
+  "emailSinkDir": "/var/folders/_7/7ql53ntd7rxdzhr8cmcb5ps00000gn/T/ocpp-playwright-xnvnxJ/email-sink",
+  "stripeDiagnosticsDir": "/var/folders/_7/7ql53ntd7rxdzhr8cmcb5ps00000gn/T/ocpp-playwright-xnvnxJ/stripe-diagnostics",
+  "invoicesEnabled": false,
+  "startedAtUtc": "2026-04-09T18:04:47Z",
+  "packageDir": "/Users/igbenic/Projects/OCPP.Core/Simulators/playwright"
+}

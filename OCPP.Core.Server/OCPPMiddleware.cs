@@ -786,6 +786,153 @@ namespace OCPP.Core.Server
             return await TryStartChargingAsync(dbContext, reservation, caller);
         }
 
+        private IQueryable<ChargePaymentReservation> BuildAwaitingPlugReservationQuery(
+            OCPPCoreContext dbContext,
+            string chargePointId,
+            DateTime nowUtc)
+        {
+            return dbContext.ChargePaymentReservations
+                .Where(r =>
+                    r.ChargePointId == chargePointId &&
+                    r.Status == PaymentReservationStatus.Authorized &&
+                    r.TransactionId == null &&
+                    r.AwaitingPlug == true &&
+                    (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > nowUtc));
+        }
+
+        private async Task<ChargePaymentReservation> TryClaimAwaitingPlugReservationAsync(
+            OCPPCoreContext dbContext,
+            string chargePointId,
+            int preparingConnectorId,
+            DateTime nowUtc)
+        {
+            var candidates = await BuildAwaitingPlugReservationQuery(dbContext, chargePointId, nowUtc)
+                .OrderByDescending(r => r.CreatedAtUtc)
+                .ToListAsync();
+
+            if (candidates.Count == 0)
+            {
+                return null;
+            }
+
+            var directCandidate = candidates.FirstOrDefault(r => r.ConnectorId == preparingConnectorId);
+            if (directCandidate != null)
+            {
+                return await ClaimAwaitingPlugReservationAsync(
+                    dbContext,
+                    directCandidate,
+                    preparingConnectorId,
+                    nowUtc,
+                    autoReassigned: false);
+            }
+
+            var mismatchedCandidates = candidates
+                .Where(r => r.ConnectorId != preparingConnectorId)
+                .ToList();
+
+            if (mismatchedCandidates.Count != 1)
+            {
+                _logger.LogInformation(
+                    "NotifyConnectorPreparing => Skipping auto-remap cp={ChargePointId} preparingConnector={PreparingConnectorId} awaitingReservations={AwaitingReservationCount}",
+                    chargePointId,
+                    preparingConnectorId,
+                    mismatchedCandidates.Count);
+                return null;
+            }
+
+            _chargePointStatusDict.TryGetValue(chargePointId, out var liveChargePointStatus);
+            var targetStartability = GetConnectorStartability(
+                dbContext,
+                chargePointId,
+                preparingConnectorId,
+                liveChargePointStatus,
+                reservationToIgnore: null);
+
+            if (!targetStartability.Startable)
+            {
+                _logger.LogInformation(
+                    "NotifyConnectorPreparing => Skipping auto-remap reservation={ReservationId} cp={ChargePointId} fromConnector={FromConnectorId} toConnector={ToConnectorId} reason={Reason}",
+                    mismatchedCandidates[0].ReservationId,
+                    chargePointId,
+                    mismatchedCandidates[0].ConnectorId,
+                    preparingConnectorId,
+                    targetStartability.Reason ?? "NotStartable");
+                return null;
+            }
+
+            return await ClaimAwaitingPlugReservationAsync(
+                dbContext,
+                mismatchedCandidates[0],
+                preparingConnectorId,
+                nowUtc,
+                autoReassigned: true);
+        }
+
+        private async Task<ChargePaymentReservation> ClaimAwaitingPlugReservationAsync(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            int preparingConnectorId,
+            DateTime nowUtc,
+            bool autoReassigned)
+        {
+            if (dbContext == null || reservation == null)
+            {
+                return null;
+            }
+
+            int originalConnectorId = reservation.ConnectorId;
+
+            try
+            {
+                int updated = await dbContext.ChargePaymentReservations
+                    .Where(r =>
+                        r.ReservationId == reservation.ReservationId &&
+                        r.Status == PaymentReservationStatus.Authorized &&
+                        r.AwaitingPlug == true)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(r => r.ConnectorId, preparingConnectorId)
+                        .SetProperty(r => r.AwaitingPlug, (bool?)false)
+                        .SetProperty(r => r.UpdatedAtUtc, nowUtc));
+
+                if (updated == 0)
+                {
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "NotifyConnectorPreparing => Failed to claim awaiting reservation={ReservationId} cp={ChargePointId} fromConnector={FromConnectorId} toConnector={ToConnectorId}",
+                    reservation.ReservationId,
+                    reservation.ChargePointId,
+                    originalConnectorId,
+                    preparingConnectorId);
+                return null;
+            }
+
+            dbContext.ChangeTracker.Clear();
+            var claimedReservation = await dbContext.ChargePaymentReservations
+                .FirstOrDefaultAsync(r => r.ReservationId == reservation.ReservationId);
+
+            if (claimedReservation == null)
+            {
+                return null;
+            }
+
+            if (autoReassigned && originalConnectorId != preparingConnectorId)
+            {
+                _logger.LogInformation(
+                    "NotifyConnectorPreparing => Auto-remapped reservation={ReservationId} cp={ChargePointId} fromConnector={FromConnectorId} toConnector={ToConnectorId}",
+                    claimedReservation.ReservationId,
+                    claimedReservation.ChargePointId,
+                    originalConnectorId,
+                    preparingConnectorId);
+            }
+
+            return claimedReservation;
+        }
+
         public void NotifyConnectorPreparing(string chargePointId, int connectorId)
         {
             if (string.IsNullOrWhiteSpace(chargePointId) || connectorId <= 0) return;
@@ -801,34 +948,9 @@ namespace OCPP.Core.Server
                     var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
 
                     var now = _utcNow();
-                    var reservation = await db.ChargePaymentReservations
-                        .Where(r =>
-                            r.ChargePointId == chargePointId &&
-                            r.ConnectorId == connectorId &&
-                            r.Status == PaymentReservationStatus.Authorized &&
-                            r.TransactionId == null &&
-                            r.AwaitingPlug == true &&
-                            (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > now))
-                        .OrderByDescending(r => r.CreatedAtUtc)
-                        .FirstOrDefaultAsync();
+                    var reservation = await TryClaimAwaitingPlugReservationAsync(db, chargePointId, connectorId, now);
 
                     if (reservation == null) return;
-
-                    // Idempotency: claim the "AwaitingPlug" flag so only one task attempts remote start.
-                    int updated = await db.ChargePaymentReservations
-                        .Where(r =>
-                            r.ReservationId == reservation.ReservationId &&
-                            r.Status == PaymentReservationStatus.Authorized &&
-                            r.AwaitingPlug == true)
-                        .ExecuteUpdateAsync(s => s
-                            .SetProperty(r => r.AwaitingPlug, (bool?)false)
-                            .SetProperty(r => r.UpdatedAtUtc, now));
-
-                    if (updated == 0) return;
-
-                    // Keep the tracked entity in sync so subsequent SaveChanges in TryStart won't flip it back.
-                    reservation.AwaitingPlug = false;
-                    reservation.UpdatedAtUtc = now;
 
                     _logger.LogInformation("NotifyConnectorPreparing => Triggering remote start reservation={ReservationId} cp={ChargePointId} connector={ConnectorId}",
                         reservation.ReservationId,

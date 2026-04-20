@@ -1329,15 +1329,28 @@ namespace OCPP.Core.Server.Payments
                    stopReason.IndexOf("EVDeparted", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private static DateTime? ResolveDisconnectedAtUtc(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
+        private static ConnectorStatus LoadConnectorStatusFresh(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
         {
             if (dbContext == null || reservation == null)
             {
                 return null;
             }
 
-            var connectorStatus = dbContext.ConnectorStatuses.Find(reservation.ChargePointId, reservation.ConnectorId);
-            if (connectorStatus?.LastStatusTime.HasValue == true &&
+            return dbContext.ConnectorStatuses
+                .AsNoTracking()
+                .FirstOrDefault(cs =>
+                    cs.ChargePointId == reservation.ChargePointId &&
+                    cs.ConnectorId == reservation.ConnectorId);
+        }
+
+        private static DateTime? ResolveDisconnectedAtUtc(ChargePaymentReservation reservation, ConnectorStatus connectorStatus)
+        {
+            if (reservation == null || connectorStatus == null)
+            {
+                return null;
+            }
+
+            if (connectorStatus.LastStatusTime.HasValue &&
                 string.Equals(connectorStatus.LastStatus, "Available", StringComparison.OrdinalIgnoreCase))
             {
                 DateTime referenceUtc = reservation.StopTransactionAtUtc ?? reservation.StartTransactionAtUtc ?? reservation.CreatedAtUtc;
@@ -1350,6 +1363,11 @@ namespace OCPP.Core.Server.Payments
             return null;
         }
 
+        private static DateTime? ResolveDisconnectedAtUtc(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
+        {
+            return ResolveDisconnectedAtUtc(reservation, LoadConnectorStatusFresh(dbContext, reservation));
+        }
+
         private static bool TryGetConnectorAvailability(OCPPCoreContext dbContext, ChargePaymentReservation reservation, out bool isAvailable)
         {
             isAvailable = false;
@@ -1358,13 +1376,13 @@ namespace OCPP.Core.Server.Payments
                 return false;
             }
 
-            var connectorStatus = dbContext.ConnectorStatuses.Find(reservation.ChargePointId, reservation.ConnectorId);
+            var connectorStatus = LoadConnectorStatusFresh(dbContext, reservation);
             if (connectorStatus == null)
             {
                 return false;
             }
 
-            isAvailable = ResolveDisconnectedAtUtc(dbContext, reservation).HasValue;
+            isAvailable = ResolveDisconnectedAtUtc(reservation, connectorStatus).HasValue;
             return true;
         }
 
