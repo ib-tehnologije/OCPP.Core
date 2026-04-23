@@ -628,9 +628,13 @@ namespace OCPP.Core.Management.Controllers
             if (liveChargePointStatus?.OnlineConnectors != null &&
                 liveChargePointStatus.OnlineConnectors.TryGetValue(connectorId, out var liveConnectorStatus))
             {
-                return !string.IsNullOrWhiteSpace(liveConnectorStatus.OcppStatus)
-                    ? liveConnectorStatus.OcppStatus.Trim()
-                    : (liveConnectorStatus.Status == ConnectorStatusEnum.Undefined ? null : liveConnectorStatus.Status.ToString());
+                string liveOcppStatus = NormalizeConnectorStatus(liveConnectorStatus.OcppStatus);
+                if (!string.IsNullOrWhiteSpace(liveOcppStatus))
+                {
+                    return IsUndefinedConnectorStatus(liveOcppStatus) ? null : liveOcppStatus;
+                }
+
+                return liveConnectorStatus.Status == ConnectorStatusEnum.Undefined ? null : liveConnectorStatus.Status.ToString();
             }
 
             return null;
@@ -669,9 +673,7 @@ namespace OCPP.Core.Management.Controllers
                 return "Available";
             }
 
-            if (string.Equals(effectiveRawStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveRawStatus, "Unavailable", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(effectiveRawStatus, "Unknown", StringComparison.OrdinalIgnoreCase))
+            if (IsOfflineLikeStatus(effectiveRawStatus))
             {
                 return "Offline";
             }
@@ -733,6 +735,28 @@ namespace OCPP.Core.Management.Controllers
         {
             return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(status, "Preparing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsOfflineLikeStatus(string status)
+        {
+            string normalizedStatus = NormalizeConnectorStatus(status);
+            return string.Equals(normalizedStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, "Unavailable", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, "Unknown", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, "Undefined", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, "Offline", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsUndefinedConnectorStatus(string status)
+        {
+            string normalizedStatus = NormalizeConnectorStatus(status);
+            return string.Equals(normalizedStatus, "Undefined", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, "0", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeConnectorStatus(string status)
+        {
+            return string.IsNullOrWhiteSpace(status) ? null : status.Trim();
         }
 
         private sealed class PublicConnectorState

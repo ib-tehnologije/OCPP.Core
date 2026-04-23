@@ -653,8 +653,10 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
-        [Fact]
-        public async Task Start_UnknownConnectorStatus_IsNormalizedToOffline()
+        [Theory]
+        [InlineData("Unknown")]
+        [InlineData("Undefined")]
+        public async Task Start_OfflineConnectorStatus_IsNormalizedToOffline(string lastStatus)
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-start-offline-{Guid.NewGuid():N}.sqlite");
 
@@ -667,7 +669,7 @@ namespace OCPP.Core.Server.Tests
                     {
                         ChargePointId = "CP-START-OFFLINE",
                         ConnectorId = 1,
-                        LastStatus = "Unknown",
+                        LastStatus = lastStatus,
                         LastStatusTime = DateTime.UtcNow
                     });
                     setupContext.SaveChanges();
@@ -920,6 +922,94 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal(1, chargePoint.AvailableConnectorCount);
                 Assert.Equal(0, chargePoint.OccupiedConnectorCount);
                 Assert.Equal(0, chargePoint.OfflineConnectorCount);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_LiveUndefinedOcppStatus_FallsBackToPersistedConnectorStatus()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-start-live-undefined-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-START-LIVE-UNDEFINED", "Live undefined start test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-START-LIVE-UNDEFINED",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow.AddHours(-2)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                string payload = "[{\"id\":\"CP-START-LIVE-UNDEFINED\",\"onlineConnectors\":{\"1\":{\"status\":\"Occupied\",\"ocppStatus\":\"Undefined\"}}}]";
+                using var server = TestHttpServer.Start(_ => TestHttpResponse.Json(payload));
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API",
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var result = await controller.Start("CP-START-LIVE-UNDEFINED", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("Available", model.LastStatus);
+                Assert.Equal("Available", model.Connectors.Single().LastStatus);
+                Assert.Null(model.AvailabilityMessage);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Map_LiveUndefinedOcppStatus_DoesNotRenderConnectorAsOccupied()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-live-undefined-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-MAP-LIVE-UNDEFINED", "Live undefined map test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-MAP-LIVE-UNDEFINED",
+                        ConnectorId = 1,
+                        LastStatus = "Undefined",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                string payload = "[{\"id\":\"CP-MAP-LIVE-UNDEFINED\",\"onlineConnectors\":{\"1\":{\"status\":\"Occupied\",\"ocppStatus\":\"Undefined\"}}}]";
+                using var server = TestHttpServer.Start(_ => TestHttpResponse.Json(payload));
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API",
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var result = await controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("Offline", chargePoint.Status);
+                Assert.Equal(0, chargePoint.AvailableConnectorCount);
+                Assert.Equal(0, chargePoint.OccupiedConnectorCount);
+                Assert.Equal(1, chargePoint.OfflineConnectorCount);
             }
             finally
             {

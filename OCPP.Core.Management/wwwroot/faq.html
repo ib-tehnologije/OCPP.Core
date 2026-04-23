@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SEO Meta Tags -->
+<title>Upute za Punjenje EV | Tehnoline.EV – Kako Koristiti Punjač</title>
+<meta name="description" content="Naučite kako puniti električni automobil na Tehnoline.EV punjačima. Upute za QR kod skeniranje, Click2Charge, plaćanje karticom, cijene i FAQ.">
+<meta name="keywords" content="upute punjenje EV, kako puniti električni auto, QR kod punjač, Click2Charge upute, Tehnoline pomoć, EV punjač tutorial">
+<meta name="author" content="Tehnoline Telekom d.o.o.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://ev.tehnoline.hr/faq.html">
+
+<!-- Open Graph / Facebook -->
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://ev.tehnoline.hr/faq.html">
+<meta property="og:title" content="Upute za Punjenje EV | Tehnoline.EV">
+<meta property="og:description" content="Naučite kako puniti električni automobil. QR kod, plaćanje, cijene i često postavljena pitanja.">
+<meta property="og:image" content="https://ev.tehnoline.hr/og-image.jpg">
+<meta property="og:locale" content="hr_HR">
+<meta property="og:site_name" content="Tehnoline.EV">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:url" content="https://ev.tehnoline.hr/faq.html">
+<meta name="twitter:title" content="Upute za Punjenje EV | Tehnoline.EV">
+<meta name="twitter:description" content="Naučite kako puniti električni automobil na Tehnoline.EV punjačima.">
+<meta name="twitter:image" content="https://ev.tehnoline.hr/og-image.jpg">
+
+<!-- Favicon -->
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+<!-- Hreflang for multilingual -->
+<link rel="alternate" hreflang="hr" href="https://ev.tehnoline.hr/faq.html">
+<link rel="alternate" hreflang="en" href="https://ev.tehnoline.hr/faq.html?lang=en">
+<link rel="alternate" hreflang="sl" href="https://ev.tehnoline.hr/faq.html?lang=sl">
+<link rel="alternate" hreflang="it" href="https://ev.tehnoline.hr/faq.html?lang=it">
+<link rel="alternate" hreflang="de" href="https://ev.tehnoline.hr/faq.html?lang=de">
+<link rel="alternate" hreflang="fr" href="https://ev.tehnoline.hr/faq.html?lang=fr">
+<link rel="alternate" hreflang="x-default" href="https://ev.tehnoline.hr/faq.html">
+
+<!-- Structured Data - FAQ -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Kako pokrenuti punjenje električnog automobila?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Postoje dva načina: 1) Skenirajte QR kod na punjaču mobilnim telefonom, 2) Otvorite evcharge.hr, pronađite punjač na karti i kliknite Pokreni punjenje."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Koje kartice prihvaćate za plaćanje?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Prihvaćamo Visa, Mastercard, American Express i Diners kartice putem sigurnog Stripe sustava."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Koliko košta punjenje?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Cijena energije je 0.35€/kWh plus naknada za sesiju od 0.50€. Naplaćuje se samo stvarno potrošena energija."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Što je predautorizacija?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Predautorizacija je privremena rezervacija sredstava na kartici. Nakon punjenja, naplaćuje se samo stvarni trošak, a ostatak se automatski vraća."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Kako mogu zaustaviti punjenje prije nego baterija bude puna?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Punjenje možete zaustaviti na nekoliko načina: preko našeg sustava otvorite link iz e-maila s potvrdom i pritisnite Zaustavi punjenje, ili direktno iz vozila jednostavno otključajte vozilo i izvucite kabel. Naplatit će se samo energija potrošena do tog trenutka."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Što ako punjač ne započne punjenje?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Provjerite je li kabel ispravno spojen i da nemate uključen limit punjenja u vozilu (često 80%). Preporučamo prvo spojiti vozilo pa pokrenuti punjenje. Između priključivanja i završetka plaćanja ne smije proteći više od 5 minuta. Ako punjenje ne započne, sredstva će biti vraćena. Pokušajte ponoviti proceduru. Ako i dalje ne možete pokrenuti punjenje, moguće je da je nešto neispravno s punionicom – probajte drugi konektor ako postoji. Javite nam problem mailom ili telefonski."
+      }
+    }
+  ]
+}
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f4f6f9;
+    --surface: rgba(255, 255, 255, 0.92);
+    --surface-2: rgba(241, 245, 249, 0.8);
+    --card: #ffffff;
+    --accent: #059669;
+    --accent-glow: rgba(5, 150, 105, 0.15);
+    --accent-2: #6366f1;
+    --warning: #d97706;
+    --warning-bg: rgba(217, 119, 6, 0.08);
+    --warning-border: rgba(217, 119, 6, 0.2);
+    --danger: #dc2626;
+    --danger-bg: rgba(220, 38, 38, 0.07);
+    --danger-border: rgba(220, 38, 38, 0.2);
+    --success: #059669;
+    --success-bg: rgba(5, 150, 105, 0.08);
+    --success-border: rgba(5, 150, 105, 0.2);
+    --text: #1e293b;
+    --text-2: #475569;
+    --text-3: #94a3b8;
+    --border: rgba(0,0,0,0.06);
+    --border-2: rgba(0,0,0,0.1);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --font: 'DM Sans', system-ui, -apple-system, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  /* Accessibility: focus-visible */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.6;
+  }
+
+  .page-wrap {
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse 600px 400px at 15% 10%, rgba(5,150,105,0.07), transparent),
+      radial-gradient(ellipse 500px 500px at 85% 80%, rgba(99,102,241,0.06), transparent),
+      var(--bg);
+    padding: 24px 16px 60px;
+  }
+
+  .help-container {
+    max-width: 680px;
+    margin: 0 auto;
+  }
+
+  /* Header */
+  .help-header {
+    text-align: center;
+    margin-bottom: 32px;
+    animation: fadeIn 0.5s ease;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .brand-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .brand-logo {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 18px; color: #fff;
+  }
+  .brand-name { font-weight: 600; font-size: 1.2rem; letter-spacing: -0.02em; }
+  .brand-name span { color: var(--accent); }
+  .brand-name .dot-sep { color: var(--text-3); }
+
+  .help-title {
+    font-size: 1.8rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+  .help-subtitle {
+    color: var(--text-2);
+    font-size: 1rem;
+  }
+
+  /* Section Cards */
+  .help-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+    animation: cardIn 0.5s ease both;
+  }
+  .help-section:nth-child(2) { animation-delay: 0.1s; }
+  .help-section:nth-child(3) { animation-delay: 0.2s; }
+  .help-section:nth-child(4) { animation-delay: 0.3s; }
+  .help-section:nth-child(5) { animation-delay: 0.4s; }
+
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .section-icon {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+  }
+  .section-icon.primary {
+    background: linear-gradient(135deg, rgba(5,150,105,0.12), rgba(0,212,170,0.05));
+    border: 1px solid rgba(0,212,170,0.2);
+  }
+  .section-icon.secondary {
+    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(99,102,241,0.04));
+    border: 1px solid rgba(99,102,241,0.12);
+  }
+  .section-icon.warning {
+    background: linear-gradient(135deg, rgba(251,191,36,0.15), rgba(251,191,36,0.05));
+    border: 1px solid rgba(251,191,36,0.2);
+  }
+  .section-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .section-badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #ffffff;
+    margin-left: auto;
+  }
+
+  .section-content p {
+    color: var(--text-2);
+    font-size: 0.92rem;
+    margin-bottom: 16px;
+  }
+  .section-content p:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Two Options Grid */
+  .options-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+  @media (max-width: 520px) {
+    .options-grid { grid-template-columns: 1fr; }
+  }
+
+  .option-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 20px;
+    text-align: center;
+    transition: all 0.25s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .option-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .option-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .option-card:hover::before { opacity: 1; }
+
+  .option-icon {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+    display: block;
+  }
+  .option-title {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .option-desc {
+    font-size: 0.82rem;
+    color: var(--text-3);
+    line-height: 1.5;
+  }
+  .option-tag {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .option-tag.fast {
+    background: rgba(0,212,170,0.12);
+    color: var(--accent);
+  }
+  .option-tag.flexible {
+    background: rgba(99,102,241,0.08);
+    color: #6366f1;
+  }
+
+  /* Steps List */
+  .steps-list {
+    counter-reset: step-counter;
+    list-style: none;
+  }
+  .step-item {
+    display: flex;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .step-item:last-child { border-bottom: none; }
+
+  .step-number {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #047857);
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-content {
+    flex: 1;
+    padding-top: 4px;
+  }
+  .step-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+  }
+  .step-desc {
+    font-size: 0.85rem;
+    color: var(--text-3);
+  }
+
+  /* Info Box */
+  .info-box {
+    padding: 16px;
+    border-radius: var(--radius-sm);
+    margin-top: 16px;
+  }
+  .info-box.tip {
+    background: var(--success-bg);
+    border: 1px solid var(--success-border);
+  }
+  .info-box.warning {
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+  }
+  .info-box-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .info-box.tip .info-box-title { color: var(--accent); }
+  .info-box.warning .info-box-title { color: var(--warning); }
+  .info-box-content {
+    font-size: 0.85rem;
+    color: var(--text-2);
+  }
+
+  /* FAQ Accordion */
+  .faq-item {
+    border-bottom: 1px solid var(--border);
+    padding: 16px 0;
+  }
+  .faq-item:last-child { border-bottom: none; }
+  .faq-question {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .faq-question::before {
+    content: '?';
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    background: rgba(99,102,241,0.1);
+    color: #6366f1;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .faq-answer {
+    font-size: 0.88rem;
+    color: var(--text-3);
+    padding-left: 32px;
+    line-height: 1.6;
+  }
+
+  /* Payment Info */
+  .payment-methods {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+  .payment-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.82rem;
+    color: var(--text-2);
+  }
+  .payment-badge svg {
+    flex-shrink: 0;
+  }
+
+  /* Payment Section Enhancements */
+  .payment-section-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 20px 0 12px;
+  }
+  .payment-section-title:first-of-type {
+    margin-top: 8px;
+  }
+  .payment-badge.apple-pay {
+    border-color: #333;
+  }
+  .payment-badge.apple-pay:hover {
+    border-color: #555;
+  }
+  .payment-badge svg {
+    flex-shrink: 0;
+  }
+
+  /* Footer */
+  .help-footer {
+    text-align: center;
+    padding: 32px 0 16px;
+    border-top: 1px solid var(--border);
+    margin-top: 20px;
+  }
+  .help-footer-contact {
+    color: var(--text-3);
+    font-size: 0.88rem;
+    margin-bottom: 16px;
+  }
+  .help-footer-contact a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .help-footer-contact a:hover { text-decoration: underline; }
+
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font: 600 0.88rem var(--font);
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+  }
+  .back-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Language Toggle (Demo) */
+  .top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+  .lang-dropdown {
+    position: relative;
+  }
+  .lang-select {
+    padding: 8px 32px 8px 12px;
+    border-radius: 8px;
+    font: 500 0.85rem var(--font);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7a90' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+  .lang-select:hover { border-color: var(--border-2); }
+  .lang-select:focus { outline: none; border-color: var(--accent); }
+  .tt-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-2);
+    font-size: 0.8rem;
+    text-decoration: none;
+  }
+  .tt-logo:hover { color: var(--text); }
+  .tt-logo img { opacity: 0.9; }
+  .tt-logo:hover img { opacity: 1; }
+
+  .company-footer {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+  }
+  .company-footer-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+  .company-footer-info {
+    font-size: 0.75rem;
+    color: var(--text-3);
+    margin-bottom: 4px;
+    line-height: 1.4;
+  }
+  .company-footer-links {
+    font-size: 0.75rem;
+    margin-top: 8px;
+  }
+  .company-footer-links a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .company-footer-links a:hover { opacity: 0.8; }
+  .company-sep { color: var(--text-3); margin: 0 6px; }
+
+  /* QR Scanner Modal */
+  .qr-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+  }
+  .qr-modal.active { display: flex; }
+  .qr-modal-content {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 24px;
+    max-width: 400px;
+    width: 100%;
+    border: 1px solid var(--border);
+  }
+  .qr-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .qr-modal-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .qr-modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+  }
+  .qr-modal-close:hover { color: var(--text); }
+  #qr-reader {
+    width: 100%;
+    min-height: 300px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #000;
+  }
+  #qr-reader video {
+    border-radius: var(--radius-sm);
+    width: 100% !important;
+    height: auto !important;
+  }
+  #qr-reader__scan_region {
+    min-height: 280px;
+  }
+  .qr-status {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 0.85rem;
+    color: var(--text-2);
+  }
+  .qr-status.success { color: var(--accent); }
+  .qr-status.error { color: var(--danger); }
+  .option-card.clickable { cursor: pointer; }
+  .option-card.clickable:active { transform: scale(0.98); }
+  
+  .scan-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 12px 20px;
+    background: var(--accent);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font: 600 0.9rem var(--font);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .scan-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+  .scan-btn svg { width: 20px; height: 20px; }
+</style>
+</head>
+<body>
+
+<div class="page-wrap">
+  <div class="help-container">
+
+    <!-- Top Bar: Logo + Language -->
+    <div class="top-bar">
+      <a href="/Public/Map" class="tt-logo"><img src="/img/evcharge-logo-light.png" alt="EV.Charge" height="48"></a>
+      <div class="lang-dropdown">
+        <select class="lang-select" id="langSelect" onchange="setLang(this.value)">
+          <option value="hr">🇭🇷 HR</option>
+          <option value="en">🇬🇧 EN</option>
+          <option value="sl">🇸🇮 SL</option>
+          <option value="it">🇮🇹 IT</option>
+          <option value="de">🇩🇪 DE</option>
+          <option value="fr">🇫🇷 FR</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Header -->
+    <div class="help-header">
+      
+      <h1 class="help-title" data-t="helpTitle">Upute za korištenje</h1>
+      <p class="help-subtitle" data-t="helpSubtitle">Kako napuniti vaš električni automobil</p>
+    </div>
+
+    <!-- Section 1: Getting Started -->
+    <div class="help-section">
+      <div class="section-header">
+        <div class="section-icon primary">🚗</div>
+        <h2 class="section-title" data-t="startTitle">Kako započeti punjenje?</h2>
+      </div>
+      <div class="section-content">
+        <p data-t="startDesc">Postoje dva načina za pokretanje punjenja na našim punjačima. Odaberite onaj koji vam više odgovara:</p>
+        
+        <div class="options-grid">
+          <div class="option-card clickable" onclick="scrollToQR()">
+            <span class="option-icon"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="14.01"/><line x1="21" y1="17" x2="21" y2="21"/><line x1="17" y1="21" x2="21" y2="21"/><line x1="14" y1="21" x2="14" y2="21.01"/><line x1="17" y1="17" x2="17" y2="17.01"/><path d="M5.5 5.5h1v1h-1z" fill="currentColor"/><path d="M16.5 5.5h1v1h-1z" fill="currentColor"/><path d="M5.5 16.5h1v1h-1z" fill="currentColor"/></svg></span>
+            <div class="option-title" data-t="qrTitle">Scan QR Code</div>
+            <p class="option-desc" data-t="qrDesc">Skenirajte QR kod na punjaču mobilnim telefonom. Direktno vas vodi na plaćanje bez dodatnih koraka.</p>
+            <span class="option-tag fast" data-t="qrTag">Najbrže</span>
+          </div>
+          <div class="option-card clickable" onclick="scrollToC2C()">
+            <span class="option-icon">🗺️</span>
+            <div class="option-title" data-t="c2cTitle">Click2Charge</div>
+            <p class="option-desc" data-t="c2cDesc">Otvorite evcharge.hr, pronađite punjač na karti i kliknite "Pokreni punjenje" za odabrani konektor.</p>
+            <span class="option-tag flexible" data-t="c2cTag">Fleksibilno</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 2: QR Code Flow -->
+    <div id="qr-section" class="help-section">
+      <div class="section-header">
+        <div class="section-icon primary" style="padding:8px;"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="14.01"/><line x1="21" y1="17" x2="21" y2="21"/><line x1="17" y1="21" x2="21" y2="21"/><line x1="14" y1="21" x2="14" y2="21.01"/><line x1="17" y1="17" x2="17" y2="17.01"/><path d="M5.5 5.5h1v1h-1z" fill="currentColor"/><path d="M16.5 5.5h1v1h-1z" fill="currentColor"/><path d="M5.5 16.5h1v1h-1z" fill="currentColor"/></svg></div>
+        <h2 class="section-title" data-t="qrFlowTitle">Opcija A: Scan QR Code</h2>
+        <span class="section-badge" data-t="recommended">Preporučeno</span>
+      </div>
+      <div class="section-content">
+        <p data-t="qrFlowDesc">Svaki punjač ima QR kod na svakom konektoru. Jednostavno ga skenirajte kamerom telefona.</p>
+        
+        <ul class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <div class="step-title" data-t="qrStep1Title">Povežite kabel</div>
+              <div class="step-desc" data-t="qrStep1Desc">Spojite kabel punjača na vaše vozilo prije skeniranja QR koda.</div>
+            </div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <div class="step-title" data-t="qrStep2Title">Skenirajte QR kod</div>
+              <div class="step-desc" data-t="qrStep2Desc">Usmjerite kameru telefona na QR kod na konektoru koji koristite. Link se automatski otvara.</div>
+            </div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <div class="step-title" data-t="qrStep3Title">Platite karticom</div>
+              <div class="step-desc" data-t="qrStep3Desc">Unesite podatke kartice. Predautorizacija se vrši odmah, a naplaćuje se samo stvarni trošak.</div>
+            </div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <div class="step-title" data-t="qrStep4Title">Punjenje počinje automatski</div>
+              <div class="step-desc" data-t="qrStep4Desc">Nakon uspješne autorizacije, punjač automatski pokreće sesiju punjenja.</div>
+            </div>
+          </li>
+        </ul>
+
+        <div class="info-box tip">
+          <div class="info-box-title">💡 <span data-t="tipTitle">Savjet</span></div>
+          <div class="info-box-content" data-t="qrTip">QR kod je isti za cijeli punjač. Nakon skeniranja, sustav vas pita koji konektor koristite (lijevi/desni) – odaberite onaj na koji ste spojili kabel.</div>
+        </div>
+
+        <button class="scan-btn" onclick="openQrScanner()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="3" height="3"/></svg>
+          <span data-t="scanNow">Skeniraj QR kod sada</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Section 3: Click2Charge Flow -->
+    <div id="c2c-section" class="help-section">
+      <div class="section-header">
+        <div class="section-icon secondary">🗺️</div>
+        <h2 class="section-title" data-t="c2cFlowTitle">Opcija B: Click2Charge (Web)</h2>
+      </div>
+      <div class="section-content">
+        <p data-t="c2cFlowDesc">Ako nemate pristup QR kodu ili želite unaprijed provjeriti dostupnost punjača, koristite web aplikaciju.</p>
+        
+        <ul class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <div class="step-title" data-t="c2cStep1Title">Otvorite evcharge.hr</div>
+              <div class="step-desc" data-t="c2cStep1Desc">Na mobilnom telefonu ili računalu otvorite web stranicu evcharge.hr.</div>
+            </div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <div class="step-title" data-t="c2cStep2Title">Pronađite punjač na karti</div>
+              <div class="step-desc" data-t="c2cStep2Desc">Karta automatski pokazuje vašu lokaciju. Zeleni markeri označavaju dostupne punjače.</div>
+            </div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <div class="step-title" data-t="c2cStep3Title">Odaberite konektor</div>
+              <div class="step-desc" data-t="c2cStep3Desc">Kliknite na punjač, zatim odaberite slobodan konektor (lijevi/desni) i pritisnite "Pokreni punjenje".</div>
+            </div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <div class="step-title" data-t="c2cStep4Title">Povežite kabel i platite</div>
+              <div class="step-desc" data-t="c2cStep4Desc">Spojite kabel na vozilo, unesite podatke kartice i punjenje započinje automatski.</div>
+            </div>
+          </li>
+        </ul>
+
+        <div class="info-box tip">
+          <div class="info-box-title">💡 <span data-t="tipTitle">Savjet</span></div>
+          <div class="info-box-content" data-t="c2cTip">Možete koristiti funkciju navigacije (Google Maps, Waze, Apple Maps) za dolazak do punjača direktno iz aplikacije.</div>
+        </div>
+
+        <button class="scan-btn" onclick="openMap()" style="background: var(--accent-2);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span data-t="locateMe">Lociraj me na karti</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Section 4: Payment -->
+    <div class="help-section">
+      <div class="section-header">
+        <div class="section-icon primary">💳</div>
+        <h2 class="section-title" data-t="paymentTitle">Plaćanje</h2>
+      </div>
+      <div class="section-content">
+        <p data-t="paymentDesc">Plaćanje se vrši sigurno putem interneta. Prihvaćamo sve kartice i digitalne novčanike.</p>
+
+        <div class="payment-section-title" data-t="digitalWallets">Digitalni novčanici</div>
+        <div class="payment-methods">
+          <div class="payment-badge apple-pay" style="background:#000;">
+            <svg viewBox="0 0 43 18" width="43" height="18" fill="#fff">
+              <path d="M8.2 3.4c.5-.6.8-1.5.7-2.4-.8 0-1.7.5-2.2 1.1-.5.5-.9 1.4-.8 2.2.9.1 1.8-.4 2.3-1zM8.9 4.5c-1.3-.1-2.4.7-3 .7-.6 0-1.5-.7-2.5-.7-1.3 0-2.5.8-3.1 1.9-1.3 2.3-.4 5.6 1 7.5.6.9 1.4 1.9 2.4 1.9 1 0 1.3-.6 2.5-.6s1.5.6 2.5.6c1 0 1.7-.9 2.4-1.9.7-1.1 1-2.1 1-2.2-1.3-.5-1.6-2.5-.3-3.8-.7-.9-1.7-1.4-2.6-1.4h-.3z"/>
+              <path d="M17.6 1.5c2.2 0 3.8 1.5 3.8 3.8 0 2.2-1.6 3.8-3.8 3.8h-2.5v3.9h-1.8V1.5h4.3zm-2.5 6.1h2.1c1.5 0 2.4-.8 2.4-2.3s-.9-2.3-2.4-2.3h-2.1v4.6zM22 11c0-1.4 1.1-2.3 3-2.4l2.2-.1v-.6c0-.9-.6-1.4-1.6-1.4-.9 0-1.5.4-1.7 1.1h-1.6c.1-1.5 1.4-2.6 3.3-2.6 2 0 3.2 1 3.2 2.7v5.6h-1.6v-1.4h0c-.5.9-1.5 1.5-2.6 1.5-1.6 0-2.7-1-2.7-2.4zm5.2-.7v-.6l-2 .1c-1 .1-1.5.5-1.5 1.1 0 .7.6 1.1 1.4 1.1 1.2 0 2.1-.8 2.1-1.8zM29.3 15.4v-1.3c.1 0 .4 0 .5 0 .8 0 1.2-.3 1.5-1.2l.2-.5-2.9-8h1.9l2 6.4h0l2-6.4h1.8l-3 8.5c-.7 2-1.5 2.6-3.1 2.6-.2 0-.5 0-.7 0z"/>
+            </svg>
+          </div>
+          <div class="payment-badge" style="background:#fff;">
+            <svg width="16" height="16" viewBox="0 0 24 24" style="margin-right:2px;">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            <span style="color:#5F6368; font-size:13px; font-weight:500;">Pay</span>
+          </div>
+          <div class="payment-badge" style="background:#191C1F;">
+            <span style="color:#fff; font-size:13px; font-weight:600;">Revolut</span>
+          </div>
+          <div class="payment-badge" style="background:#00D66F;">
+            <svg viewBox="0 0 16 16" width="14" height="14" style="margin-right:4px;">
+              <circle cx="8" cy="8" r="7" fill="rgba(255,255,255,0.3)"/>
+              <path d="M5 8l2.5 2.5 4-4" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span style="color:#fff; font-size:13px; font-weight:700;">Link</span>
+          </div>
+        </div>
+
+        <div class="payment-section-title" data-t="creditCards">Kreditne i debitne kartice</div>
+        <div class="payment-methods">
+          <div class="payment-badge">
+            <svg viewBox="0 0 48 32" width="36" height="24"><rect width="48" height="32" rx="4" fill="#1A1F71"/><path d="M19.5 21h-2.7l1.7-10.5h2.7L19.5 21zm8.9-10.2c-.5-.2-1.4-.4-2.5-.4-2.7 0-4.6 1.4-4.6 3.5 0 1.5 1.4 2.3 2.4 2.8 1.1.5 1.4.9 1.4 1.3 0 .7-.9 1.1-1.7 1.1-.8 0-1.8-.2-2.3-.4l-.3 2c.6.2 1.6.4 2.8.4 3 0 5-1.5 5-3.6 0-2.8-4.1-2.9-4.1-4.2 0-.4.4-.8 1.3-.8.8 0 1.5.1 2 .4l.4-2.1h.2zm4.5 6.5l1.2-3.2.7 3.2h-1.9zm2.7 3.7h2.5l-2.2-10.5h-2.2c-.5 0-.9.3-1.1.7l-3.9 9.8h2.8l.5-1.5h3.4l.2 1.5zM15.2 10.5l-2.6 7.2-.3-1.4-.9-4.7c-.2-.7-.7-.9-1.3-.9H6l-.1.3c1 .3 2.1.6 2.8 1.1.4.3.5.5.6.9l2.1 7.9h2.8l4.2-10.4h-3.2z" fill="#fff"/></svg>
+            <span>Visa</span>
+          </div>
+          <div class="payment-badge">
+            <svg viewBox="0 0 48 32" width="36" height="24"><rect width="48" height="32" rx="4" fill="#f5f5f5"/><circle cx="18" cy="16" r="9" fill="#EB001B"/><circle cx="30" cy="16" r="9" fill="#F79E1B"/><path d="M24 9.3a9 9 0 0 0-3.4 6.7 9 9 0 0 0 3.4 6.7 9 9 0 0 0 3.4-6.7 9 9 0 0 0-3.4-6.7z" fill="#FF5F00"/></svg>
+            <span>Mastercard</span>
+          </div>
+          <div class="payment-badge">
+            <svg viewBox="0 0 48 32" width="36" height="24"><rect width="48" height="32" rx="4" fill="#f5f5f5"/><circle cx="18" cy="16" r="9" fill="#0099DF"/><circle cx="30" cy="16" r="9" fill="#ED0006"/><path d="M24 9.3a9 9 0 0 0-3.4 6.7 9 9 0 0 0 3.4 6.7 9 9 0 0 0 3.4-6.7 9 9 0 0 0-3.4-6.7z" fill="#6C6BBD"/></svg>
+            <span>Maestro</span>
+          </div>
+          <div class="payment-badge">
+            <svg viewBox="0 0 48 32" width="36" height="24">
+              <rect width="48" height="32" rx="4" fill="#016FD0"/>
+              <path d="M10 10h28v2H10zM10 20h28v2H10z" fill="#fff"/>
+              <text x="24" y="17" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="7" font-weight="bold" letter-spacing="0.5">AMEX</text>
+            </svg>
+            <span>Amex</span>
+          </div>
+          <div class="payment-badge">
+            <svg viewBox="0 0 48 32" width="36" height="24">
+              <rect width="48" height="32" rx="4" fill="#fff"/>
+              <ellipse cx="19" cy="16" rx="10" ry="10" fill="none" stroke="#004A97" stroke-width="2"/>
+              <ellipse cx="29" cy="16" rx="10" ry="10" fill="none" stroke="#004A97" stroke-width="2"/>
+            </svg>
+            <span>Diners</span>
+          </div>
+        </div>
+
+        <div class="info-box tip" style="margin-top: 20px;">
+          <div class="info-box-title">💡 <span data-t="pricingTitle">Cijene punjenja</span></div>
+          <div class="info-box-content" data-t="pricingNote">Cijene punjenja ovise o lokaciji i punjaču. Sve cijene (energija, naknada za sesiju, idle fee) su jasno prikazane prije pokretanja punjenja.</div>
+        </div>
+
+        <div class="info-box warning" style="margin-top: 12px;">
+          <div class="info-box-title">⚠️ <span data-t="importantTitle">Važno</span></div>
+          <div class="info-box-content" data-t="preauthNote">Predautorizacija (procijenjeni iznos) se rezervira na kartici pri pokretanju punjenja. Naplaćuje se samo stvarni trošak, a razlika se automatski vraća na karticu u roku 24-48 sati.</div>
+        </div>
+
+        <div class="info-box tip" style="margin-top: 12px;">
+          <div class="info-box-title">💡 <span data-t="idleFeeTitle">Naknada za zadržavanje</span></div>
+          <div class="info-box-content" data-t="idleFeeNote">Naknada za zadržavanje se naplaćuje samo ako vozilo ostane spojeno nakon završetka punjenja. Besplatno zadržavanje od 21:00 do 08:00 (minimalno punjenje 10 kWh za besplatno zadržavanje).</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 5: FAQ -->
+    <div class="help-section">
+      <div class="section-header">
+        <div class="section-icon secondary">❓</div>
+        <h2 class="section-title" data-t="faqTitle">Često postavljana pitanja</h2>
+      </div>
+      <div class="section-content">
+        <div class="faq-item">
+          <div class="faq-question" data-t="faq1Q">Što ako punjač ne započne punjenje?</div>
+          <div class="faq-answer" data-t="faq1A">Provjerite je li kabel ispravno spojen na vozilo i punjač. Provjerite da nemate uključen limit punjenja u vozilu (često je postavljen na 80% napunjenosti). Preporučamo prvo spojiti vozilo na punjač, a zatim pokrenuti punjenje. Obratite pažnju da između priključivanja vozila i završetka plaćanja ne smije proteći više od 5 minuta (sigurnosni limit). Ako punjenje ne započne, sredstva će biti vraćena. Pokušajte ponoviti proceduru – možda nešto nije prošlo kako treba. Ukoliko i dalje niste u mogućnosti pokrenuti punjenje, moguće je da je nešto neispravno sa samom punionicom. Ako na istom mjestu postoji dodatna punionica ili drugi konektor, svakako probajte na drugom. Cijenili bismo da nam javite eventualni problem na kontakte navedene ispod – mailom ili telefonski. Preporučamo mail ukoliko situacija ne zahtijeva hitnost.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" data-t="faq2Q">Mogu li dobiti R1 račun za firmu?</div>
+          <div class="faq-answer" data-t="faq2A">Da! Pri pokretanju punjenja označite opciju "Želim R1 račun". Nakon završetka sesije primit ćete email s linkom za unos podataka tvrtke (OIB, naziv, adresa).</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" data-t="faq3Q">Kako mogu zaustaviti punjenje prije nego baterija bude puna?</div>
+          <div class="faq-answer" data-t="faq3A">Punjenje možete zaustaviti na nekoliko načina: (1) Preko našeg sustava – otvorite link iz e-maila s potvrdom i pritisnite "Zaustavi punjenje", (2) Direktno iz vozila – jednostavno otključajte vozilo i izvucite kabel, punionica će automatski prekinuti punjenje. Naplatit će se samo energija potrošena do tog trenutka.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" data-t="faq4Q">Koji tipovi konektora su dostupni?</div>
+          <div class="faq-answer" data-t="faq4A">Ovisno o snazi punionice koriste se različiti konektori: AC punionice (do 22 kW) koriste Type 2 konektor, dok DC brze punionice koriste CCS konektor. Oba tipa podržavaju većinu električnih vozila na europskom tržištu. Napomena o brzini punjenja: iako naše AC punionice podržavaju do 22 kW, većina vozila ima ugrađeni limit punjenja na 11 kW za AC punjenje. Ako primijetite sporije punjenje od očekivanog, to najvjerojatnije nije problem punionice već karakteristika vašeg vozila.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" data-t="faq5Q">Trebam li instalirati aplikaciju?</div>
+          <div class="faq-answer" data-t="faq5A">Ne! Naš sustav radi potpuno kroz web preglednik – bez potrebe za instalacijom aplikacije. Jednostavno skenirate QR kod ili posjetite evcharge.hr.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="help-footer">
+      <div class="help-footer-contact">
+        <span data-t="needMoreHelp">Trebate dodatnu pomoć?</span><br>
+        📧 <a href="mailto:ev@tehnoline.hr">ev@tehnoline.hr</a> · 📞 <a href="tel:+38552355050">+385 52 355 050</a>
+      </div>
+      <a href="#" class="back-btn" onclick="history.back(); return false;">
+        ← <span data-t="backToCharging">Natrag na punjenje</span>
+      </a>
+      <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center;">
+        <a href="https://tehnoline.hr" target="_blank" style="display:inline-block; margin-bottom:8px;">
+          <img src="data:image/jpeg;base64,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" alt="Tehnoline Telekom" style="height:28px; width:auto;">
+        </a>
+        <div style="color: var(--text-2); font-size: 0.75rem; line-height: 1.8;">
+          Bože Gumpca 49, 52100 Pula · OIB: 62579761244
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const T = {
+  hr: {
+    helpTitle: "Upute za korištenje",
+    helpSubtitle: "Kako napuniti vaš električni automobil",
+    startTitle: "Kako započeti punjenje?",
+    startDesc: "Postoje dva načina za pokretanje punjenja na našim punjačima. Odaberite onaj koji vam više odgovara:",
+    qrTitle: "Scan QR Code",
+    qrDesc: "Skenirajte QR kod na punjaču mobilnim telefonom. Direktno vas vodi na plaćanje bez dodatnih koraka.",
+    qrTag: "Najbrže",
+    c2cTitle: "Click2Charge",
+    c2cDesc: "Otvorite evcharge.hr, pronađite punjač na karti i kliknite \"Pokreni punjenje\" za odabrani konektor.",
+    c2cTag: "Fleksibilno",
+    qrFlowTitle: "Opcija A: Scan QR Code",
+    recommended: "Preporučeno",
+    qrFlowDesc: "Svaki punjač ima QR kod na svakom konektoru. Jednostavno ga skenirajte kamerom telefona.",
+    qrStep1Title: "Povežite kabel",
+    qrStep1Desc: "Spojite kabel punjača na vaše vozilo prije skeniranja QR koda.",
+    qrStep2Title: "Skenirajte QR kod",
+    qrStep2Desc: "Usmjerite kameru telefona na QR kod na konektoru koji koristite. Link se automatski otvara.",
+    qrStep3Title: "Platite karticom",
+    qrStep3Desc: "Unesite podatke kartice. Predautorizacija se vrši odmah, a naplaćuje se samo stvarni trošak.",
+    qrStep4Title: "Punjenje počinje automatski",
+    qrStep4Desc: "Nakon uspješne autorizacije, punjač automatski pokreće sesiju punjenja.",
+    tipTitle: "Savjet",
+    qrTip: "QR kod je isti za cijeli punjač. Nakon skeniranja, sustav vas pita koji konektor koristite (lijevi/desni) – odaberite onaj na koji ste spojili kabel.",
+    scanNow: "Skeniraj QR kod sada",
+    locateMe: "Lociraj me na karti",
+    scanQrTitle: "📷 Skeniraj QR kod",
+    scanInstruction: "Usmjerite kameru na QR kod...",
+    scanSuccess: "QR kod skeniran! Preusmjeravanje...",
+    cameraError: "Greška: Nije moguće pristupiti kameri.",
+    c2cFlowTitle: "Opcija B: Click2Charge (Web)",
+    c2cFlowDesc: "Ako nemate pristup QR kodu ili želite unaprijed provjeriti dostupnost punjača, koristite web aplikaciju.",
+    c2cStep1Title: "Otvorite evcharge.hr",
+    c2cStep1Desc: "Na mobilnom telefonu ili računalu otvorite web stranicu evcharge.hr.",
+    c2cStep2Title: "Pronađite punjač na karti",
+    c2cStep2Desc: "Karta automatski pokazuje vašu lokaciju. Zeleni markeri označavaju dostupne punjače.",
+    c2cStep3Title: "Odaberite konektor",
+    c2cStep3Desc: "Kliknite na punjač, zatim odaberite slobodan konektor (lijevi/desni) i pritisnite \"Pokreni punjenje\".",
+    c2cStep4Title: "Povežite kabel i platite",
+    c2cStep4Desc: "Spojite kabel na vozilo, unesite podatke kartice i punjenje započinje automatski.",
+    c2cTip: "Možete koristiti funkciju navigacije (Google Maps, Waze, Apple Maps) za dolazak do punjača direktno iz aplikacije.",
+    paymentTitle: "Plaćanje",
+    paymentDesc: "Plaćanje se vrši sigurno putem interneta. Prihvaćamo sve kartice i digitalne novčanike.",
+    digitalWallets: "Digitalni novčanici",
+    creditCards: "Kreditne i debitne kartice",
+    pricingTitle: "Cijene punjenja",
+    pricingNote: "Cijene punjenja ovise o lokaciji i punjaču. Sve cijene (energija, naknada za sesiju, idle fee) su jasno prikazane prije pokretanja punjenja.",
+    importantTitle: "Važno",
+    preauthNote: "Predautorizacija (procijenjeni iznos) se rezervira na kartici pri pokretanju punjenja. Naplaćuje se samo stvarni trošak, a razlika se automatski vraća na karticu u roku 24-48 sati.",
+    idleFeeTitle: "Naknada za zadržavanje",
+    idleFeeNote: "Naknada za zadržavanje se naplaćuje samo ako vozilo ostane spojeno nakon završetka punjenja. Besplatno zadržavanje od 21:00 do 08:00 (minimalno punjenje 10 kWh za besplatno zadržavanje).",
+    faqTitle: "Često postavljana pitanja",
+    faq1Q: "Što ako punjač ne započne punjenje?",
+    faq1A: "Provjerite je li kabel ispravno spojen na vozilo i punjač. Provjerite da nemate uključen limit punjenja u vozilu (često je postavljen na 80% napunjenosti). Preporučamo prvo spojiti vozilo na punjač, a zatim pokrenuti punjenje. Obratite pažnju da između priključivanja vozila i završetka plaćanja ne smije proteći više od 5 minuta (sigurnosni limit). Ako punjenje ne započne, sredstva će biti vraćena. Pokušajte ponoviti proceduru – možda nešto nije prošlo kako treba. Ukoliko i dalje niste u mogućnosti pokrenuti punjenje, moguće je da je nešto neispravno sa samom punionicom. Ako na istom mjestu postoji dodatna punionica ili drugi konektor, svakako probajte na drugom. Cijenili bismo da nam javite eventualni problem na kontakte navedene ispod – mailom ili telefonski. Preporučamo mail ukoliko situacija ne zahtijeva hitnost.",
+    faq2Q: "Mogu li dobiti R1 račun za firmu?",
+    faq2A: "Da! Pri pokretanju punjenja označite opciju \"Želim R1 račun\". Nakon završetka sesije primit ćete email s linkom za unos podataka tvrtke (OIB, naziv, adresa).",
+    faq3Q: "Kako mogu zaustaviti punjenje prije nego baterija bude puna?",
+    faq3A: "Punjenje možete zaustaviti na nekoliko načina: (1) Preko našeg sustava – otvorite link iz e-maila s potvrdom i pritisnite \"Zaustavi punjenje\", (2) Direktno iz vozila – jednostavno otključajte vozilo i izvucite kabel, punionica će automatski prekinuti punjenje. Naplatit će se samo energija potrošena do tog trenutka.",
+    faq4Q: "Koji tipovi konektora su dostupni?",
+    faq4A: "Ovisno o snazi punionice koriste se različiti konektori: AC punionice (do 22 kW) koriste Type 2 konektor, dok DC brze punionice koriste CCS konektor. Oba tipa podržavaju većinu električnih vozila na europskom tržištu. Napomena o brzini punjenja: iako naše AC punionice podržavaju do 22 kW, većina vozila ima ugrađeni limit punjenja na 11 kW za AC punjenje. Ako primijetite sporije punjenje od očekivanog, to najvjerojatnije nije problem punionice već karakteristika vašeg vozila.",
+    faq5Q: "Trebam li instalirati aplikaciju?",
+    faq5A: "Ne! Naš sustav radi potpuno kroz web preglednik – bez potrebe za instalacijom aplikacije. Jednostavno skenirate QR kod ili posjetite evcharge.hr.",
+    needMoreHelp: "Trebate dodatnu pomoć?",
+    backToCharging: "Natrag na punjenje"
+  },
+  en: {
+    helpTitle: "How to Use",
+    helpSubtitle: "How to charge your electric vehicle",
+    startTitle: "How to start charging?",
+    startDesc: "There are two ways to start charging at our stations. Choose the one that suits you best:",
+    qrTitle: "Scan QR Code",
+    qrDesc: "Scan the QR code on the charger with your phone. Takes you directly to payment without extra steps.",
+    qrTag: "Fastest",
+    c2cTitle: "Click2Charge",
+    c2cDesc: "Open evcharge.hr, find the charger on the map and click \"Start charging\" for the selected connector.",
+    c2cTag: "Flexible",
+    qrFlowTitle: "Option A: Scan QR Code",
+    recommended: "Recommended",
+    qrFlowDesc: "Each charger has a QR code on every connector. Simply scan it with your phone camera.",
+    qrStep1Title: "Connect the cable",
+    qrStep1Desc: "Connect the charger cable to your vehicle before scanning the QR code.",
+    qrStep2Title: "Scan the QR code",
+    qrStep2Desc: "Point your phone camera at the QR code on the connector you're using. The link opens automatically.",
+    qrStep3Title: "Pay with card",
+    qrStep3Desc: "Enter your card details. Pre-authorization happens immediately, but only the actual cost is charged.",
+    qrStep4Title: "Charging starts automatically",
+    qrStep4Desc: "After successful authorization, the charger automatically starts the charging session.",
+    tipTitle: "Tip",
+    qrTip: "The QR code is the same for the entire charger. After scanning, the system asks which connector you're using (left/right) – select the one where you plugged in the cable.",
+    scanNow: "Scan QR code now",
+    locateMe: "Find me on the map",
+    scanQrTitle: "📷 Scan QR code",
+    scanInstruction: "Point your camera at the QR code...",
+    scanSuccess: "QR code scanned! Redirecting...",
+    cameraError: "Error: Unable to access camera.",
+    c2cFlowTitle: "Option B: Click2Charge (Web)",
+    c2cFlowDesc: "If you don't have access to the QR code or want to check charger availability beforehand, use the web application.",
+    c2cStep1Title: "Open evcharge.hr",
+    c2cStep1Desc: "On your mobile phone or computer, open the evcharge.hr website.",
+    c2cStep2Title: "Find the charger on the map",
+    c2cStep2Desc: "The map automatically shows your location. Green markers indicate available chargers.",
+    c2cStep3Title: "Select a connector",
+    c2cStep3Desc: "Click on the charger, then select an available connector (left/right) and press \"Start charging\".",
+    c2cStep4Title: "Connect cable and pay",
+    c2cStep4Desc: "Connect the cable to your vehicle, enter card details, and charging starts automatically.",
+    c2cTip: "You can use the navigation function (Google Maps, Waze, Apple Maps) to get to the charger directly from the app.",
+    paymentTitle: "Payment",
+    paymentDesc: "Payment is made securely online. We accept all cards and digital wallets.",
+    digitalWallets: "Digital wallets",
+    creditCards: "Credit and debit cards",
+    pricingTitle: "Charging prices",
+    pricingNote: "Charging prices depend on location and charger. All prices (energy, session fee, idle fee) are clearly displayed before starting the charge.",
+    importantTitle: "Important",
+    preauthNote: "Pre-authorization (estimated amount) is reserved on your card when starting the charge. Only the actual cost is charged, and the difference is automatically refunded within 24-48 hours.",
+    idleFeeTitle: "Idle fee",
+    idleFeeNote: "Idle fee is only charged if the vehicle remains connected after charging is complete. Free idle time from 9 PM to 8 AM (minimum charge 10 kWh for free idle).",
+    faqTitle: "Frequently Asked Questions",
+    faq1Q: "What if the charger doesn't start charging?",
+    faq1A: "Check that the cable is properly connected to the vehicle and charger. Make sure you don't have a charging limit enabled in your vehicle (often set to 80% charge). We recommend connecting the vehicle to the charger first, then starting the charging session. Note that no more than 5 minutes can pass between plugging in and completing payment (security limit). If charging doesn't start, funds will be refunded. Try repeating the procedure – something may not have gone through correctly. If you still cannot start charging, there may be something wrong with the charger itself. If there is another charger or connector at the same location, please try that one. We would appreciate if you report any issues to the contacts listed below – by email or phone. We recommend email if the situation is not urgent.",
+    faq2Q: "Can I get a business invoice (R1)?",
+    faq2A: "Yes! When starting the charge, check the \"I want R1 invoice\" option. After the session ends, you'll receive an email with a link to enter company details (VAT ID, name, address).",
+    faq3Q: "How can I stop charging before the battery is full?",
+    faq3A: "You can stop charging in several ways: (1) Through our system – open the link from the confirmation email and press \"Stop charging\", (2) Directly from the vehicle – simply unlock your car and unplug the cable, the charger will automatically stop the session. You'll only be charged for energy consumed up to that point.",
+    faq4Q: "What connector types are available?",
+    faq4A: "Different connectors are used depending on charger power: AC chargers (up to 22 kW) use Type 2 connector, while DC fast chargers use CCS connector. Both types support most electric vehicles on the European market. Note on charging speed: although our AC chargers support up to 22 kW, most vehicles have a built-in charging limit of 11 kW for AC charging. If you notice slower charging than expected, this is most likely not a charger issue but a characteristic of your vehicle.",
+    faq5Q: "Do I need to install an app?",
+    faq5A: "No! Our system works entirely through the web browser – no app installation needed. Simply scan the QR code or visit evcharge.hr.",
+    needMoreHelp: "Need more help?",
+    backToCharging: "Back to charging"
+  },
+  sl: {
+    helpTitle: "Navodila za uporabo",
+    helpSubtitle: "Kako napolniti vaš električni avtomobil",
+    startTitle: "Kako začeti polnjenje?",
+    startDesc: "Obstajata dva načina za začetek polnjenja na naših polnilnicah. Izberite tistega, ki vam bolj ustreza:",
+    qrTitle: "Skeniraj QR kodo",
+    qrDesc: "Skenirajte QR kodo na polnilnici z mobilnim telefonom. Vas neposredno vodi do plačila brez dodatnih korakov.",
+    qrTag: "Najhitreje",
+    c2cTitle: "Click2Charge",
+    c2cDesc: "Odprite evcharge.hr, poiščite polnilnico na zemljevidu in kliknite \"Začni polnjenje\" za izbrani priključek.",
+    c2cTag: "Prilagodljivo",
+    qrFlowTitle: "Možnost A: Skeniraj QR kodo",
+    recommended: "Priporočeno",
+    qrFlowDesc: "Vsaka polnilnica ima QR kodo na vsakem priključku. Preprosto jo skenirajte s kamero telefona.",
+    qrStep1Title: "Priključite kabel",
+    qrStep1Desc: "Priključite kabel polnilnice na vaše vozilo pred skeniranjem QR kode.",
+    qrStep2Title: "Skenirajte QR kodo",
+    qrStep2Desc: "Usmerite kamero telefona na QR kodo na priključku, ki ga uporabljate. Povezava se samodejno odpre.",
+    qrStep3Title: "Plačajte s kartico",
+    qrStep3Desc: "Vnesite podatke kartice. Predavtorizacija se izvede takoj, zaračuna pa se samo dejanski strošek.",
+    qrStep4Title: "Polnjenje se začne samodejno",
+    qrStep4Desc: "Po uspešni avtorizaciji polnilnica samodejno začne sejo polnjenja.",
+    tipTitle: "Nasvet",
+    qrTip: "QR koda je enaka za celotno polnilnico. Po skeniranju vas sistem vpraša, kateri priključek uporabljate (levi/desni) – izberite tistega, na katerega ste priključili kabel.",
+    scanNow: "Skeniraj QR kodo zdaj",
+    locateMe: "Najdi me na zemljevidu",
+    scanQrTitle: "📷 Skeniraj QR kodo",
+    scanInstruction: "Usmerite kamero na QR kodo...",
+    scanSuccess: "QR koda skenirana! Preusmerjanje...",
+    cameraError: "Napaka: Dostop do kamere ni mogoč.",
+    c2cFlowTitle: "Možnost B: Click2Charge (splet)",
+    c2cFlowDesc: "Če nimate dostopa do QR kode ali želite vnaprej preveriti razpoložljivost polnilnice, uporabite spletno aplikacijo.",
+    c2cStep1Title: "Odprite evcharge.hr",
+    c2cStep1Desc: "Na mobilnem telefonu ali računalniku odprite spletno stran evcharge.hr.",
+    c2cStep2Title: "Poiščite polnilnico na zemljevidu",
+    c2cStep2Desc: "Zemljevid samodejno prikazuje vašo lokacijo. Zeleni označevalci označujejo razpoložljive polnilnice.",
+    c2cStep3Title: "Izberite priključek",
+    c2cStep3Desc: "Kliknite na polnilnico, nato izberite prosti priključek (levi/desni) in pritisnite \"Začni polnjenje\".",
+    c2cStep4Title: "Priključite kabel in plačajte",
+    c2cStep4Desc: "Priključite kabel na vozilo, vnesite podatke kartice in polnjenje se začne samodejno.",
+    c2cTip: "Lahko uporabite funkcijo navigacije (Google Maps, Waze, Apple Maps) za prihod do polnilnice neposredno iz aplikacije.",
+    paymentTitle: "Plačilo",
+    paymentDesc: "Plačilo poteka varno prek interneta. Sprejemamo vse kartice in digitalne denarnice.",
+    digitalWallets: "Digitalne denarnice",
+    creditCards: "Kreditne in debetne kartice",
+    pricingTitle: "Cene polnjenja",
+    pricingNote: "Cene polnjenja so odvisne od lokacije in polnilnice. Vse cene (energija, pristojbina za sejo, pristojbina za zadrževanje) so jasno prikazane pred začetkom polnjenja.",
+    importantTitle: "Pomembno",
+    preauthNote: "Predavtorizacija (ocenjeni znesek) se rezervira na kartici ob začetku polnjenja. Zaračuna se samo dejanski strošek, razlika pa se samodejno vrne v 24-48 urah.",
+    idleFeeTitle: "Pristojbina za zadrževanje",
+    idleFeeNote: "Pristojbina za zadrževanje se zaračuna samo, če vozilo ostane priključeno po končanem polnjenju. Brezplačno zadrževanje od 21:00 do 08:00 (minimalno polnjenje 10 kWh za brezplačno zadrževanje).",
+    faqTitle: "Pogosto zastavljena vprašanja",
+    faq1Q: "Kaj če polnilnica ne začne polnjenja?",
+    faq1A: "Preverite, ali je kabel pravilno priključen na vozilo in polnilnico. Preverite, da nimate vklopljenega limita polnjenja v vozilu (pogosto je nastavljen na 80% napolnjenosti). Priporočamo, da vozilo najprej priključite na polnilnico, nato pa zaženete polnjenje. Upoštevajte, da med priključitvijo vozila in zaključkom plačila ne sme preteči več kot 5 minut (varnostna omejitev). Če se polnjenje ne začne, bodo sredstva vrnjena. Poskusite ponoviti postopek – morda kaj ni šlo pravilno. Če polnjenja še vedno ne morete zagnati, je morda nekaj narobe s samo polnilnico. Če je na istem mestu druga polnilnica ali drug priključek, poskusite na drugem. Cenili bi, če nam morebitne težave sporočite na spodaj navedene kontakte – po e-pošti ali telefonu. Priporočamo e-pošto, če situacija ni nujna.",
+    faq2Q: "Ali lahko dobim račun za podjetje (R1)?",
+    faq2A: "Da! Ob začetku polnjenja označite možnost \"Želim R1 račun\". Po končani seji boste prejeli e-pošto s povezavo za vnos podatkov podjetja (davčna št., ime, naslov).",
+    faq3Q: "Kako lahko ustavim polnjenje, preden je baterija polna?",
+    faq3A: "Polnjenje lahko ustavite na več načinov: (1) Preko našega sistema – odprite povezavo iz potrditvenega e-maila in pritisnite \"Ustavi polnjenje\", (2) Neposredno iz vozila – preprosto odklenite avto in izvlecite kabel, polnilnica bo samodejno prekinila polnjenje. Zaračunana bo samo energija, porabljena do tega trenutka.",
+    faq4Q: "Kateri tipi priključkov so na voljo?",
+    faq4A: "Odvisno od moči polnilnice se uporabljajo različni priključki: AC polnilnice (do 22 kW) uporabljajo priključek Type 2, medtem ko DC hitre polnilnice uporabljajo priključek CCS. Oba tipa podpirata večino električnih vozil na evropskem trgu. Opomba o hitrosti polnjenja: čeprav naše AC polnilnice podpirajo do 22 kW, ima večina vozil vgrajeno omejitev polnjenja na 11 kW za AC polnjenje. Če opazite počasnejše polnjenje od pričakovanega, to najverjetneje ni težava polnilnice, ampak lastnost vašega vozila.",
+    faq5Q: "Ali moram namestiti aplikacijo?",
+    faq5A: "Ne! Naš sistem deluje v celoti prek spletnega brskalnika – brez potrebe po namestitvi aplikacije. Preprosto skenirajte QR kodo ali obiščite evcharge.hr.",
+    needMoreHelp: "Potrebujete dodatno pomoč?",
+    backToCharging: "Nazaj na polnjenje"
+  },
+  it: {
+    helpTitle: "Istruzioni per l'uso",
+    helpSubtitle: "Come ricaricare il tuo veicolo elettrico",
+    startTitle: "Come iniziare la ricarica?",
+    startDesc: "Ci sono due modi per avviare la ricarica presso le nostre stazioni. Scegli quello più adatto a te:",
+    qrTitle: "Scansiona QR Code",
+    qrDesc: "Scansiona il codice QR sul caricatore con il telefono. Ti porta direttamente al pagamento senza passaggi aggiuntivi.",
+    qrTag: "Più veloce",
+    c2cTitle: "Click2Charge",
+    c2cDesc: "Apri evcharge.hr, trova il caricatore sulla mappa e clicca \"Avvia ricarica\" per il connettore selezionato.",
+    c2cTag: "Flessibile",
+    qrFlowTitle: "Opzione A: Scansiona QR Code",
+    recommended: "Consigliato",
+    qrFlowDesc: "Ogni caricatore ha un codice QR su ogni connettore. Scansionalo semplicemente con la fotocamera del telefono.",
+    qrStep1Title: "Collega il cavo",
+    qrStep1Desc: "Collega il cavo del caricatore al tuo veicolo prima di scansionare il codice QR.",
+    qrStep2Title: "Scansiona il codice QR",
+    qrStep2Desc: "Punta la fotocamera del telefono sul codice QR del connettore che stai usando. Il link si apre automaticamente.",
+    qrStep3Title: "Paga con carta",
+    qrStep3Desc: "Inserisci i dati della carta. La pre-autorizzazione avviene immediatamente, ma viene addebitato solo il costo effettivo.",
+    qrStep4Title: "La ricarica inizia automaticamente",
+    qrStep4Desc: "Dopo l'autorizzazione riuscita, il caricatore avvia automaticamente la sessione di ricarica.",
+    tipTitle: "Suggerimento",
+    qrTip: "Il codice QR è lo stesso per l'intero caricatore. Dopo la scansione, il sistema chiede quale connettore stai usando (sinistro/destro) – seleziona quello a cui hai collegato il cavo.",
+    scanNow: "Scansiona codice QR ora",
+    locateMe: "Trovami sulla mappa",
+    scanQrTitle: "📷 Scansiona codice QR",
+    scanInstruction: "Punta la fotocamera sul codice QR...",
+    scanSuccess: "Codice QR scansionato! Reindirizzamento...",
+    cameraError: "Errore: Impossibile accedere alla fotocamera.",
+    c2cFlowTitle: "Opzione B: Click2Charge (Web)",
+    c2cFlowDesc: "Se non hai accesso al codice QR o vuoi verificare la disponibilità del caricatore in anticipo, usa l'applicazione web.",
+    c2cStep1Title: "Apri evcharge.hr",
+    c2cStep1Desc: "Sul telefono o computer, apri il sito web evcharge.hr.",
+    c2cStep2Title: "Trova il caricatore sulla mappa",
+    c2cStep2Desc: "La mappa mostra automaticamente la tua posizione. I marcatori verdi indicano i caricatori disponibili.",
+    c2cStep3Title: "Seleziona un connettore",
+    c2cStep3Desc: "Clicca sul caricatore, poi seleziona un connettore disponibile (sinistro/destro) e premi \"Avvia ricarica\".",
+    c2cStep4Title: "Collega il cavo e paga",
+    c2cStep4Desc: "Collega il cavo al veicolo, inserisci i dati della carta e la ricarica inizia automaticamente.",
+    c2cTip: "Puoi usare la funzione di navigazione (Google Maps, Waze, Apple Maps) per raggiungere il caricatore direttamente dall'app.",
+    paymentTitle: "Pagamento",
+    paymentDesc: "Il pagamento viene effettuato in modo sicuro online. Accettiamo tutte le carte e i portafogli digitali.",
+    digitalWallets: "Portafogli digitali",
+    creditCards: "Carte di credito e debito",
+    pricingTitle: "Prezzi di ricarica",
+    pricingNote: "I prezzi di ricarica dipendono dalla posizione e dal caricatore. Tutti i prezzi (energia, tariffa sessione, tariffa di occupazione) sono chiaramente visualizzati prima di iniziare la ricarica.",
+    importantTitle: "Importante",
+    preauthNote: "La pre-autorizzazione (importo stimato) viene riservata sulla carta all'inizio della ricarica. Viene addebitato solo il costo effettivo e la differenza viene rimborsata automaticamente entro 24-48 ore.",
+    idleFeeTitle: "Tariffa di occupazione",
+    idleFeeNote: "La tariffa di occupazione viene addebitata solo se il veicolo rimane collegato dopo il completamento della ricarica. Occupazione gratuita dalle 21:00 alle 08:00 (ricarica minima 10 kWh per occupazione gratuita).",
+    faqTitle: "Domande frequenti",
+    faq1Q: "Cosa fare se il caricatore non avvia la ricarica?",
+    faq1A: "Verifica che il cavo sia collegato correttamente al veicolo e al caricatore. Assicurati di non avere un limite di ricarica attivato nel veicolo (spesso impostato all'80% di carica). Raccomandiamo di collegare prima il veicolo al caricatore, poi avviare la ricarica. Nota che non possono trascorrere più di 5 minuti tra il collegamento e il completamento del pagamento (limite di sicurezza). Se la ricarica non si avvia, i fondi saranno rimborsati. Prova a ripetere la procedura – qualcosa potrebbe non essere andato a buon fine. Se ancora non riesci ad avviare la ricarica, potrebbe esserci un problema con la stazione stessa. Se nello stesso luogo c'è un'altra stazione o un altro connettore, prova quello. Apprezzeremmo se ci segnalaste eventuali problemi ai contatti indicati sotto – via email o telefono. Raccomandiamo l'email se la situazione non è urgente.",
+    faq2Q: "Posso ottenere una fattura aziendale (R1)?",
+    faq2A: "Sì! All'avvio della ricarica, seleziona l'opzione \"Voglio fattura R1\". Al termine della sessione riceverai un'email con un link per inserire i dati aziendali (P.IVA, nome, indirizzo).",
+    faq3Q: "Come posso fermare la ricarica prima che la batteria sia piena?",
+    faq3A: "Puoi fermare la ricarica in diversi modi: (1) Tramite il nostro sistema – apri il link dall'email di conferma e premi \"Ferma ricarica\", (2) Direttamente dal veicolo – sblocca semplicemente l'auto e scollega il cavo, la stazione interromperà automaticamente la ricarica. Verrà addebitata solo l'energia consumata fino a quel momento.",
+    faq4Q: "Quali tipi di connettori sono disponibili?",
+    faq4A: "A seconda della potenza della stazione si utilizzano connettori diversi: le stazioni AC (fino a 22 kW) utilizzano il connettore Type 2, mentre le stazioni DC veloci utilizzano il connettore CCS. Entrambi i tipi supportano la maggior parte dei veicoli elettrici sul mercato europeo. Nota sulla velocità di ricarica: sebbene le nostre stazioni AC supportino fino a 22 kW, la maggior parte dei veicoli ha un limite di ricarica integrato di 11 kW per la ricarica AC. Se notate una ricarica più lenta del previsto, molto probabilmente non è un problema della stazione ma una caratteristica del vostro veicolo.",
+    faq5Q: "Devo installare un'app?",
+    faq5A: "No! Il nostro sistema funziona interamente tramite browser web – non è necessaria alcuna installazione di app. Basta scansionare il codice QR o visitare evcharge.hr.",
+    needMoreHelp: "Hai bisogno di ulteriore aiuto?",
+    backToCharging: "Torna alla ricarica"
+  },
+  de: {
+    helpTitle: "Bedienungsanleitung",
+    helpSubtitle: "So laden Sie Ihr Elektrofahrzeug",
+    startTitle: "Wie starte ich den Ladevorgang?",
+    startDesc: "Es gibt zwei Möglichkeiten, an unseren Ladestationen zu laden. Wählen Sie die für Sie passende:",
+    qrTitle: "QR-Code scannen",
+    qrDesc: "Scannen Sie den QR-Code am Ladegerät mit Ihrem Handy. Führt Sie direkt zur Zahlung ohne zusätzliche Schritte.",
+    qrTag: "Schnellste",
+    c2cTitle: "Click2Charge",
+    c2cDesc: "Öffnen Sie evcharge.hr, finden Sie das Ladegerät auf der Karte und klicken Sie auf \"Laden starten\" für den ausgewählten Anschluss.",
+    c2cTag: "Flexibel",
+    qrFlowTitle: "Option A: QR-Code scannen",
+    recommended: "Empfohlen",
+    qrFlowDesc: "Jedes Ladegerät hat einen QR-Code an jedem Anschluss. Scannen Sie ihn einfach mit der Handykamera.",
+    qrStep1Title: "Kabel anschließen",
+    qrStep1Desc: "Schließen Sie das Ladekabel an Ihr Fahrzeug an, bevor Sie den QR-Code scannen.",
+    qrStep2Title: "QR-Code scannen",
+    qrStep2Desc: "Richten Sie die Handykamera auf den QR-Code am verwendeten Anschluss. Der Link öffnet sich automatisch.",
+    qrStep3Title: "Mit Karte bezahlen",
+    qrStep3Desc: "Geben Sie Ihre Kartendaten ein. Die Vorautorisierung erfolgt sofort, aber nur die tatsächlichen Kosten werden berechnet.",
+    qrStep4Title: "Laden startet automatisch",
+    qrStep4Desc: "Nach erfolgreicher Autorisierung startet das Ladegerät automatisch die Ladesitzung.",
+    tipTitle: "Tipp",
+    qrTip: "Der QR-Code ist für das gesamte Ladegerät gleich. Nach dem Scannen fragt das System, welchen Anschluss Sie verwenden (links/rechts) – wählen Sie den, an den Sie das Kabel angeschlossen haben.",
+    scanNow: "QR-Code jetzt scannen",
+    locateMe: "Finde mich auf der Karte",
+    scanQrTitle: "📷 QR-Code scannen",
+    scanInstruction: "Richten Sie die Kamera auf den QR-Code...",
+    scanSuccess: "QR-Code gescannt! Weiterleitung...",
+    cameraError: "Fehler: Kein Zugriff auf die Kamera.",
+    c2cFlowTitle: "Option B: Click2Charge (Web)",
+    c2cFlowDesc: "Wenn Sie keinen Zugang zum QR-Code haben oder die Verfügbarkeit vorab prüfen möchten, nutzen Sie die Webanwendung.",
+    c2cStep1Title: "evcharge.hr öffnen",
+    c2cStep1Desc: "Öffnen Sie auf Ihrem Handy oder Computer die Website evcharge.hr.",
+    c2cStep2Title: "Ladegerät auf der Karte finden",
+    c2cStep2Desc: "Die Karte zeigt automatisch Ihren Standort. Grüne Markierungen zeigen verfügbare Ladegeräte.",
+    c2cStep3Title: "Anschluss wählen",
+    c2cStep3Desc: "Klicken Sie auf das Ladegerät, wählen Sie einen verfügbaren Anschluss (links/rechts) und drücken Sie \"Laden starten\".",
+    c2cStep4Title: "Kabel anschließen und bezahlen",
+    c2cStep4Desc: "Schließen Sie das Kabel am Fahrzeug an, geben Sie die Kartendaten ein und das Laden startet automatisch.",
+    c2cTip: "Sie können die Navigationsfunktion (Google Maps, Waze, Apple Maps) nutzen, um direkt aus der App zum Ladegerät zu gelangen.",
+    paymentTitle: "Zahlung",
+    paymentDesc: "Die Zahlung erfolgt sicher online. Wir akzeptieren alle Karten und digitalen Wallets.",
+    digitalWallets: "Digitale Wallets",
+    creditCards: "Kredit- und Debitkarten",
+    pricingTitle: "Ladepreise",
+    pricingNote: "Die Ladepreise hängen vom Standort und Ladegerät ab. Alle Preise (Energie, Sitzungsgebühr, Belegungsgebühr) werden vor Ladebeginn deutlich angezeigt.",
+    importantTitle: "Wichtig",
+    preauthNote: "Die Vorautorisierung (geschätzter Betrag) wird beim Ladestart auf der Karte reserviert. Es werden nur die tatsächlichen Kosten berechnet, die Differenz wird automatisch innerhalb von 24-48 Stunden erstattet.",
+    idleFeeTitle: "Belegungsgebühr",
+    idleFeeNote: "Die Belegungsgebühr wird nur berechnet, wenn das Fahrzeug nach Ladeende angeschlossen bleibt. Kostenlose Belegung von 21:00 bis 08:00 Uhr (Mindestladung 10 kWh für kostenlose Belegung).",
+    faqTitle: "Häufig gestellte Fragen",
+    faq1Q: "Was wenn das Ladegerät nicht startet?",
+    faq1A: "Prüfen Sie, ob das Kabel richtig am Fahrzeug und Ladegerät angeschlossen ist. Stellen Sie sicher, dass Sie kein Ladelimit im Fahrzeug aktiviert haben (oft auf 80% Ladung eingestellt). Wir empfehlen, das Fahrzeug zuerst an die Ladestation anzuschließen und dann den Ladevorgang zu starten. Beachten Sie, dass zwischen dem Anschließen und dem Abschluss der Zahlung nicht mehr als 5 Minuten vergehen dürfen (Sicherheitslimit). Wenn das Laden nicht startet, werden die Mittel zurückerstattet. Versuchen Sie den Vorgang zu wiederholen – möglicherweise ist etwas nicht richtig durchgegangen. Wenn Sie das Laden immer noch nicht starten können, liegt möglicherweise ein Problem mit der Ladestation selbst vor. Wenn am selben Standort eine weitere Ladestation oder ein anderer Anschluss vorhanden ist, versuchen Sie es dort. Wir würden es begrüßen, wenn Sie uns eventuelle Probleme über die unten angegebenen Kontakte melden – per E-Mail oder Telefon. Wir empfehlen E-Mail, wenn die Situation nicht dringend ist.",
+    faq2Q: "Kann ich eine Firmenrechnung (R1) bekommen?",
+    faq2A: "Ja! Beim Ladestart die Option \"Ich möchte R1-Rechnung\" auswählen. Nach der Sitzung erhalten Sie eine E-Mail mit einem Link zur Eingabe der Firmendaten (USt-IdNr., Name, Adresse).",
+    faq3Q: "Wie kann ich das Laden stoppen, bevor die Batterie voll ist?",
+    faq3A: "Sie können den Ladevorgang auf verschiedene Arten stoppen: (1) Über unser System – öffnen Sie den Link aus der Bestätigungs-E-Mail und drücken Sie \"Laden stoppen\", (2) Direkt vom Fahrzeug aus – entsperren Sie einfach Ihr Auto und ziehen Sie das Kabel ab, die Ladestation wird den Ladevorgang automatisch beenden. Es wird nur die bis dahin verbrauchte Energie berechnet.",
+    faq4Q: "Welche Steckertypen sind verfügbar?",
+    faq4A: "Je nach Ladeleistung werden unterschiedliche Stecker verwendet: AC-Ladestationen (bis 22 kW) verwenden den Type 2 Stecker, während DC-Schnellladestationen den CCS-Stecker verwenden. Beide Typen unterstützen die meisten Elektrofahrzeuge auf dem europäischen Markt. Hinweis zur Ladegeschwindigkeit: obwohl unsere AC-Ladestationen bis zu 22 kW unterstützen, haben die meisten Fahrzeuge ein eingebautes Ladelimit von 11 kW für AC-Laden. Wenn Sie ein langsameres Laden als erwartet bemerken, ist dies höchstwahrscheinlich kein Problem der Ladestation, sondern eine Eigenschaft Ihres Fahrzeugs.",
+    faq5Q: "Muss ich eine App installieren?",
+    faq5A: "Nein! Unser System funktioniert vollständig über den Webbrowser – keine App-Installation erforderlich. Scannen Sie einfach den QR-Code oder besuchen Sie evcharge.hr.",
+    needMoreHelp: "Brauchen Sie weitere Hilfe?",
+    backToCharging: "Zurück zum Laden"
+  },
+  fr: {
+    helpTitle: "Mode d'emploi",
+    helpSubtitle: "Comment recharger votre véhicule électrique",
+    startTitle: "Comment démarrer la recharge ?",
+    startDesc: "Il existe deux façons de démarrer la recharge à nos bornes. Choisissez celle qui vous convient le mieux :",
+    qrTitle: "Scanner le QR Code",
+    qrDesc: "Scannez le code QR sur la borne avec votre téléphone. Vous mène directement au paiement sans étapes supplémentaires.",
+    qrTag: "Le plus rapide",
+    c2cTitle: "Click2Charge",
+    c2cDesc: "Ouvrez evcharge.hr, trouvez la borne sur la carte et cliquez sur \"Démarrer la recharge\" pour le connecteur sélectionné.",
+    c2cTag: "Flexible",
+    qrFlowTitle: "Option A : Scanner le QR Code",
+    recommended: "Recommandé",
+    qrFlowDesc: "Chaque borne a un code QR sur chaque connecteur. Scannez-le simplement avec l'appareil photo de votre téléphone.",
+    qrStep1Title: "Branchez le câble",
+    qrStep1Desc: "Connectez le câble de la borne à votre véhicule avant de scanner le code QR.",
+    qrStep2Title: "Scannez le code QR",
+    qrStep2Desc: "Pointez l'appareil photo de votre téléphone sur le code QR du connecteur que vous utilisez. Le lien s'ouvre automatiquement.",
+    qrStep3Title: "Payez par carte",
+    qrStep3Desc: "Entrez vos coordonnées de carte. La pré-autorisation se fait immédiatement, mais seul le coût réel est facturé.",
+    qrStep4Title: "La recharge démarre automatiquement",
+    qrStep4Desc: "Après autorisation réussie, la borne démarre automatiquement la session de recharge.",
+    tipTitle: "Conseil",
+    qrTip: "Le code QR est le même pour toute la borne. Après le scan, le système demande quel connecteur vous utilisez (gauche/droite) – sélectionnez celui où vous avez branché le câble.",
+    scanNow: "Scanner le code QR maintenant",
+    locateMe: "Me localiser sur la carte",
+    scanQrTitle: "📷 Scanner le code QR",
+    scanInstruction: "Dirigez la caméra vers le code QR...",
+    scanSuccess: "Code QR scanné! Redirection...",
+    cameraError: "Erreur: Impossible d'accéder à la caméra.",
+    c2cFlowTitle: "Option B : Click2Charge (Web)",
+    c2cFlowDesc: "Si vous n'avez pas accès au code QR ou souhaitez vérifier la disponibilité à l'avance, utilisez l'application web.",
+    c2cStep1Title: "Ouvrez evcharge.hr",
+    c2cStep1Desc: "Sur votre téléphone ou ordinateur, ouvrez le site web evcharge.hr.",
+    c2cStep2Title: "Trouvez la borne sur la carte",
+    c2cStep2Desc: "La carte affiche automatiquement votre position. Les marqueurs verts indiquent les bornes disponibles.",
+    c2cStep3Title: "Sélectionnez un connecteur",
+    c2cStep3Desc: "Cliquez sur la borne, puis sélectionnez un connecteur disponible (gauche/droite) et appuyez sur \"Démarrer la recharge\".",
+    c2cStep4Title: "Branchez le câble et payez",
+    c2cStep4Desc: "Connectez le câble au véhicule, entrez les coordonnées de carte et la recharge démarre automatiquement.",
+    c2cTip: "Vous pouvez utiliser la fonction navigation (Google Maps, Waze, Apple Maps) pour vous rendre à la borne directement depuis l'application.",
+    paymentTitle: "Paiement",
+    paymentDesc: "Le paiement s'effectue en toute sécurité en ligne. Nous acceptons toutes les cartes et portefeuilles numériques.",
+    digitalWallets: "Portefeuilles numériques",
+    creditCards: "Cartes de crédit et débit",
+    pricingTitle: "Tarifs de recharge",
+    pricingNote: "Les tarifs de recharge dépendent de l'emplacement et de la borne. Tous les prix (énergie, frais de session, frais d'occupation) sont clairement affichés avant de démarrer la recharge.",
+    importantTitle: "Important",
+    preauthNote: "La pré-autorisation (montant estimé) est réservée sur votre carte au démarrage de la recharge. Seul le coût réel est facturé, et la différence est automatiquement remboursée sous 24-48 heures.",
+    idleFeeTitle: "Frais d'occupation",
+    idleFeeNote: "Les frais d'occupation ne sont facturés que si le véhicule reste branché après la fin de la recharge. Occupation gratuite de 21h00 à 08h00 (recharge minimum 10 kWh pour occupation gratuite).",
+    faqTitle: "Questions fréquentes",
+    faq1Q: "Que faire si la borne ne démarre pas la recharge ?",
+    faq1A: "Vérifiez que le câble est correctement branché au véhicule et à la borne. Assurez-vous de ne pas avoir une limite de charge activée dans votre véhicule (souvent réglée à 80% de charge). Nous recommandons de connecter d'abord le véhicule à la borne, puis de lancer la recharge. Notez qu'il ne peut pas s'écouler plus de 5 minutes entre le branchement et la fin du paiement (limite de sécurité). Si la recharge ne démarre pas, les fonds seront remboursés. Essayez de répéter la procédure – quelque chose n'a peut-être pas fonctionné correctement. Si vous ne parvenez toujours pas à démarrer la recharge, il se peut qu'il y ait un problème avec la borne elle-même. S'il y a une autre borne ou un autre connecteur au même endroit, essayez celui-là. Nous apprécierions que vous nous signaliez tout problème aux contacts indiqués ci-dessous – par email ou téléphone. Nous recommandons l'email si la situation n'est pas urgente.",
+    faq2Q: "Puis-je obtenir une facture entreprise (R1) ?",
+    faq2A: "Oui ! Au démarrage de la recharge, cochez l'option \"Je veux une facture R1\". À la fin de la session, vous recevrez un email avec un lien pour saisir les informations de l'entreprise (N° TVA, nom, adresse).",
+    faq3Q: "Comment arrêter la recharge avant que la batterie soit pleine ?",
+    faq3A: "Vous pouvez arrêter la recharge de plusieurs façons : (1) Via notre système – ouvrez le lien de l'email de confirmation et appuyez sur \"Arrêter la recharge\", (2) Directement depuis le véhicule – déverrouillez simplement votre voiture et débranchez le câble, la borne arrêtera automatiquement la recharge. Seule l'énergie consommée jusqu'à ce moment sera facturée.",
+    faq4Q: "Quels types de connecteurs sont disponibles ?",
+    faq4A: "Différents connecteurs sont utilisés selon la puissance de la borne : les bornes AC (jusqu'à 22 kW) utilisent le connecteur Type 2, tandis que les bornes DC rapides utilisent le connecteur CCS. Les deux types prennent en charge la plupart des véhicules électriques sur le marché européen. Note sur la vitesse de charge : bien que nos bornes AC supportent jusqu'à 22 kW, la plupart des véhicules ont une limite de charge intégrée de 11 kW pour la charge AC. Si vous constatez une charge plus lente que prévu, ce n'est très probablement pas un problème de borne mais une caractéristique de votre véhicule.",
+    faq5Q: "Dois-je installer une application ?",
+    faq5A: "Non ! Notre système fonctionne entièrement via le navigateur web – aucune installation d'application nécessaire. Scannez simplement le code QR ou visitez evcharge.hr.",
+    needMoreHelp: "Besoin d'aide supplémentaire ?",
+    backToCharging: "Retour à la recharge"
+  }
+};
+
+const LANGS = ['hr','en','sl','it','de','fr'];
+
+function detectLang() {
+  const browserLang = (navigator.language || navigator.userLanguage || 'hr').slice(0,2).toLowerCase();
+  return LANGS.includes(browserLang) ? browserLang : 'hr';
+}
+
+function setLang(lang) {
+  document.documentElement.lang = lang;
+  document.getElementById('langSelect').value = lang;
+  
+  const s = T[lang] || T['hr'];
+  document.querySelectorAll('[data-t]').forEach(el => {
+    const key = el.getAttribute('data-t');
+    if (s[key]) el.textContent = s[key];
+  });
+}
+
+// Auto-detect and set language on load
+setLang(detectLang());
+
+// ========== QR SCANNER ==========
+let html5QrcodeScanner = null;
+let scannerRunning = false;
+
+async function openQrScanner() {
+  const modal = document.getElementById('qr-modal');
+  const statusEl = document.getElementById('qr-status');
+  
+  modal.classList.add('active');
+  statusEl.textContent = 'Tražim dozvolu za kameru...';
+  statusEl.className = 'qr-status';
+  
+  // Check if library loaded
+  if (typeof Html5Qrcode === 'undefined') {
+    statusEl.textContent = 'Greška: QR biblioteka nije učitana. Osvježite stranicu.';
+    statusEl.className = 'qr-status error';
+    return;
+  }
+  
+  // First, explicitly request camera permission
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'environment' } 
+    });
+    // Stop the stream immediately - we just needed permission
+    stream.getTracks().forEach(track => track.stop());
+    console.log('Camera permission granted');
+  } catch (err) {
+    console.error('Camera permission error:', err);
+    statusEl.textContent = 'Dozvola za kameru je odbijena. Omogućite kameru u postavkama preglednika.';
+    statusEl.className = 'qr-status error';
+    return;
+  }
+  
+  // Stop any existing scanner first
+  if (html5QrcodeScanner && scannerRunning) {
+    try {
+      await html5QrcodeScanner.stop();
+    } catch(e) {}
+    scannerRunning = false;
+  }
+  
+  startScanner(statusEl);
+}
+
+function startScanner(statusEl) {
+  statusEl.textContent = 'Pokrećem kameru...';
+  
+  if (!html5QrcodeScanner) {
+    html5QrcodeScanner = new Html5Qrcode("qr-reader");
+  }
+  
+  const config = {
+    fps: 10,
+    qrbox: function(viewfinderWidth, viewfinderHeight) {
+      const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+      const qrboxSize = Math.floor(minEdge * 0.7);
+      return { width: qrboxSize, height: qrboxSize };
+    }
+  };
+  
+  // Use facingMode instead of camera ID for better compatibility
+  html5QrcodeScanner.start(
+    { facingMode: "environment" },
+    config,
+    (decodedText) => {
+      console.log('QR decoded:', decodedText);
+      statusEl.textContent = 'QR kod skeniran! Preusmjeravanje...';
+      statusEl.className = 'qr-status success';
+      scannerRunning = false;
+      
+      html5QrcodeScanner.stop().finally(() => {
+        setTimeout(() => {
+          window.location.href = decodedText;
+        }, 500);
+      });
+    },
+    (errorMessage) => {
+      // Ignore - scanning in progress
+    }
+  ).then(() => {
+    scannerRunning = true;
+    statusEl.textContent = T[document.documentElement.lang || 'hr']?.scanInstruction || 'Usmjerite kameru na QR kod...';
+    statusEl.className = 'qr-status';
+    console.log('Scanner started successfully');
+  }).catch((err) => {
+    console.error('Scanner start error:', err);
+    statusEl.textContent = 'Greška kamere: ' + (err.message || err);
+    statusEl.className = 'qr-status error';
+  });
+}
+
+function closeQrScanner() {
+  const modal = document.getElementById('qr-modal');
+  modal.classList.remove('active');
+  
+  if (html5QrcodeScanner && scannerRunning) {
+    html5QrcodeScanner.stop().finally(() => {
+      scannerRunning = false;
+    });
+  }
+}
+
+// Close modal on escape key or click outside
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeQrScanner();
+});
+
+// Scroll to Click2Charge section
+function scrollToC2C() {
+  const section = document.getElementById('c2c-section');
+  if (section) {
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+// Scroll to QR section
+function scrollToQR() {
+  const section = document.getElementById('qr-section');
+  if (section) {
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+// Open map page
+function openMap() {
+  window.location.href = '/Public/Map';
+}
+</script>
+
+<!-- QR Scanner Modal -->
+<div id="qr-modal" class="qr-modal" onclick="if(event.target === this) closeQrScanner()">
+  <div class="qr-modal-content">
+    <div class="qr-modal-header">
+      <div class="qr-modal-title" data-t="scanQrTitle">📷 Skeniraj QR kod</div>
+      <button type="button" class="qr-modal-close" onclick="closeQrScanner()" aria-label="Close">&times;</button>
+    </div>
+    <div id="qr-reader"></div>
+    <div id="qr-status" class="qr-status">Usmjerite kameru na QR kod...</div>
+  </div>
+</div>
+</body>
+</html>
