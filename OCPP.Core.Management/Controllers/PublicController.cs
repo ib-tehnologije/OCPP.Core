@@ -629,8 +629,8 @@ namespace OCPP.Core.Management.Controllers
                 liveChargePointStatus.OnlineConnectors.TryGetValue(connectorId, out var liveConnectorStatus))
             {
                 return !string.IsNullOrWhiteSpace(liveConnectorStatus.OcppStatus)
-                    ? liveConnectorStatus.OcppStatus
-                    : liveConnectorStatus.Status.ToString();
+                    ? liveConnectorStatus.OcppStatus.Trim()
+                    : (liveConnectorStatus.Status == ConnectorStatusEnum.Undefined ? null : liveConnectorStatus.Status.ToString());
             }
 
             return null;

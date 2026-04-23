@@ -1775,6 +1775,117 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void GetConnectorStartability_IgnoresMeterOnlyUndefinedLiveStatus()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-startability-meter-only-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-METER-ONLY",
+                        Name = "Meter-only startability test"
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-METER-ONLY",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var dbContext = CreateContext(databasePath);
+                var middleware = CreateMiddleware();
+                var chargePointStatus = new ChargePointStatus
+                {
+                    Id = "CP-METER-ONLY",
+                    Protocol = "ocpp1.6",
+                    WebSocket = new FakeOpenWebSocket(() => Task.CompletedTask),
+                    OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                    {
+                        [1] = new OnlineConnectorStatus
+                        {
+                            Status = ConnectorStatusEnum.Undefined,
+                            MeterKWH = 1534.933,
+                            MeterValueDate = DateTimeOffset.UtcNow
+                        }
+                    }
+                };
+
+                var result = InvokeGetConnectorStartability(middleware, dbContext, "CP-METER-ONLY", 1, chargePointStatus, null);
+                bool startable = Assert.IsType<bool>(result.GetType().GetProperty("Startable")!.GetValue(result));
+                string reason = Assert.IsType<string>(result.GetType().GetProperty("Reason")!.GetValue(result));
+                string persistedStatus = Assert.IsType<string>(result.GetType().GetProperty("PersistedStatus")!.GetValue(result));
+
+                Assert.True(startable);
+                Assert.Equal("Startable", reason);
+                Assert.Equal("Available", persistedStatus);
+                Assert.Null(result.GetType().GetProperty("LiveStatus")!.GetValue(result));
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public void IsConnectorBusy_IgnoresMeterOnlyUndefinedLiveStatus()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-busy-meter-only-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-BUSY-METER-ONLY",
+                        Name = "Meter-only busy test"
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-BUSY-METER-ONLY",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var dbContext = CreateContext(databasePath);
+                var middleware = CreateMiddleware();
+                var chargePointStatus = new ChargePointStatus
+                {
+                    Id = "CP-BUSY-METER-ONLY",
+                    Protocol = "ocpp1.6",
+                    WebSocket = new FakeOpenWebSocket(() => Task.CompletedTask),
+                    OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                    {
+                        [1] = new OnlineConnectorStatus
+                        {
+                            Status = ConnectorStatusEnum.Undefined,
+                            MeterKWH = 1534.933,
+                            MeterValueDate = DateTimeOffset.UtcNow
+                        }
+                    }
+                };
+
+                bool isBusy = InvokeIsConnectorBusy(middleware, dbContext, "CP-BUSY-METER-ONLY", 1, chargePointStatus, null, out var reason);
+
+                Assert.False(isBusy);
+                Assert.Equal("Available", reason);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task HandlePaymentCreateAsync_UsesCaseInsensitiveChargePointLookup()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-create-case-{Guid.NewGuid():N}.sqlite");
@@ -2424,6 +2535,34 @@ namespace OCPP.Core.Server.Tests
             Assert.NotNull(method);
 
             return method.Invoke(middleware, new object?[] { dbContext, chargePointId, connectorId, chargePointStatus, reservationToIgnore })!;
+        }
+
+        private static bool InvokeIsConnectorBusy(
+            OCPPMiddleware middleware,
+            OCPPCoreContext dbContext,
+            string chargePointId,
+            int connectorId,
+            ChargePointStatus chargePointStatus,
+            Guid? reservationToIgnore,
+            out string? busyReason)
+        {
+            var method = typeof(OCPPMiddleware)
+                .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
+                .Single(m => m.Name == "IsConnectorBusy" && m.GetParameters().Length == 6);
+
+            object?[] args =
+            {
+                dbContext,
+                chargePointId,
+                connectorId,
+                chargePointStatus,
+                reservationToIgnore,
+                null
+            };
+
+            var result = method.Invoke(middleware, args);
+            busyReason = args[5] as string;
+            return Assert.IsType<bool>(result);
         }
 
         private static bool InvokeTryRemoveStatusIfSameInstance(

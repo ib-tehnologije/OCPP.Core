@@ -259,7 +259,8 @@ namespace OCPP.Core.Server
                 return null;
             }
 
-            return OcppConnectorStatus.Normalize(connectorStatus.OcppStatus) ?? connectorStatus.Status.ToString();
+            return OcppConnectorStatus.Normalize(connectorStatus.OcppStatus) ??
+                   (connectorStatus.Status == ConnectorStatusEnum.Undefined ? null : connectorStatus.Status.ToString());
         }
 
         private static string GetLiveConnectorRawStatus(ChargePointStatus chargePointStatus, int connectorId)
@@ -712,7 +713,11 @@ namespace OCPP.Core.Server
                 if (cpStatus?.OnlineConnectors != null &&
                     cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
                 {
-                    return online.Status == ConnectorStatusEnum.Preparing;
+                    string liveRawStatus = GetLiveConnectorRawStatus(online);
+                    if (!string.IsNullOrWhiteSpace(liveRawStatus))
+                    {
+                        return IsStatus(liveRawStatus, OcppConnectorStatus.Preparing);
+                    }
                 }
             }
             catch
@@ -747,12 +752,19 @@ namespace OCPP.Core.Server
                     bool available = false;
                     try
                     {
+                        bool checkedAuthoritativeLiveStatus = false;
                         if (cpStatus?.OnlineConnectors != null &&
                             cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
                         {
-                            available = online.Status == ConnectorStatusEnum.Available;
+                            string liveRawStatus = GetLiveConnectorRawStatus(online);
+                            if (!string.IsNullOrWhiteSpace(liveRawStatus))
+                            {
+                                available = IsStatus(liveRawStatus, OcppConnectorStatus.Available);
+                                checkedAuthoritativeLiveStatus = true;
+                            }
                         }
-                        else
+
+                        if (!checkedAuthoritativeLiveStatus)
                         {
                             var persisted = dbContext?.ConnectorStatuses?.Find(reservation.ChargePointId, reservation.ConnectorId);
                             available = IsStatus(persisted?.LastStatus, "Available");
@@ -2409,8 +2421,8 @@ namespace OCPP.Core.Server
             if (cpStatus?.OnlineConnectors != null &&
                 cpStatus.OnlineConnectors.TryGetValue(reservation.ConnectorId, out var online))
             {
-                liveStatus = online.Status.ToString();
                 liveOcppStatus = GetLiveConnectorRawStatus(online);
+                liveStatus = liveOcppStatus ?? (online.Status == ConnectorStatusEnum.Undefined ? null : online.Status.ToString());
                 liveChargeRateKw = online.ChargeRateKW;
                 liveCurrentImportA = online.CurrentImportA;
                 liveMeterKwh = online.MeterKWH;
@@ -2634,12 +2646,16 @@ namespace OCPP.Core.Server
                 status.OnlineConnectors != null &&
                 status.OnlineConnectors.TryGetValue(connectorId, out liveConnectorStatus))
             {
-                string liveRawStatus = GetLiveConnectorRawStatus(liveConnectorStatus) ?? liveConnectorStatus.Status.ToString();
-                busyReason = $"LiveStatus:{liveRawStatus}";
+                string liveRawStatus = GetLiveConnectorRawStatus(liveConnectorStatus);
+                if (!string.IsNullOrWhiteSpace(liveRawStatus))
+                {
+                    busyReason = $"LiveStatus:{liveRawStatus}";
+                }
             }
 
-            string currentLiveStatus = GetLiveConnectorRawStatus(liveConnectorStatus) ?? liveConnectorStatus?.Status.ToString();
-            bool busy = liveConnectorStatus != null && !OcppConnectorStatus.IsStartable(currentLiveStatus);
+            string currentLiveStatus = GetLiveConnectorRawStatus(liveConnectorStatus);
+            bool hasAuthoritativeLiveStatus = !string.IsNullOrWhiteSpace(currentLiveStatus);
+            bool busy = hasAuthoritativeLiveStatus && !OcppConnectorStatus.IsStartable(currentLiveStatus);
 
             int activeTransactionCount = 0;
             try
@@ -2683,7 +2699,7 @@ namespace OCPP.Core.Server
 
             string persistedStatusValue = null;
             double? persistedStatusAgeMinutes = null;
-            if (liveConnectorStatus == null)
+            if (!hasAuthoritativeLiveStatus)
             {
                 var persistedStatus = dbContext.ConnectorStatuses
                     .Where(cs => cs.ChargePointId == chargePointId && cs.ConnectorId == connectorId)
@@ -2778,8 +2794,9 @@ namespace OCPP.Core.Server
             if (status.OnlineConnectors != null &&
                 status.OnlineConnectors.TryGetValue(connectorId, out liveConnectorStatus))
             {
-                result.LiveStatus = GetLiveConnectorRawStatus(liveConnectorStatus) ?? liveConnectorStatus.Status.ToString();
-                if (!OcppConnectorStatus.IsStartable(result.LiveStatus))
+                result.LiveStatus = GetLiveConnectorRawStatus(liveConnectorStatus);
+                if (!string.IsNullOrWhiteSpace(result.LiveStatus) &&
+                    !OcppConnectorStatus.IsStartable(result.LiveStatus))
                 {
                     result.Reason = $"Status:{result.LiveStatus}";
                     result.Reasons.Add(result.Reason);
@@ -2819,7 +2836,7 @@ namespace OCPP.Core.Server
                 return result;
             }
 
-            if (liveConnectorStatus == null)
+            if (string.IsNullOrWhiteSpace(result.LiveStatus))
             {
                 var persistedStatus = dbContext.ConnectorStatuses
                     .Where(cs => cs.ChargePointId == chargePointId && cs.ConnectorId == connectorId)

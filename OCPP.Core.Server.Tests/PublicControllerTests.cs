@@ -840,6 +840,94 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task Start_MeterOnlyLiveStatus_FallsBackToPersistedConnectorStatus()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-start-meter-only-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-START-METER-ONLY", "Meter-only start test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-START-METER-ONLY",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow.AddHours(-2)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                string payload = "[{\"id\":\"CP-START-METER-ONLY\",\"onlineConnectors\":{\"1\":{\"status\":0,\"ocppStatus\":null,\"meterValueDate\":\"2026-04-23T08:44:00Z\",\"meterKWH\":1534.933}}}]";
+                using var server = TestHttpServer.Start(_ => TestHttpResponse.Json(payload));
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API",
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var result = await controller.Start("CP-START-METER-ONLY", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("Available", model.LastStatus);
+                Assert.Equal("Available", model.Connectors.Single().LastStatus);
+                Assert.Null(model.AvailabilityMessage);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Map_MeterOnlyLiveStatus_FallsBackToPersistedConnectorStatus()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-meter-only-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-MAP-METER-ONLY", "Meter-only map test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-MAP-METER-ONLY",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow.AddHours(-2)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                string payload = "[{\"id\":\"CP-MAP-METER-ONLY\",\"onlineConnectors\":{\"1\":{\"status\":0,\"ocppStatus\":null,\"meterValueDate\":\"2026-04-23T08:44:00Z\",\"meterKWH\":1534.933}}}]";
+                using var server = TestHttpServer.Start(_ => TestHttpResponse.Json(payload));
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API",
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var result = await controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("Available", chargePoint.Status);
+                Assert.Equal(1, chargePoint.AvailableConnectorCount);
+                Assert.Equal(0, chargePoint.OccupiedConnectorCount);
+                Assert.Equal(0, chargePoint.OfflineConnectorCount);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task Start_PostRejectsConnectorOutsideChargePoint()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-post-{Guid.NewGuid():N}.sqlite");
