@@ -97,10 +97,6 @@
             {
                 <a class="public-nav-link @(activeNav == "help" ? "active" : string.Empty)" href="@helpUrl" target="_blank" rel="noopener" data-i18n="nav.help">How it works</a>
             }
-            else if (!string.IsNullOrWhiteSpace(supportMailTo))
-            {
-                <a class="public-nav-link" href="@supportMailTo" data-i18n="nav.help">How it works</a>
-            }
             @if (!string.IsNullOrWhiteSpace(supportMailTo))
             {
                 <a class="public-nav-link" href="@supportMailTo" data-i18n="nav.contact">Contact</a>

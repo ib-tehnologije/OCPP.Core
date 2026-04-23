@@ -62,7 +62,7 @@ namespace OCPP.Core.Management.Controllers
             entity.Tagline = Normalize(model.Tagline);
             entity.SupportEmail = Normalize(model.SupportEmail);
             entity.SupportPhone = Normalize(model.SupportPhone);
-            entity.HelpUrl = Normalize(model.HelpUrl);
+            entity.HelpUrl = NormalizePublicLinkUrl(model.HelpUrl);
             entity.FooterCompanyLine = Normalize(model.FooterCompanyLine);
             entity.FooterAddressLine = Normalize(model.FooterAddressLine);
             entity.FooterLegalLine = Normalize(model.FooterLegalLine);
@@ -90,6 +90,31 @@ namespace OCPP.Core.Management.Controllers
         private static string NormalizeUrl(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        private static string NormalizePublicLinkUrl(string value)
+        {
+            var normalized = NormalizeUrl(value);
+            if (normalized == null)
+            {
+                return normalized;
+            }
+
+            if (normalized.StartsWith("//", StringComparison.Ordinal))
+            {
+                return $"https:{normalized}";
+            }
+
+            if (normalized.StartsWith("/", StringComparison.Ordinal) ||
+                normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                normalized.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
+                normalized.StartsWith("tel:", StringComparison.OrdinalIgnoreCase))
+            {
+                return normalized;
+            }
+
+            return $"https://{normalized}";
         }
 
         private static string NormalizeIdleWindow(string value)

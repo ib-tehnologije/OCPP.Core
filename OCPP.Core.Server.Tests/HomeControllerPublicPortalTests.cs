@@ -129,6 +129,34 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public void PublicPortal_Post_NormalizesHelpUrlWithoutScheme()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"portal-help-url-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using var context = CreateContext(databasePath);
+                var controller = CreateController(context);
+
+                var result = controller.PublicPortal(new PublicPortalSettingsEditViewModel
+                {
+                    BrandName = "EV Portal",
+                    HelpUrl = " www.example.test/faq ",
+                    QrScannerEnabled = true
+                });
+
+                Assert.IsType<RedirectToActionResult>(result);
+
+                var saved = Assert.Single(context.PublicPortalSettings);
+                Assert.Equal("https://www.example.test/faq", saved.HelpUrl);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         private static HomeController CreateController(OCPPCoreContext dbContext)
         {
             IConfiguration configuration = new ConfigurationBuilder()
