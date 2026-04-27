@@ -408,6 +408,91 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task Start_ConfiguredIdleWindow_IsExposedForPublicNote()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-idle-window-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-IDLE-WINDOW", "Idle window test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-IDLE-WINDOW",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["Payments:IdleFeeExcludedWindow"] = "20:00-08:00"
+                });
+
+                var result = await controller.Start("CP-IDLE-WINDOW", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.True(model.HasIdleFeeExcludedWindow);
+                Assert.Equal("20:00-08:00", model.IdleFeeExcludedWindow);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_DisabledPublicPortalIdleWindow_HidesPublicNote()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-idle-window-disabled-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-IDLE-WINDOW-DISABLED", "Idle window disabled test");
+                    setupContext.PublicPortalSettings.Add(new PublicPortalSettings
+                    {
+                        IdleFeeExcludedWindowEnabled = false,
+                        IdleFeeExcludedWindow = "20:00-08:00",
+                        CreatedAtUtc = DateTime.UtcNow,
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-IDLE-WINDOW-DISABLED",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["Payments:IdleFeeExcludedWindow"] = "20:00-08:00"
+                });
+
+                var result = await controller.Start("CP-IDLE-WINDOW-DISABLED", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.False(model.HasIdleFeeExcludedWindow);
+                Assert.Null(model.IdleFeeExcludedWindow);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         [Theory]
         [InlineData("LiveStatus:SuspendedEV")]
         [InlineData("LiveStatus:SuspendedEVSE")]
@@ -591,6 +676,49 @@ namespace OCPP.Core.Server.Tests
 
                 Assert.Equal("Delmar Banjole", chargePoint.Name);
                 Assert.Equal("HR*TTK*052009*02", chargePoint.PublicDisplayCode);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Map_PublicPortalIdleWindow_IsExposedForPublicNote()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-idle-window-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-MAP-IDLE-WINDOW", "Map idle window test");
+                    setupContext.PublicPortalSettings.Add(new PublicPortalSettings
+                    {
+                        IdleFeeExcludedWindowEnabled = true,
+                        IdleFeeExcludedWindow = " 20:00-08:00 ",
+                        CreatedAtUtc = DateTime.UtcNow,
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-MAP-IDLE-WINDOW",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+
+                Assert.True(model.HasIdleFeeExcludedWindow);
+                Assert.Equal("20:00-08:00", model.IdleFeeExcludedWindow);
             }
             finally
             {

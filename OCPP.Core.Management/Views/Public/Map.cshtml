@@ -124,7 +124,13 @@
                                 </div>
                                 @if (cp.ConnectorUsageFeePerMinute > 0)
                                 {
-                                    <div class="cc-detail"><span data-i18n="map.idleFee">Idle fee</span> @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (<span data-i18n="map.grace">grace</span> @cp.StartUsageFeeAfterMinutes <span data-i18n="map.minutes">min</span>)</div>
+                                    <div class="cc-detail">
+                                        <span data-i18n="map.idleFee">Idle fee</span> @cp.ConnectorUsageFeePerMinute.ToString("0.##") @Model.CurrencySymbol/min (<span data-i18n="map.grace">grace</span> @cp.StartUsageFeeAfterMinutes <span data-i18n="map.minutes">min</span>)
+                                        @if (Model.HasIdleFeeExcludedWindow)
+                                        {
+                                            <span> · <span data-i18n="start.idleFreeWindow">free</span> @Model.IdleFeeExcludedWindow</span>
+                                        }
+                                    </div>
                                 }
                                 <div class="cc-actions">
                                     <a href="@startUrl" onclick="event.stopPropagation();" data-i18n="@(cp.HasMultipleConnectors ? "map.chooseConnector" : "map.startSession")">@startLabel</a>
@@ -149,6 +155,7 @@
         <script>
             const points = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.ChargePoints ?? new List<PublicMapChargePoint>()));
             const currencySymbol = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.CurrencySymbol));
+            const idleFeeExcludedWindow = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.IdleFeeExcludedWindow));
             if (typeof L === 'undefined' || typeof L.map !== 'function') {
                 console.error('Public map: Leaflet library failed to load.');
             } else {
@@ -259,7 +266,7 @@
                 const hasMultipleConnectors = pick(p, 'HasMultipleConnectors', 'hasMultipleConnectors') === true || Number(pick(p, 'ConnectorCount', 'connectorCount')) > 1;
                 const safePrice = Number(price) > 0 ? `${Number(price).toFixed(2)} ${currencySymbol} / kWh` : 'Free energy';
                 const idleText = usageFee > 0
-                    ? `Idle fee: ${Number(usageFee).toFixed(2)} ${currencySymbol}/min (${afterCharge ? 'after charge' : 'from start'}, grace ${startFeeTime} min)`
+                    ? `Idle fee: ${Number(usageFee).toFixed(2)} ${currencySymbol}/min (${afterCharge ? 'after charge' : 'from start'}, grace ${startFeeTime} min${idleFeeExcludedWindow ? `, free ${idleFeeExcludedWindow}` : ''})`
                     : null;
                 const startUrl = buildStartUrl(chargePointId, 1, hasMultipleConnectors);
                 const startLabel = hasMultipleConnectors ? 'Choose connector →' : 'Start session →';

@@ -193,6 +193,10 @@
                         {
                             <div class="sub" style="color:#fde68a;">
                                 @(Model.UsageFeeAfterChargingEnds ? "Charged after charging ends" : "Charged from session start") · grace @Model.StartUsageFeeAfterMinutes min · max @Model.MaxUsageFeeBillableMinutes min
+                                @if (Model.HasIdleFeeExcludedWindow)
+                                {
+                                    <span> · <span data-i18n="start.idleFreeWindow">free</span> @Model.IdleFeeExcludedWindow</span>
+                                }
                             </div>
                         }
                     </div>

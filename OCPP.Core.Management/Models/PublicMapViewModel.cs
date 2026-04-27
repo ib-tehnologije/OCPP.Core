@@ -6,6 +6,8 @@ namespace OCPP.Core.Management.Models
     public class PublicMapViewModel
     {
         public List<PublicMapChargePoint> ChargePoints { get; set; } = new List<PublicMapChargePoint>();
+        public string IdleFeeExcludedWindow { get; set; }
+        public bool HasIdleFeeExcludedWindow => !string.IsNullOrWhiteSpace(IdleFeeExcludedWindow);
         public string CurrencySymbol { get; set; } = "€";
     }
 

@@ -46,6 +46,7 @@
       "start.finishPreviousCheckout": "Dovršite ili otkažite prethodni checkout prije pokretanja nove sesije na ovom priključku.",
       "start.freeInfo": "Besplatno punjenje je uključeno. Naplata se neće izvršiti.",
       "start.secureInfo": "Sigurno plaćanje putem Stripea. Naplaćuje se samo stvarni trošak.",
+      "start.idleFreeWindow": "besplatno",
       "result.newSession": "Pokreni novu sesiju"
     },
     en: {
@@ -93,6 +94,7 @@
       "start.finishPreviousCheckout": "Finish or cancel the previous checkout before starting a new session on this connector.",
       "start.freeInfo": "Free charging enabled. No payment will be charged.",
       "start.secureInfo": "Secure payment via Stripe. Only the actual cost is charged.",
+      "start.idleFreeWindow": "free",
       "result.newSession": "Start a new session"
     },
     sl: {
@@ -140,6 +142,7 @@
       "start.finishPreviousCheckout": "Dokončajte ali prekličite prejšnji checkout, preden začnete novo sejo na tem priključku.",
       "start.freeInfo": "Brezplačno polnjenje je omogočeno. Plačilo ne bo izvedeno.",
       "start.secureInfo": "Varno plačilo prek Stripe. Zaračuna se samo dejanski strošek.",
+      "start.idleFreeWindow": "brezplačno",
       "result.newSession": "Začni novo sejo"
     },
     it: {
@@ -187,6 +190,7 @@
       "start.finishPreviousCheckout": "Completa o annulla il checkout precedente prima di avviare una nuova sessione su questo connettore.",
       "start.freeInfo": "Ricarica gratuita abilitata. Nessun pagamento verrà addebitato.",
       "start.secureInfo": "Pagamento sicuro tramite Stripe. Viene addebitato solo il costo effettivo.",
+      "start.idleFreeWindow": "gratis",
       "result.newSession": "Avvia una nuova sessione"
     },
     de: {
@@ -234,6 +238,7 @@
       "start.finishPreviousCheckout": "Schließen Sie den vorherigen Checkout ab oder stornieren Sie ihn, bevor Sie auf diesem Anschluss eine neue Sitzung starten.",
       "start.freeInfo": "Kostenloses Laden ist aktiviert. Es wird nichts belastet.",
       "start.secureInfo": "Sichere Zahlung über Stripe. Es werden nur die tatsächlichen Kosten berechnet.",
+      "start.idleFreeWindow": "kostenfrei",
       "result.newSession": "Neue Sitzung starten"
     },
     fr: {
@@ -281,6 +286,7 @@
       "start.finishPreviousCheckout": "Terminez ou annulez le checkout précédent avant de démarrer une nouvelle session sur ce connecteur.",
       "start.freeInfo": "Recharge gratuite activée. Aucun paiement ne sera débité.",
       "start.secureInfo": "Paiement sécurisé via Stripe. Seul le coût réel est débité.",
+      "start.idleFreeWindow": "gratuit",
       "result.newSession": "Démarrer une nouvelle session"
     }
   };

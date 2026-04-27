@@ -29,10 +29,12 @@ namespace OCPP.Core.Management.Models
         public bool FreeChargingEnabled { get; set; }
         public decimal EstimatedMaxHold { get; set; }
         public int MaxUsageFeeBillableMinutes { get; set; }
+        public string IdleFeeExcludedWindow { get; set; }
         public string CurrencySymbol { get; set; } = "€";
         public List<PublicStartConnectorOption> Connectors { get; set; } = new List<PublicStartConnectorOption>();
         public bool ShowConnectorSelector => Connectors.Count > 1;
         public bool HasIdleFee => ConnectorUsageFeePerMinute > 0;
+        public bool HasIdleFeeExcludedWindow => !string.IsNullOrWhiteSpace(IdleFeeExcludedWindow);
         public string AvailabilityMessage { get; set; }
         public bool HasAvailabilityMessage => !string.IsNullOrWhiteSpace(AvailabilityMessage);
         public string ErrorMessage { get; set; }

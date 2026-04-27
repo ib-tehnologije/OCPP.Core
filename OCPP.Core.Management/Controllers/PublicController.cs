@@ -217,7 +217,10 @@ namespace OCPP.Core.Management.Controllers
 
         private async Task<PublicMapViewModel> BuildMapViewModelAsync()
         {
-            var vm = new PublicMapViewModel();
+            var vm = new PublicMapViewModel
+            {
+                IdleFeeExcludedWindow = ResolveIdleFeeExcludedWindow()
+            };
             var nowUtc = DateTime.UtcNow;
             var onlineStatuses = await LoadOnlineChargePointStatusesAsync();
 
@@ -297,7 +300,8 @@ namespace OCPP.Core.Management.Controllers
             var model = new PublicStartViewModel
             {
                 ChargePointId = chargePointId,
-                ConnectorId = requestedConnectorId.GetValueOrDefault() > 0 ? requestedConnectorId.Value : 1
+                ConnectorId = requestedConnectorId.GetValueOrDefault() > 0 ? requestedConnectorId.Value : 1,
+                IdleFeeExcludedWindow = ResolveIdleFeeExcludedWindow()
             };
             var nowUtc = DateTime.UtcNow;
             var onlineStatuses = await LoadOnlineChargePointStatusesAsync();
@@ -553,6 +557,40 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return dictOnlineStatus;
+        }
+
+        private string ResolveIdleFeeExcludedWindow()
+        {
+            var dbSettings = DbContext.PublicPortalSettings
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .FirstOrDefault();
+
+            if (dbSettings?.IdleFeeExcludedWindowEnabled.HasValue == true)
+            {
+                return dbSettings.IdleFeeExcludedWindowEnabled.Value
+                    ? NormalizeIdleWindowForDisplay(dbSettings.IdleFeeExcludedWindow)
+                    : null;
+            }
+
+            return NormalizeIdleWindowForDisplay(Config?.GetValue<string>("Payments:IdleFeeExcludedWindow"));
+        }
+
+        private static string NormalizeIdleWindowForDisplay(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            var parts = value.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 ||
+                !TimeSpan.TryParse(parts[0], out var start) ||
+                !TimeSpan.TryParse(parts[1], out var end))
+            {
+                return null;
+            }
+
+            return $"{start:hh\\:mm}-{end:hh\\:mm}";
         }
 
         private static string BuildConnectorDisplayName(ConnectorStatus connector, int connectorId)
