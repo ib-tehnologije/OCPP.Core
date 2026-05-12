@@ -170,6 +170,13 @@
             const mapExpandBtn = document.getElementById('mapExpandBtn');
             const chargerCountValue = document.querySelector('.charger-count span:first-child');
             const emptyStateEl = document.getElementById('charger-list-empty');
+            const publicStyles = getComputedStyle(document.documentElement);
+            const publicThemeColor = (name, fallback) => publicStyles.getPropertyValue(name).trim() || fallback;
+            const markerColors = {
+                available: publicThemeColor('--public-success', '#047857'),
+                offline: publicThemeColor('--public-danger', '#b91c1c'),
+                busy: publicThemeColor('--public-accent-2', '#2563eb')
+            };
             const markerLookup = {};
             let userMarker = null;
             let activeQuery = '';
@@ -241,12 +248,12 @@
                 const availabilitySummary = status === 'offline'
                     ? 'Offline'
                     : `${availableConnectorCount}/${connectorCount} available`;
-                let color = '#00d4aa';
+                let color = markerColors.available;
                 let statusLabel = pick(p, 'Status', 'status') || 'Offline';
                 if (status.includes('offline')) {
-                    color = '#ff6b81';
+                    color = markerColors.offline;
                 } else if (!status.includes('avail')) {
-                    color = '#a78bfa';
+                    color = markerColors.busy;
                 }
 
                 const lat = asNumber(pick(p, 'Latitude', 'latitude'));
@@ -427,8 +434,8 @@
                     }
                     userMarker = L.circleMarker([lat, lng], {
                         radius: 7,
-                        color: '#00d4aa',
-                        fillColor: '#00d4aa',
+                        color: markerColors.available,
+                        fillColor: markerColors.available,
                         fillOpacity: 0.9,
                         weight: 2
                     }).addTo(map);

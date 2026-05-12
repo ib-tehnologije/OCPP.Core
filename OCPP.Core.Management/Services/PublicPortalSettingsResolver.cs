@@ -48,7 +48,8 @@ namespace OCPP.Core.Management.Services
                 SeoDescription = Pick(dbSettings?.SeoDescription, "PublicPortal:SeoDescription", tagline),
                 HeaderLogoUrl = Pick(dbSettings?.HeaderLogoUrl, "PublicPortal:HeaderLogoUrl", string.Empty),
                 FooterLogoUrl = Pick(dbSettings?.FooterLogoUrl, "PublicPortal:FooterLogoUrl", string.Empty),
-                QrScannerEnabled = dbSettings?.QrScannerEnabled ?? _configuration.GetValue<bool?>("PublicPortal:QrScannerEnabled") ?? true
+                QrScannerEnabled = dbSettings?.QrScannerEnabled ?? _configuration.GetValue<bool?>("PublicPortal:QrScannerEnabled") ?? true,
+                LightThemeEnabled = dbSettings?.LightThemeEnabled ?? _configuration.GetValue<bool?>("PublicPortal:LightThemeEnabled") ?? false
             };
         }
 
@@ -76,6 +77,7 @@ namespace OCPP.Core.Management.Services
                 HeaderLogoUrl = resolved.HeaderLogoUrl,
                 FooterLogoUrl = resolved.FooterLogoUrl,
                 QrScannerEnabled = resolved.QrScannerEnabled,
+                LightThemeEnabled = resolved.LightThemeEnabled,
                 IdleFeeExcludedWindowEnabled = dbSettings?.IdleFeeExcludedWindowEnabled ?? !string.IsNullOrWhiteSpace(_configuration["Payments:IdleFeeExcludedWindow"]),
                 IdleFeeExcludedWindow = !string.IsNullOrWhiteSpace(dbSettings?.IdleFeeExcludedWindow)
                     ? dbSettings.IdleFeeExcludedWindow

@@ -62,6 +62,9 @@ namespace OCPP.Core.Management.Models
         [Display(Name = "Enable QR scanner")]
         public bool QrScannerEnabled { get; set; } = true;
 
+        [Display(Name = "Use light public theme")]
+        public bool LightThemeEnabled { get; set; }
+
         [Display(Name = "Enable non-billing idle window")]
         public bool IdleFeeExcludedWindowEnabled { get; set; }
 

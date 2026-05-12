@@ -72,6 +72,7 @@ namespace OCPP.Core.Management.Controllers
             entity.HeaderLogoUrl = NormalizeUrl(model.HeaderLogoUrl);
             entity.FooterLogoUrl = NormalizeUrl(model.FooterLogoUrl);
             entity.QrScannerEnabled = model.QrScannerEnabled;
+            entity.LightThemeEnabled = model.LightThemeEnabled;
             entity.IdleFeeExcludedWindowEnabled = model.IdleFeeExcludedWindowEnabled;
             entity.IdleFeeExcludedWindow = model.IdleFeeExcludedWindowEnabled ? normalizedIdleWindow : null;
             entity.UpdatedAtUtc = DateTime.UtcNow;

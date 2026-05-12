@@ -96,7 +96,7 @@
                 <div class="info-section info-section--compact-bottom">
                     <div class="info-section-title" data-i18n="status.section.progress">Progress</div>
                     <div>
-                        <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%;"></div></div>
+                        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
                         <div class="progress-labels"><span id="progress-left">-</span><span id="progress-right">-</span></div>
                     </div>
                 </div>
@@ -199,7 +199,7 @@
                     </div>
                 </div>
 
-                <div class="info-section" id="done-invoice-section" style="display:none;">
+                <div class="info-section" id="done-invoice-section" hidden>
                     <div class="info-section-title" data-i18n="status.section.invoice">Invoice</div>
                     <div class="info-row">
                         <div class="tile">
@@ -219,7 +219,7 @@
                             <div class="value mono" id="done-invoice-updated">-</div>
                         </div>
                     </div>
-                    <div class="form-section form-section--flush-top" style="display:none;" id="done-invoice-actions">
+                    <div class="form-section form-section--flush-top" id="done-invoice-actions" hidden>
                         <a class="btn-secondary" id="done-invoice-link" href="#" target="_blank" rel="noopener" data-i18n="status.action.openInvoice">Open invoice</a>
                     </div>
                 </div>
@@ -513,7 +513,8 @@
         const setR1Result = (message, isError) => {
             if (!r1Result) return;
             r1Result.textContent = message || "";
-            r1Result.style.color = isError ? "var(--danger)" : "var(--success)";
+            r1Result.classList.toggle("field-help--error", !!isError);
+            r1Result.classList.toggle("field-help--success", !isError && !!message);
         };
 
         const resolveState = (data) => {
@@ -627,13 +628,13 @@
 
         const renderInvoice = (invoice) => {
             if (!invoice) {
-                doneInvoiceSection.style.display = "none";
-                doneInvoiceActions.style.display = "none";
+                doneInvoiceSection.hidden = true;
+                doneInvoiceActions.hidden = true;
                 doneInvoiceLink.removeAttribute("href");
                 return;
             }
 
-            doneInvoiceSection.style.display = "";
+            doneInvoiceSection.hidden = false;
             doneInvoiceStatus.textContent = invoice.status || "-";
             doneInvoiceProvider.textContent = [invoice.provider, invoice.mode].filter(Boolean).join(" · ") || "-";
             doneInvoiceNumber.textContent = invoice.externalInvoiceNumber || "-";
@@ -642,10 +643,10 @@
 
             if (invoice.invoiceUrl) {
                 doneInvoiceLink.href = invoice.invoiceUrl;
-                doneInvoiceActions.style.display = "";
+                doneInvoiceActions.hidden = false;
             } else {
                 doneInvoiceLink.removeAttribute("href");
-                doneInvoiceActions.style.display = "none";
+                doneInvoiceActions.hidden = true;
             }
         };
 
@@ -819,14 +820,13 @@
             if (stopChargingButton) {
                 const stopEnabled = state === "charging" || state === "waiting";
                 stopChargingButton.disabled = !stopEnabled;
-                stopChargingButton.style.opacity = stopEnabled ? "1" : "0.65";
                 if (stopChargingLabel) {
                     stopChargingLabel.textContent = t("status.action.stopCharging");
                 }
             }
 
             if (r1Panel) {
-                r1Panel.style.display = state === "error" ? "none" : "";
+                r1Panel.hidden = state === "error";
             }
 
             const cp = data?.chargePointId;

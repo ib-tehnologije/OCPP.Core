@@ -16,5 +16,6 @@ namespace OCPP.Core.Management.Models
         public string HeaderLogoUrl { get; set; }
         public string FooterLogoUrl { get; set; }
         public bool QrScannerEnabled { get; set; }
+        public bool LightThemeEnabled { get; set; }
     }
 }

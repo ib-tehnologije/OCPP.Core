@@ -14,12 +14,21 @@
     var supportMailTo = string.IsNullOrWhiteSpace(portal.SupportEmail) ? null : $"mailto:{portal.SupportEmail}";
     var supportTel = string.IsNullOrWhiteSpace(portal.SupportPhone) ? null : $"tel:{portal.SupportPhone}";
     var mapUrl = Url.Action("Map", "Public");
+    var publicThemeName = portal.LightThemeEnabled ? "light" : "dark";
+    var publicThemeHtmlClass = portal.LightThemeEnabled ? "public-theme-light" : "public-theme-dark";
+    var publicThemeBodyClass = portal.LightThemeEnabled ? "theme-light" : "theme-dark";
+    var publicThemeColor = portal.LightThemeEnabled ? "#047857" : "#080d1a";
 }
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="@publicThemeHtmlClass">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="@publicThemeColor" />
+    <meta name="application-name" content="@portal.BrandName" />
+    <meta name="apple-mobile-web-app-title" content="@portal.BrandName" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>@pageTitle</title>
     @if (!string.IsNullOrWhiteSpace(pageDescription))
     {
@@ -43,14 +52,19 @@
     }
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="manifest" href="~/manifest.webmanifest" asp-append-version="true" />
+    <link rel="icon" href="~/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="192x192" href="~/img/public-portal-icon-192.png" asp-append-version="true" />
+    <link rel="apple-touch-icon" sizes="180x180" href="~/img/public-portal-icon-180.png" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/public-portal.css" asp-append-version="true" />
     @RenderSection("Head", required: false)
 </head>
-<body class="public-portal"
+<body class="public-portal @publicThemeBodyClass"
       data-portal-brand="@portal.BrandName"
       data-portal-support-email="@portal.SupportEmail"
       data-portal-support-phone="@portal.SupportPhone"
-      data-portal-help-url="@portal.HelpUrl">
+      data-portal-help-url="@portal.HelpUrl"
+      data-portal-theme="@publicThemeName">
     <div class="public-shell">
         <header class="public-header">
             <div class="public-branding">

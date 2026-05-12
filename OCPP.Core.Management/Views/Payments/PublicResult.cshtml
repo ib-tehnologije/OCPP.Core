@@ -8,7 +8,7 @@
     ViewData["PublicPageTitle"] = heading;
     ViewData["PublicPageDescription"] = message;
     ViewData["PublicNav"] = "map";
-    var badgeClass = Model.Success ? "available" : "error";
+    var badgeClass = Model.Success ? "available status-badge--static" : "error";
 }
     <nav class="public-session-nav" aria-label="Charging session states">
         <button type="button" class="active" disabled>① Start</button>
@@ -22,7 +22,7 @@
         <div class="card">
             <div class="status-header">
                 <div class="status-badge @badgeClass">
-                    <span class="dot" style="@(Model.Success ? "animation:none;" : "")"></span>
+                    <span class="dot"></span>
                     <span>@heading</span>
                 </div>
                 <h1 class="charger-title">@heading</h1>

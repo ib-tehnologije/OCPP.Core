@@ -177,8 +177,8 @@
                 </div>
 
                 <div class="info-row">
-                    <div class="tile full" style="border-color: var(--warning-border); background: var(--warning-bg);">
-                        <div class="label" style="color: var(--warning);">⏱ Idle fee</div>
+                    <div class="tile full tile--warning">
+                        <div class="label label--warning">⏱ Idle fee</div>
                         <div class="value">
                             @if (Model.ConnectorUsageFeePerMinute > 0)
                             {
@@ -191,7 +191,7 @@
                         </div>
                         @if (Model.ConnectorUsageFeePerMinute > 0)
                         {
-                            <div class="sub" style="color:#fde68a;">
+                            <div class="sub sub--warning">
                                 @(Model.UsageFeeAfterChargingEnds ? "Charged after charging ends" : "Charged from session start") · grace @Model.StartUsageFeeAfterMinutes min · max @Model.MaxUsageFeeBillableMinutes min
                                 @if (Model.HasIdleFeeExcludedWindow)
                                 {
@@ -232,8 +232,8 @@
                 </div>
 
                 <div class="info-row">
-                    <div class="tile full" style="background: transparent; border-style: dashed;">
-                        <div class="sub" style="margin:0;">💡 Final amount = energy + session fee + idle fee (if any). Difference from pre-auth is refunded automatically.</div>
+                    <div class="tile full tile--note">
+                        <div class="sub sub--flush">💡 Final amount = energy + session fee + idle fee (if any). Difference from pre-auth is refunded automatically.</div>
                     </div>
                 </div>
             </div>
@@ -293,14 +293,14 @@
                             </div>
                         </label>
 
-                        <div id="r1Fields" style="display:@(Model.RequestR1Invoice ? "block" : "none"); margin-bottom: 14px;">
-                        <label for="buyerCompanyName" class="field-label" data-i18n="start.companyName">Company name (optional)</label>
-                        <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" data-i18n-placeholder="start.companyNamePlaceholder" autocomplete="organization" />
+                        <div id="r1Fields" class="r1-fields" @(Model.RequestR1Invoice ? null : "hidden")>
+                            <label for="buyerCompanyName" class="field-label" data-i18n="start.companyName">Company name (optional)</label>
+                            <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" data-i18n-placeholder="start.companyNamePlaceholder" autocomplete="organization" />
 
-                        <label for="buyerOib" class="field-label field-label--spaced" data-i18n="start.oib">OIB (required for R1)</label>
-                        <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" data-i18n-placeholder="start.oibPlaceholder" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
-                        <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
-                    </div>
+                            <label for="buyerOib" class="field-label field-label--spaced" data-i18n="start.oib">OIB (required for R1)</label>
+                            <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" data-i18n-placeholder="start.oibPlaceholder" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
+                            <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
+                        </div>
 
                         <button type="submit" class="btn-primary">
                             <span data-i18n="@(isFree ? "start.startFree" : "start.startCharging")">@(isFree ? "Start free session" : "Start charging")</span>
@@ -319,7 +319,7 @@
                     if (!wantsR1 || !fields) return;
                     const sync = () => {
                         const enabled = wantsR1.checked;
-                        fields.style.display = enabled ? 'block' : 'none';
+                        fields.hidden = !enabled;
                         const inputs = fields.querySelectorAll('input, select, textarea');
                         inputs.forEach(i => i.disabled = !enabled);
                     };
