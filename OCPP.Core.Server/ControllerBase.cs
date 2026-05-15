@@ -111,12 +111,39 @@ namespace OCPP.Core.Server
 
                 IList<string> messages = new List<string>();
                 validatingReader.ValidationEventHandler += (o, a) => messages.Add(a.Message);
-                T obj = serializer.Deserialize<T>(validatingReader);
+                T obj;
+                try
+                {
+                    obj = serializer.Deserialize<T>(validatingReader);
+                }
+                catch (JSchemaException exp)
+                {
+                    Logger.LogError(
+                        exp,
+                        "DeserializeMessage => Schema validation runtime failure cp={ChargePointId} protocol={ProtocolVersion} action={Action} uniqueId={UniqueId} messageType={MessageType} payloadBytes={PayloadBytes} schemaType={SchemaType}",
+                        ChargePointStatus?.Id,
+                        ProtocolVersion,
+                        msg?.Action,
+                        msg?.UniqueId,
+                        msg?.MessageType,
+                        msg?.JsonPayload == null ? 0 : System.Text.Encoding.UTF8.GetByteCount(msg.JsonPayload),
+                        typeof(T).Name);
+                    throw;
+                }
+
                 if (messages.Count > 0)
                 {
                     foreach (string err in messages)
                     {
-                        Logger.LogWarning("DeserializeMessage {0} => Validation error: {1}", msg.Action, err);
+                        Logger.LogWarning(
+                            "DeserializeMessage => Schema validation error cp={ChargePointId} protocol={ProtocolVersion} action={Action} uniqueId={UniqueId} messageType={MessageType} schemaType={SchemaType} error={ValidationError}",
+                            ChargePointStatus?.Id,
+                            ProtocolVersion,
+                            msg?.Action,
+                            msg?.UniqueId,
+                            msg?.MessageType,
+                            typeof(T).Name,
+                            err);
                     }
                     throw new FormatException("Message validation failed");
                 }
@@ -227,11 +254,24 @@ namespace OCPP.Core.Server
             ocs.Status = OcppConnectorStatus.ToConnectorStatusEnum(normalizedStatus);
             ocs.OcppStatus = normalizedStatus;
             ocs.OcppStatusAtUtc = statusTime ?? DateTimeOffset.UtcNow;
+            if (IsUnpoweredConnectorStatus(normalizedStatus))
+            {
+                ocs.ChargeRateKW = null;
+                ocs.CurrentImportA = null;
+                ocs.SoC = null;
+            }
 
             if (isNew)
             {
                 TryAddOnlineConnectorStatus(connectorId, ocs, "StatusNotification");
             }
+        }
+
+        private static bool IsUnpoweredConnectorStatus(string normalizedStatus)
+        {
+            return string.Equals(normalizedStatus, OcppConnectorStatus.Available, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, OcppConnectorStatus.Unavailable, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, OcppConnectorStatus.Faulted, StringComparison.OrdinalIgnoreCase);
         }
 
         protected void ApplyConnectorStatusTransition(int connectorId, string rawStatus, DateTimeOffset? statusTime)

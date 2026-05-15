@@ -41,6 +41,26 @@ namespace OCPP.Core.Server
                 Logger.LogInformation("HandleRemoteStopTransaction => Answer status: {0}", remoteStopTransactionResponse?.Status);
                 WriteMessageLog(ChargePointStatus?.Id, null, msgOut.Action, remoteStopTransactionResponse?.Status.ToString(), msgIn.ErrorCode);
 
+                if (remoteStopTransactionResponse?.Status == RemoteStopTransactionResponseStatus.Accepted)
+                {
+                    int? requestedTransactionId = null;
+                    try
+                    {
+                        requestedTransactionId = JsonConvert.DeserializeObject<RemoteStopTransactionRequest>(msgOut.JsonPayload)?.TransactionId;
+                    }
+                    catch (Exception exp)
+                    {
+                        Logger.LogDebug(exp, "HandleRemoteStopTransaction => Failed to parse original request payload for diagnostics");
+                    }
+
+                    Logger.LogWarning(
+                        "HandleRemoteStopTransaction => Charger accepted RemoteStopTransaction; waiting for StopTransaction cp={ChargePointId} tx={TransactionId} requestUniqueId={RequestUniqueId} responseUniqueId={ResponseUniqueId}",
+                        ChargePointStatus?.Id,
+                        requestedTransactionId,
+                        msgOut.UniqueId,
+                        msgIn.UniqueId);
+                }
+
                 if (msgOut.TaskCompletionSource != null)
                 {
                     // Set API response as TaskCompletion-result

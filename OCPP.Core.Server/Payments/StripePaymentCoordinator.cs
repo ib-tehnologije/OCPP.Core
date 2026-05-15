@@ -1305,12 +1305,16 @@ namespace OCPP.Core.Server.Payments
                 return 0;
             }
 
-            int totalMinutes = 0;
-            totalMinutes = Math.Max(0, (int)Math.Ceiling((stopTimeUtc - anchorStartUtc.Value).TotalMinutes));
+            int billableMinutes = IdleFeeCalculator.CalculateBillableUsageMinutes(
+                anchorStartUtc.Value,
+                stopTimeUtc,
+                reservation.StartUsageFeeAfterMinutes,
+                flowOptions,
+                _logger);
 
             return Math.Min(
-                Math.Max(0, totalMinutes - reservation.StartUsageFeeAfterMinutes),
-                reservation.MaxUsageFeeMinutes);
+                Math.Max(0, billableMinutes),
+                Math.Max(0, reservation.MaxUsageFeeMinutes));
         }
 
         private PaymentFlowOptions ResolveFlowOptions(OCPPCoreContext dbContext)

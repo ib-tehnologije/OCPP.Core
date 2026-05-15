@@ -985,26 +985,62 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            if (string.Equals(OcppConnectorStatus.Normalize(rawStatus), "Available", StringComparison.OrdinalIgnoreCase))
+            string normalizedStatus = OcppConnectorStatus.Normalize(rawStatus);
+            DateTime statusTimeUtc = (statusTime ?? DateTimeOffset.UtcNow).UtcDateTime;
+
+            if (string.Equals(normalizedStatus, OcppConnectorStatus.Available, StringComparison.OrdinalIgnoreCase))
             {
+                var availableTransaction = FindLatestOpenTransaction(dbContext, chargePointStatus.Id, connectorId);
+                if (availableTransaction != null)
+                {
+                    LogOpenTransactionStatusNotificationDiagnostic(
+                        dbContext,
+                        chargePointStatus,
+                        connectorId,
+                        normalizedStatus,
+                        statusTimeUtc,
+                        availableTransaction,
+                        "before-available-recovery");
+                }
+
+                if (availableTransaction != null &&
+                    OpenTransactionRecovery.TryCloseForAvailableConnector(
+                        dbContext,
+                        availableTransaction,
+                        chargePointStatus.Id,
+                        connectorId,
+                        statusTimeUtc,
+                        ResolveLiveConnectorMeterKwh(chargePointStatus, connectorId),
+                        _logger,
+                        "NotifyConnectorOcppStatus"))
+                {
+                    NotifyTransactionCompleted(dbContext, availableTransaction);
+                }
+
                 _paymentCoordinator?.HandleConnectorAvailable(
                     dbContext,
                     chargePointStatus.Id,
                     connectorId,
-                    (statusTime ?? DateTimeOffset.UtcNow).UtcDateTime);
+                    statusTimeUtc);
             }
 
-            var transaction = dbContext.Transactions
-                .Where(t =>
-                    t.ChargePointId == chargePointStatus.Id &&
-                    t.ConnectorId == connectorId &&
-                    !t.StopTime.HasValue)
-                .OrderByDescending(t => t.TransactionId)
-                .FirstOrDefault();
+            var transaction = FindLatestOpenTransaction(dbContext, chargePointStatus.Id, connectorId);
 
             if (transaction == null)
             {
                 return;
+            }
+
+            if (ShouldLogOpenTransactionStatusDiagnostic(normalizedStatus))
+            {
+                LogOpenTransactionStatusNotificationDiagnostic(
+                    dbContext,
+                    chargePointStatus,
+                    connectorId,
+                    normalizedStatus,
+                    statusTimeUtc,
+                    transaction,
+                    "status-transition");
             }
 
             if (!OcppConnectorStatus.IsSuspendedEv(rawStatus))
@@ -1040,6 +1076,110 @@ namespace OCPP.Core.Server
                         transaction.TransactionId);
                 }
             });
+        }
+
+        private void LogOpenTransactionStatusNotificationDiagnostic(
+            OCPPCoreContext dbContext,
+            ChargePointStatus chargePointStatus,
+            int connectorId,
+            string normalizedStatus,
+            DateTime statusTimeUtc,
+            Transaction transaction,
+            string phase)
+        {
+            try
+            {
+                var reservation = dbContext.ChargePaymentReservations
+                    .AsNoTracking()
+                    .Where(r => r.TransactionId == transaction.TransactionId)
+                    .OrderByDescending(r => r.UpdatedAtUtc)
+                    .FirstOrDefault();
+
+                var connectorStatus = dbContext.ConnectorStatuses
+                    .AsNoTracking()
+                    .Where(cs => cs.ChargePointId == transaction.ChargePointId && cs.ConnectorId == transaction.ConnectorId)
+                    .Select(cs => new
+                    {
+                        cs.LastStatus,
+                        cs.LastStatusTime,
+                        cs.LastMeter,
+                        cs.LastMeterTime
+                    })
+                    .FirstOrDefault();
+
+                var liveMeterKwh = ResolveLiveConnectorMeterKwh(chargePointStatus, connectorId);
+                double? deliveredKwh = liveMeterKwh.HasValue
+                    ? Math.Max(0, liveMeterKwh.Value - transaction.MeterStart)
+                    : null;
+
+                _logger.LogWarning(
+                    "NotifyConnectorOcppStatus => Open transaction status diagnostic phase={Phase} cp={ChargePointId} connector={ConnectorId} tx={TransactionId} status={Status} statusAt={StatusAt:u} txStart={TransactionStart:u} txAgeMinutes={TransactionAgeMinutes} meterStart={MeterStart} currentMeterStop={CurrentMeterStop} liveMeterKwh={LiveMeterKwh} deliveredKwh={DeliveredKwh} persistedStatus={PersistedStatus} persistedStatusAt={PersistedStatusAt:u} persistedMeter={PersistedMeter} persistedMeterAt={PersistedMeterAt:u} reservation={ReservationId} reservationStatus={ReservationStatus} reservationUpdatedAt={ReservationUpdatedAt:u}",
+                    phase,
+                    transaction.ChargePointId,
+                    transaction.ConnectorId,
+                    transaction.TransactionId,
+                    normalizedStatus,
+                    statusTimeUtc,
+                    transaction.StartTime,
+                    (int)Math.Floor((_utcNow() - transaction.StartTime).TotalMinutes),
+                    transaction.MeterStart,
+                    transaction.MeterStop,
+                    liveMeterKwh,
+                    deliveredKwh,
+                    connectorStatus?.LastStatus,
+                    connectorStatus?.LastStatusTime,
+                    connectorStatus?.LastMeter,
+                    connectorStatus?.LastMeterTime,
+                    reservation?.ReservationId,
+                    reservation?.Status,
+                    reservation?.UpdatedAtUtc);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "NotifyConnectorOcppStatus => Failed to write open transaction diagnostic cp={ChargePointId} connector={ConnectorId} tx={TransactionId} status={Status}",
+                    transaction?.ChargePointId,
+                    transaction?.ConnectorId,
+                    transaction?.TransactionId,
+                    normalizedStatus);
+            }
+        }
+
+        private static bool ShouldLogOpenTransactionStatusDiagnostic(string normalizedStatus)
+        {
+            return string.Equals(normalizedStatus, OcppConnectorStatus.SuspendedEv, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, OcppConnectorStatus.SuspendedEvse, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, OcppConnectorStatus.Finishing, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, OcppConnectorStatus.Unavailable, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedStatus, OcppConnectorStatus.Faulted, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Transaction FindLatestOpenTransaction(OCPPCoreContext dbContext, string chargePointId, int connectorId)
+        {
+            if (dbContext == null || string.IsNullOrWhiteSpace(chargePointId) || connectorId <= 0)
+            {
+                return null;
+            }
+
+            return dbContext.Transactions
+                .Where(t =>
+                    t.ChargePointId == chargePointId &&
+                    t.ConnectorId == connectorId &&
+                    !t.StopTime.HasValue)
+                .OrderByDescending(t => t.TransactionId)
+                .FirstOrDefault();
+        }
+
+        private static double? ResolveLiveConnectorMeterKwh(ChargePointStatus chargePointStatus, int connectorId)
+        {
+            if (chargePointStatus?.OnlineConnectors != null &&
+                chargePointStatus.OnlineConnectors.TryGetValue(connectorId, out var connectorStatus))
+            {
+                return connectorStatus.MeterKWH;
+            }
+
+            return null;
         }
 
         private async Task TryAutoStopIdleTransactionAsync(string chargePointId, int connectorId, int transactionId, int idleAutoStopMinutes)

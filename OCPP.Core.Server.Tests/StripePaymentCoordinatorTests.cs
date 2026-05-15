@@ -236,6 +236,36 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CalculateUsageFeeMinutes_SessionStartAnchorExcludesConfiguredNightWindow()
+        {
+            TimeZoneInfo zagreb = ResolveZagrebTimeZone();
+            DateTime start = LocalToUtc(zagreb, new DateTime(2025, 1, 1, 22, 30, 0));
+            DateTime stop = LocalToUtc(zagreb, new DateTime(2025, 1, 2, 7, 30, 0));
+
+            var reservation = new ChargePaymentReservation
+            {
+                UsageFeePerMinute = 0.05m,
+                StartUsageFeeAfterMinutes = 60,
+                MaxUsageFeeMinutes = 300,
+                UsageFeeAnchorMinutes = 0
+            };
+            var transaction = new Transaction
+            {
+                StartTime = start,
+                StopTime = stop
+            };
+            var flowOptions = new PaymentFlowOptions
+            {
+                IdleFeeExcludedWindow = "20:00-08:00",
+                IdleFeeExcludedTimeZoneId = "Europe/Zagreb"
+            };
+
+            int minutes = StripePaymentCoordinator.TestCalculateUsageFeeMinutes(transaction, reservation, flowOptions, stop);
+
+            Assert.Equal(0, minutes);
+        }
+
+        [Fact]
         public void IdleFeeCalculator_CalculatesAccumulatedTotalsAcrossSuspendedEvResumeCycles()
         {
             var now = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);

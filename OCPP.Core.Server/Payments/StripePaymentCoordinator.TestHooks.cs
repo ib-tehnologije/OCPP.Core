@@ -18,11 +18,14 @@ namespace OCPP.Core.Server.Payments
         internal static string TestNormalizeChargeTag(string tag) => NormalizeChargeTag(tag);
 
         internal static int TestCalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, DateTime? nowUtc = null) =>
+            TestCalculateUsageFeeMinutes(transaction, reservation, new PaymentFlowOptions(), nowUtc);
+
+        internal static int TestCalculateUsageFeeMinutes(Transaction transaction, ChargePaymentReservation reservation, PaymentFlowOptions flowOptions, DateTime? nowUtc = null) =>
             new StripePaymentCoordinator(
                 Options.Create(new StripeOptions()),
                 Options.Create(new PaymentFlowOptions()),
                 logger: null)
-            .CalculateUsageFeeMinutes(transaction, reservation, new PaymentFlowOptions(), nowUtc);
+            .CalculateUsageFeeMinutes(transaction, reservation, flowOptions ?? new PaymentFlowOptions(), nowUtc);
 
         internal static void TestPersistTransactionBreakdown(
             OCPPCoreContext dbContext,

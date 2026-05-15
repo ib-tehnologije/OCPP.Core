@@ -1529,6 +1529,104 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void NotifyConnectorOcppStatus_ClosesOpenTransaction_WhenConnectorReportsAvailable()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-available-recovery-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            var availableAt = new DateTimeOffset(2026, 5, 9, 15, 51, 17, TimeSpan.Zero);
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-AVAILABLE",
+                        Name = "CP-AVAILABLE"
+                    });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-AVAILABLE",
+                        ConnectorId = 2,
+                        LastStatus = "Available",
+                        LastStatusTime = availableAt.UtcDateTime,
+                        LastMeter = 53.921875,
+                        LastMeterTime = availableAt.UtcDateTime.AddMinutes(-1)
+                    });
+                    setupContext.Transactions.Add(new Transaction
+                    {
+                        TransactionId = 4376,
+                        ChargePointId = "CP-AVAILABLE",
+                        ConnectorId = 2,
+                        StartTagId = "PAY-AVAILABLE",
+                        StartTime = availableAt.UtcDateTime.AddHours(-7),
+                        MeterStart = 50.0
+                    });
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-AVAILABLE",
+                        ConnectorId = 2,
+                        ChargeTagId = "PAY-AVAILABLE",
+                        OcppIdTag = "PAY-AVAILABLE",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = 4376,
+                        CreatedAtUtc = availableAt.UtcDateTime.AddHours(-7),
+                        UpdatedAtUtc = availableAt.UtcDateTime.AddHours(-7)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var coordinator = new CompletingPaymentCoordinator();
+                var middleware = CreateMiddleware(
+                    paymentCoordinator: coordinator,
+                    serviceProvider: CreateServiceProvider(databasePath));
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    middleware.NotifyConnectorOcppStatus(
+                        actionContext,
+                        new ChargePointStatus
+                        {
+                            Id = "CP-AVAILABLE",
+                            Protocol = "ocpp1.6",
+                            OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                            {
+                                [2] = new OnlineConnectorStatus
+                                {
+                                    MeterKWH = 53.921875
+                                }
+                            }
+                        },
+                        2,
+                        "Available",
+                        availableAt);
+                }
+
+                using (var verificationContext = CreateContext(databasePath))
+                {
+                    var transaction = verificationContext.Transactions.Single(t => t.TransactionId == 4376);
+                    var reservation = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+
+                    Assert.Equal(availableAt.UtcDateTime, transaction.StopTime);
+                    Assert.Equal(53.921875, transaction.MeterStop);
+                    Assert.Equal("ConnectorAvailableWithoutStopTransaction", transaction.StopReason);
+                    Assert.Equal(availableAt.UtcDateTime, transaction.ChargingEndedAtUtc);
+                    Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+                    Assert.Equal(availableAt.UtcDateTime, reservation.StopTransactionAtUtc);
+                    Assert.Equal(availableAt.UtcDateTime, reservation.DisconnectedAtUtc);
+                }
+
+                Assert.Equal(new[] { 4376 }, coordinator.CompletedTransactionIds);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task NotifyConnectorPreparing_AutoReassignsSingleAwaitingPlugReservationToPreparingConnector()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-misplug-remap-{Guid.NewGuid():N}.sqlite");
@@ -2686,6 +2784,40 @@ namespace OCPP.Core.Server.Tests
             public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
             public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
             public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
+            public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
+        }
+
+        private sealed class CompletingPaymentCoordinator : IPaymentCoordinator
+        {
+            public bool IsEnabled => true;
+            public List<int> CompletedTransactionIds { get; } = new();
+
+            public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
+            public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) => throw new NotSupportedException();
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) => throw new NotSupportedException();
+            public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
+            public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
+            public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
+            public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
+
+            public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
+            {
+                CompletedTransactionIds.Add(transaction.TransactionId);
+
+                var reservation = dbContext.ChargePaymentReservations.SingleOrDefault(r => r.TransactionId == transaction.TransactionId);
+                if (reservation == null)
+                {
+                    return;
+                }
+
+                reservation.Status = PaymentReservationStatus.Completed;
+                reservation.StopTransactionAtUtc = transaction.StopTime;
+                reservation.DisconnectedAtUtc = transaction.StopTime;
+                reservation.UpdatedAtUtc = transaction.StopTime ?? DateTime.UtcNow;
+                dbContext.SaveChanges();
+            }
+
             public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
             public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
         }

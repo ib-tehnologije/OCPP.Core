@@ -141,6 +141,26 @@ namespace OCPP.Core.Server.Payments
                 return 0;
             }
 
+            return CalculateBillableUsageMinutes(
+                intervalStartUtc,
+                intervalEndUtc,
+                reservation.StartUsageFeeAfterMinutes,
+                flowOptions,
+                logger);
+        }
+
+        public static int CalculateBillableUsageMinutes(
+            DateTime intervalStartUtc,
+            DateTime intervalEndUtc,
+            int startUsageFeeAfterMinutes,
+            PaymentFlowOptions flowOptions,
+            ILogger logger = null)
+        {
+            if (intervalEndUtc <= intervalStartUtc)
+            {
+                return 0;
+            }
+
             int totalMinutes;
             if (TryParseDailyWindow(flowOptions?.IdleFeeExcludedWindow, out var excludedStart, out var excludedEnd) &&
                 TryResolveTimeZone(flowOptions?.IdleFeeExcludedTimeZoneId, out var timeZone))
@@ -158,7 +178,7 @@ namespace OCPP.Core.Server.Payments
                 totalMinutes = Math.Max(0, (int)Math.Ceiling((intervalEndUtc - intervalStartUtc).TotalMinutes));
             }
 
-            return Math.Max(0, totalMinutes - Math.Max(0, reservation.StartUsageFeeAfterMinutes));
+            return Math.Max(0, totalMinutes - Math.Max(0, startUsageFeeAfterMinutes));
         }
 
         public static decimal CalculateAmount(int minutes, decimal pricePerMinute)

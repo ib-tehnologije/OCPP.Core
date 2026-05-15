@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,6 +22,7 @@ namespace OCPP.Core.Server.Payments
         private readonly ILogger<PaymentReservationCleanupService> _logger;
         private readonly IConfiguration _configuration;
         private readonly TimeSpan _interval;
+        private readonly TimeSpan _availableStatusCloseGrace;
         private readonly int _startWindowMinutes;
 
         public PaymentReservationCleanupService(
@@ -36,6 +38,9 @@ namespace OCPP.Core.Server.Payments
 
             int intervalSeconds = _configuration.GetValue<int?>("Maintenance:CleanupIntervalSeconds") ?? 60;
             _interval = TimeSpan.FromSeconds(Math.Max(30, intervalSeconds));
+
+            int availableStatusGraceMinutes = _configuration.GetValue<int?>("Maintenance:AvailableStatusOpenTransactionGraceMinutes") ?? 5;
+            _availableStatusCloseGrace = TimeSpan.FromMinutes(Math.Max(0, availableStatusGraceMinutes));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -91,7 +96,9 @@ namespace OCPP.Core.Server.Payments
                     r.TransactionId == null)
                 .ToListAsync(token);
 
-            if (!stale.Any() && !timedOutStarts.Any()) return;
+            var availableOpenTransactions = await LoadAvailableOpenTransactionsAsync(db, now, token);
+
+            if (!stale.Any() && !timedOutStarts.Any() && !availableOpenTransactions.Any()) return;
 
             foreach (var reservation in stale)
             {
@@ -148,6 +155,40 @@ namespace OCPP.Core.Server.Payments
                 reservation.UpdatedAtUtc = now;
             }
 
+            foreach (var availableOpenTransaction in availableOpenTransactions)
+            {
+                var transaction = availableOpenTransaction.Transaction;
+                var connectorStatus = availableOpenTransaction.ConnectorStatus;
+
+                LogOpenTransactionRecoveryCandidate(availableOpenTransaction, now);
+
+                if (!OpenTransactionRecovery.TryCloseForAvailableConnector(
+                    db,
+                    transaction,
+                    connectorStatus.ChargePointId,
+                    connectorStatus.ConnectorId,
+                    connectorStatus.LastStatusTime.Value,
+                    connectorStatus.LastMeter,
+                    _logger,
+                    "PaymentReservationCleanup"))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    coordinator?.CompleteReservation(db, transaction);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "PaymentReservationCleanup => CompleteReservation failed for recovered transaction reservation={ReservationId} tx={TransactionId}",
+                        availableOpenTransaction.Reservation.ReservationId,
+                        transaction.TransactionId);
+                }
+            }
+
             await db.SaveChangesAsync(token);
             if (stale.Any())
             {
@@ -157,6 +198,102 @@ namespace OCPP.Core.Server.Payments
             {
                 _logger.LogInformation("PaymentReservationCleanupService => marked {Count} reservations as StartTimeout (>{Window} min window)", timedOutStarts.Count, _startWindowMinutes);
             }
+            if (availableOpenTransactions.Any())
+            {
+                _logger.LogWarning(
+                    "PaymentReservationCleanupService => recovered {Count} open transactions from persisted Available connector status",
+                    availableOpenTransactions.Count);
+            }
+        }
+
+        private async Task<List<AvailableOpenTransaction>> LoadAvailableOpenTransactionsAsync(
+            OCPPCoreContext db,
+            DateTime now,
+            CancellationToken token)
+        {
+            if (_availableStatusCloseGrace <= TimeSpan.Zero)
+            {
+                return new List<AvailableOpenTransaction>();
+            }
+
+            DateTime cutoff = now.Subtract(_availableStatusCloseGrace);
+
+            return await db.ChargePaymentReservations
+                .Where(r =>
+                    r.Status == PaymentReservationStatus.Charging &&
+                    r.TransactionId.HasValue)
+                .Join(
+                    db.Transactions,
+                    reservation => reservation.TransactionId.Value,
+                    transaction => transaction.TransactionId,
+                    (reservation, transaction) => new { Reservation = reservation, Transaction = transaction })
+                .Join(
+                    db.ConnectorStatuses,
+                    joined => new { joined.Reservation.ChargePointId, joined.Reservation.ConnectorId },
+                    connectorStatus => new { connectorStatus.ChargePointId, connectorStatus.ConnectorId },
+                    (joined, connectorStatus) => new AvailableOpenTransaction
+                    {
+                        Reservation = joined.Reservation,
+                        Transaction = joined.Transaction,
+                        ConnectorStatus = connectorStatus
+                    })
+                .Where(item =>
+                    !item.Transaction.StopTime.HasValue &&
+                    item.ConnectorStatus.LastStatus == OcppConnectorStatus.Available &&
+                    item.ConnectorStatus.LastStatusTime.HasValue &&
+                    item.ConnectorStatus.LastStatusTime.Value >= item.Transaction.StartTime &&
+                    item.ConnectorStatus.LastStatusTime.Value <= cutoff)
+                .ToListAsync(token);
+        }
+
+        private void LogOpenTransactionRecoveryCandidate(AvailableOpenTransaction item, DateTime now)
+        {
+            if (item?.Transaction == null || item.ConnectorStatus == null)
+            {
+                return;
+            }
+
+            var transaction = item.Transaction;
+            var connectorStatus = item.ConnectorStatus;
+            var reservation = item.Reservation;
+
+            double? deliveredKwh = null;
+            if (connectorStatus.LastMeter.HasValue)
+            {
+                deliveredKwh = Math.Max(0, connectorStatus.LastMeter.Value - transaction.MeterStart);
+            }
+
+            _logger.LogWarning(
+                "PaymentReservationCleanup => Open transaction recovery candidate cp={ChargePointId} connector={ConnectorId} tx={TransactionId} txStart={TransactionStart:u} txAgeMinutes={TransactionAgeMinutes} meterStart={MeterStart} currentMeterStop={CurrentMeterStop} connectorMeter={ConnectorMeter} deliveredKwh={DeliveredKwh} status={ConnectorStatus} connectorStatusAt={ConnectorStatusAt:u} statusAgeMinutes={StatusAgeMinutes} connectorMeterAt={ConnectorMeterAt:u} meterAgeMinutes={MeterAgeMinutes} reservation={ReservationId} reservationStatus={ReservationStatus} reservationUpdatedAt={ReservationUpdatedAt:u}",
+                transaction.ChargePointId,
+                transaction.ConnectorId,
+                transaction.TransactionId,
+                transaction.StartTime,
+                WholeMinutes(now - transaction.StartTime),
+                transaction.MeterStart,
+                transaction.MeterStop,
+                connectorStatus.LastMeter,
+                deliveredKwh,
+                connectorStatus.LastStatus,
+                connectorStatus.LastStatusTime,
+                connectorStatus.LastStatusTime.HasValue ? WholeMinutes(now - connectorStatus.LastStatusTime.Value) : (int?)null,
+                connectorStatus.LastMeterTime,
+                connectorStatus.LastMeterTime.HasValue ? WholeMinutes(now - connectorStatus.LastMeterTime.Value) : (int?)null,
+                reservation?.ReservationId,
+                reservation?.Status,
+                reservation?.UpdatedAtUtc);
+        }
+
+        private static int WholeMinutes(TimeSpan value)
+        {
+            return (int)Math.Floor(value.TotalMinutes);
+        }
+
+        private sealed class AvailableOpenTransaction
+        {
+            public ChargePaymentReservation Reservation { get; set; }
+            public Transaction Transaction { get; set; }
+            public ConnectorStatus ConnectorStatus { get; set; }
         }
     }
 }
