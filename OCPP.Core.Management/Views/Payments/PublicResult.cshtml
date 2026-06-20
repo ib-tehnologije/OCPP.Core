@@ -1,0 +1,41 @@
+@model OCPP.Core.Management.Models.PaymentResultViewModel
+@{
+    Layout = "_PublicPortalLayout";
+    var heading = Model.Success ? "Payment authorized" : "Payment status";
+    var message = Model.Message ?? (Model.Success ? "Charging session will start shortly." : "Something went wrong.");
+    var cta = "Start a new session";
+    var returnUrl = string.IsNullOrWhiteSpace(Model.ReturnUrl) ? Url.Action("Start", "Public") : Model.ReturnUrl;
+    ViewData["PublicPageTitle"] = heading;
+    ViewData["PublicPageDescription"] = message;
+    ViewData["PublicNav"] = "map";
+    var badgeClass = Model.Success ? "available status-badge--static" : "error";
+}
+    <nav class="public-session-nav" aria-label="Charging session states">
+        <button type="button" class="active" disabled>① Start</button>
+        <button type="button" disabled>② Wait</button>
+        <button type="button" disabled>③ Charge</button>
+        <button type="button" disabled>④ Done</button>
+        <button type="button" disabled>⑤ Error</button>
+    </nav>
+
+    <div class="page-wrap">
+        <div class="card">
+            <div class="status-header">
+                <div class="status-badge @badgeClass">
+                    <span class="dot"></span>
+                    <span>@heading</span>
+                </div>
+                <h1 class="charger-title">@heading</h1>
+                <p class="charger-sub">@message</p>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-section">
+                <a class="btn-primary" href="@returnUrl">
+                    <span data-i18n="result.newSession">@cta</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                </a>
+            </div>
+        </div>
+    </div>

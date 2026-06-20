@@ -1,0 +1,54 @@
+﻿@using Microsoft.AspNetCore.Mvc.Localization
+@model ChargeTagViewModel
+@inject IViewLocalizer Localizer
+@{
+    ViewData["Title"] = @Localizer["Title"];
+}
+<br />
+
+@if (Model != null)
+{
+    <table id="dtChargeTags" class="table table-striped table-bordered table-sm table-hover" cellspacing="0" width="100%">
+        <thead>
+            <tr>
+                <th class="th-sm">@Localizer["TagId"]</th>
+                <th class="th-sm">@Localizer["TagName"]</th>
+                <th class="th-sm">@Localizer["GroupName"]</th>
+                <th class="th-sm">@Localizer["ExpiryDate"]</th>
+                <th class="th-sm">@Localizer["Blocked"]</th>
+                <th class="th-sm">@Localizer["FreeAccess"]</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.ChargeTags != null)
+            {
+                foreach (ChargeTag tag in Model.ChargeTags)
+                {
+                    var privilege = ViewBag.Privileges != null ? ((IDictionary<string, OCPP.Core.Database.ChargeTagPrivilege>)ViewBag.Privileges).ContainsKey(tag.TagId)
+                        ? ((IDictionary<string, OCPP.Core.Database.ChargeTagPrivilege>)ViewBag.Privileges)[tag.TagId]
+                        : null : null;
+                    <tr class="table-row" data-href='@Url.Action("ChargeTag", Constants.HomeController, new { id = tag.TagId })'>
+                        <td>@tag.TagId</td>
+                        <td>@tag.TagName</td>
+                        <td>@tag.ParentTagId</td>
+                        <td>@((tag.ExpiryDate != null) ? tag.ExpiryDate.Value.ToString(ViewBag.DatePattern) : "-")</td>
+                        <td>@((tag.Blocked == true) ? "1" : "0")</td>
+                        <td>
+                            @if (privilege != null && privilege.FreeChargingEnabled)
+                            {
+                                @((string.IsNullOrWhiteSpace(privilege.ChargePointId) ? Localizer["FreeScopeAll"].Value : privilege.ChargePointId))
+                            }
+                            else
+                            {
+                                @Html.Raw("-")
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+
+    <br />
+    <a class="btn btn-secondary" href='@Url.Action("ChargeTag", Constants.HomeController, new { id = "@" })'>@Localizer["AddNew"]</a>
+}

@@ -1,0 +1,965 @@
+@model OCPP.Core.Management.Models.PaymentStatusViewModel
+@inject OCPP.Core.Management.Services.IPublicPortalSettingsResolver PortalResolver
+@{
+    Layout = "_PublicPortalLayout";
+    var portal = PortalResolver.Resolve();
+    var apiUrl = Url.Action("StatusData", "Payments", new { reservationId = Model.ReservationId });
+    var brandName = portal.BrandName;
+    var supportEmail = portal.SupportEmail;
+    var cancelUrl = Url.Action("Cancel", "Payments", new { reservationId = Model.ReservationId, origin = "public" });
+    var mapUrl = Url.Action("Index", "Public");
+    var startUrlBase = Url.Action("Start", "Public");
+    var startPathTemplate = Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" }) ?? string.Empty;
+    var requestR1InvoiceUrl = Url.Action("RequestR1Invoice", "Payments");
+    var stopUrl = Url.Action("Stop", "Payments");
+    ViewData["PublicPageTitle"] = "Charging status";
+    ViewData["PublicPageDescription"] = "Track charger start, live charging, totals, and invoice details.";
+    ViewData["PublicNav"] = "map";
+}
+    <nav class="public-session-nav" aria-label="Charging session states">
+        <button type="button" data-step="start" class="active" disabled data-i18n="status.step.start">① Start</button>
+        <button type="button" data-step="waiting" disabled data-i18n="status.step.wait">② Wait</button>
+        <button type="button" data-step="charging" disabled data-i18n="status.step.charge">③ Charge</button>
+        <button type="button" data-step="done" disabled data-i18n="status.step.done">④ Done</button>
+        <button type="button" data-step="error" disabled data-i18n="status.step.error">⑤ Error</button>
+    </nav>
+
+    <div class="page-wrap">
+        <div class="card">
+            <div class="status-header">
+                <div class="status-badge waiting" id="status-badge">
+                    <span class="dot"></span>
+                    <span id="status-badge-text" data-i18n="status.badge.waiting">Waiting for charger...</span>
+                </div>
+                <h1 class="charger-title" id="charger-title">-</h1>
+                <p class="charger-sub" id="charger-sub">Reservation <span class="mono">@Model.ReservationId</span></p>
+                <div class="public-code-row" id="status-connector-code-row" hidden>
+                    <span class="public-code-pill public-code-pill--connector" id="status-connector-code"></span>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="alert-box warning public-cap-alert" id="max-energy-alert" hidden>
+                <span class="alert-icon">⚡</span>
+                <span id="max-energy-alert-text"></span>
+            </div>
+
+            <div id="view-waiting" class="session-view active">
+                <div class="info-section info-section--tight-bottom">
+                    <div class="info-section-title" data-i18n="status.reservation">Reservation</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.status">Status</div>
+                            <div class="value public-status-value--warning" id="wait-status">Starting...</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.authorized">Authorized</div>
+                            <div class="value" id="wait-authorized">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="alert-box warning">
+                    <span class="alert-icon">⏳</span>
+                    <span id="wait-hint" data-i18n="status.hint.waitDefault">Make sure the cable is plugged into your vehicle. The charger should start the session shortly.</span>
+                </div>
+                <div class="footer-note">
+                    <span data-i18n="status.footer.autoRefresh">Page refreshes automatically</span> · <a href="@cancelUrl" data-i18n="status.action.cancelSession">Cancel session</a> · <a href="@mapUrl" data-i18n="status.action.backToMap">Back to map</a>
+                </div>
+            </div>
+
+            <div id="view-charging" class="session-view">
+                <div class="charging-anim" aria-hidden="true">
+                    <div class="battery-icon">
+                        <div class="battery-fill"></div>
+                        <div class="battery-bolt">⚡</div>
+                    </div>
+                </div>
+                <div class="timer-display" id="charge-timer">--:--:--</div>
+                <div class="timer-label" data-i18n="status.label.sessionDuration">Session duration</div>
+
+                <div class="live-stats">
+                    <div class="live-stat">
+                        <div class="stat-value" id="stat-energy">-</div>
+                        <div class="stat-label">kWh</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="stat-cost">-</div>
+                        <div class="stat-label" data-i18n="status.label.currentTotal">ESTIMATED TOTAL</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="stat-power">-</div>
+                        <div class="stat-label">kW</div>
+                    </div>
+                </div>
+
+                <div class="info-section info-section--compact-bottom">
+                    <div class="info-section-title" data-i18n="status.section.progress">Progress</div>
+                    <div>
+                        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+                        <div class="progress-labels"><span id="progress-left">-</span><span id="progress-right">-</span></div>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="info-section">
+                    <div class="info-section-title" data-i18n="status.section.costBreakdown">Cost breakdown</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.energy">Energy</div>
+                            <div class="value" id="bd-energy">-</div>
+                            <div class="sub" id="bd-energy-sub">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.sessionFee">Session fee</div>
+                            <div class="value" id="bd-session-fee">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.idleFee">Idle fee</div>
+                            <div class="value" id="bd-idle-fee">-</div>
+                            <div class="sub" id="bd-idle-sub">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.authorized">Authorized</div>
+                            <div class="value" id="bd-authorized">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label" data-i18n="status.label.chargingStarted">Charging started</div>
+                            <div class="value mono" id="bd-start-time">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section form-section--flush-top">
+                    <button type="button" id="stop-charging" class="btn-secondary btn-secondary--danger" disabled>
+                        <span>⏹</span> <span data-i18n="status.action.stopCharging">Stop charging</span>
+                    </button>
+                </div>
+
+                <div class="footer-note"><span data-i18n="status.footer.dataRefreshes">Data refreshes automatically every 5 seconds</span> · <a href="@mapUrl" data-i18n="status.action.backToMap">Back to map</a></div>
+            </div>
+
+            <div id="view-done" class="session-view">
+                <div class="session-complete-summary">
+                    <div class="session-complete-summary__icon">✅</div>
+                    <div class="session-complete-summary__title" data-i18n="status.done.thankYou">Thank you!</div>
+                    <div class="session-complete-summary__subtitle" data-i18n="status.done.completed">Session completed successfully</div>
+                </div>
+
+                <div class="live-stats">
+                    <div class="live-stat">
+                        <div class="stat-value" id="done-energy">-</div>
+                        <div class="stat-label">kWh</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="done-total">-</div>
+                        <div class="stat-label" data-i18n="status.label.total">TOTAL</div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="stat-value" id="done-time">-</div>
+                        <div class="stat-label" data-i18n="status.label.totalTime">TOTAL TIME</div>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <div class="info-section-title" data-i18n="status.section.costSummary">Cost summary</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.authorized">Authorized</div>
+                            <div class="value" id="done-authorized">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.totalCharged">Total charged</div>
+                            <div class="value" id="done-captured">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label" data-i18n="status.label.chargingStarted">Charging started</div>
+                            <div class="value mono" id="done-start">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label" data-i18n="status.label.disconnected">Disconnected</div>
+                            <div class="value mono" id="done-stop">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile featured full">
+                            <div class="label" data-i18n="status.label.refundToCard">Refund to card</div>
+                            <div class="value"><span class="highlight" id="done-refund">-</span></div>
+                            <div class="sub" id="done-refund-calc">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-section" id="done-invoice-section" hidden>
+                    <div class="info-section-title" data-i18n="status.section.invoice">Invoice</div>
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.invoiceStatus">Status</div>
+                            <div class="value" id="done-invoice-status">-</div>
+                            <div class="sub" id="done-invoice-provider">-</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.invoiceNumber">Invoice number</div>
+                            <div class="value mono" id="done-invoice-number">-</div>
+                            <div class="sub" id="done-invoice-document">-</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <div class="tile full">
+                            <div class="label" data-i18n="status.label.updated">Updated</div>
+                            <div class="value mono" id="done-invoice-updated">-</div>
+                        </div>
+                    </div>
+                    <div class="form-section form-section--flush-top" id="done-invoice-actions" hidden>
+                        <a class="btn-secondary" id="done-invoice-link" href="#" target="_blank" rel="noopener" data-i18n="status.action.openInvoice">Open invoice</a>
+                    </div>
+                </div>
+
+                <div class="form-section form-section--flush-top">
+                    <a class="btn-primary" href="@mapUrl">
+                        <span data-i18n="status.action.backToMap">Back to map</span>
+                        <span class="arrow">→</span>
+                    </a>
+                </div>
+
+                <div class="footer-note"><span data-i18n="status.footer.poweredBy">Powered by</span> <a href="@mapUrl">@brandName</a></div>
+            </div>
+
+            <div id="view-error" class="session-view">
+                <div class="alert-box danger alert-box--top">
+                    <span class="alert-icon">⚠️</span>
+                    <div>
+                        <strong id="error-title" data-i18n="status.error.title">Charger failed to start the session</strong><br>
+                        <span class="error-desc-secondary" id="error-desc" data-i18n="status.hint.errorDefault">The charger is offline or occupied. Check the cable and try again.</span>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <div class="info-row">
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.paymentStatus">Payment status</div>
+                            <div class="value public-status-value--danger" id="error-payment-status">-</div>
+                            <div class="sub" id="error-no-charge" data-i18n="status.error.noFunds">No funds were charged</div>
+                        </div>
+                        <div class="tile">
+                            <div class="label" data-i18n="status.label.lastStatus">Last status</div>
+                            <div class="value" id="error-last-status">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section form-section--flush-top">
+                    <a class="btn-primary" id="try-again" href="@startUrlBase">
+                        <span data-i18n="status.action.tryAgain">Try again</span>
+                        <span class="arrow">→</span>
+                    </a>
+                    @if (!string.IsNullOrWhiteSpace(supportEmail))
+                    {
+                        <a class="btn-secondary" id="contact-support" href="mailto:@supportEmail" data-i18n="status.action.contactSupport">Contact support</a>
+                    }
+                </div>
+
+                <div class="footer-note">
+                    @if (!string.IsNullOrWhiteSpace(supportEmail))
+                    {
+                        <span><span data-i18n="status.footer.needHelp">Need help?</span> <a href="mailto:@supportEmail">@supportEmail</a> · </span>
+                    }
+                    <a href="@mapUrl" data-i18n="status.action.backToMap">Back to map</a>
+                </div>
+            </div>
+
+            <div id="r1-panel" class="info-section info-section--flush-top">
+                <div class="divider"></div>
+                <div class="info-section-title info-section-title--top-pad" data-i18n="status.r1.title">R1 invoice (company)</div>
+                <div class="field-help field-help--spaced" data-i18n="status.r1.subtitle">
+                    Need an R1 invoice? You can submit company details now or later using this secure session link.
+                </div>
+                <div class="info-row">
+                    <div class="tile full">
+                        <label for="r1-company" class="field-label" data-i18n="status.r1.companyName">Company name (optional)</label>
+                        <input type="text"
+                               class="field-input"
+                               id="r1-company"
+                               data-i18n-placeholder="start.companyNamePlaceholder"
+                               placeholder="Company / organization name"
+                               autocomplete="organization" />
+
+                        <label for="r1-oib" class="field-label field-label--spaced" data-i18n="status.r1.oib">OIB (required for R1)</label>
+                        <input type="text"
+                               class="field-input"
+                               id="r1-oib"
+                               data-i18n-placeholder="start.oibPlaceholder"
+                               placeholder="11 digits"
+                               inputmode="numeric"
+                               autocomplete="off"
+                               pattern="[0-9]{11}"
+                               maxlength="11" />
+                        <div class="field-help" data-i18n="status.r1.oibHelp">OIB is validated before the request is saved.</div>
+
+                        <div class="form-section form-section--inline">
+                            <button type="button" id="r1-submit" class="btn-secondary" data-i18n="status.action.saveR1">Save R1 details</button>
+                        </div>
+                        <div id="r1-result" class="field-help field-help--result"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const apiUrl = "@apiUrl";
+        const cancelUrl = "@cancelUrl";
+        const startUrlBase = "@startUrlBase";
+        const startPathTemplate = "@startPathTemplate";
+        const requestR1InvoiceUrl = "@requestR1InvoiceUrl";
+        const stopUrl = "@stopUrl";
+        const reservationId = "@Model.ReservationId";
+
+        const navButtons = Array.from(document.querySelectorAll(".public-session-nav [data-step]"));
+        const badge = document.getElementById("status-badge");
+        const badgeText = document.getElementById("status-badge-text");
+        const title = document.getElementById("charger-title");
+        const sub = document.getElementById("charger-sub");
+        const connectorCodeRow = document.getElementById("status-connector-code-row");
+        const connectorCode = document.getElementById("status-connector-code");
+        const maxEnergyAlert = document.getElementById("max-energy-alert");
+        const maxEnergyAlertText = document.getElementById("max-energy-alert-text");
+
+        const viewWaiting = document.getElementById("view-waiting");
+        const viewCharging = document.getElementById("view-charging");
+        const viewDone = document.getElementById("view-done");
+        const viewError = document.getElementById("view-error");
+
+        const waitStatus = document.getElementById("wait-status");
+        const waitAuthorized = document.getElementById("wait-authorized");
+        const waitHint = document.getElementById("wait-hint");
+
+        const chargeTimer = document.getElementById("charge-timer");
+        const statEnergy = document.getElementById("stat-energy");
+        const statCost = document.getElementById("stat-cost");
+        const statPower = document.getElementById("stat-power");
+        const progressFill = document.getElementById("progress-fill");
+        const progressLeft = document.getElementById("progress-left");
+        const progressRight = document.getElementById("progress-right");
+        const bdEnergy = document.getElementById("bd-energy");
+        const bdEnergySub = document.getElementById("bd-energy-sub");
+        const bdSessionFee = document.getElementById("bd-session-fee");
+        const bdIdleFee = document.getElementById("bd-idle-fee");
+        const bdIdleSub = document.getElementById("bd-idle-sub");
+        const bdAuthorized = document.getElementById("bd-authorized");
+        const bdStartTime = document.getElementById("bd-start-time");
+        const stopChargingButton = document.getElementById("stop-charging");
+
+        const doneEnergy = document.getElementById("done-energy");
+        const doneTotal = document.getElementById("done-total");
+        const doneTime = document.getElementById("done-time");
+        const doneAuthorized = document.getElementById("done-authorized");
+        const doneCaptured = document.getElementById("done-captured");
+        const doneStart = document.getElementById("done-start");
+        const doneStop = document.getElementById("done-stop");
+        const doneRefund = document.getElementById("done-refund");
+        const doneRefundCalc = document.getElementById("done-refund-calc");
+        const doneInvoiceSection = document.getElementById("done-invoice-section");
+        const doneInvoiceStatus = document.getElementById("done-invoice-status");
+        const doneInvoiceProvider = document.getElementById("done-invoice-provider");
+        const doneInvoiceNumber = document.getElementById("done-invoice-number");
+        const doneInvoiceDocument = document.getElementById("done-invoice-document");
+        const doneInvoiceUpdated = document.getElementById("done-invoice-updated");
+        const doneInvoiceActions = document.getElementById("done-invoice-actions");
+        const doneInvoiceLink = document.getElementById("done-invoice-link");
+
+        const errorTitle = document.getElementById("error-title");
+        const errorDesc = document.getElementById("error-desc");
+        const errorPaymentStatus = document.getElementById("error-payment-status");
+        const errorLastStatus = document.getElementById("error-last-status");
+        const tryAgain = document.getElementById("try-again");
+
+        const r1Panel = document.getElementById("r1-panel");
+        const r1Company = document.getElementById("r1-company");
+        const r1Oib = document.getElementById("r1-oib");
+        const r1Submit = document.getElementById("r1-submit");
+        const r1Result = document.getElementById("r1-result");
+
+        const stopChargingLabel = stopChargingButton ? stopChargingButton.querySelector("[data-i18n]") : null;
+
+        const toLower = (value) => String(value || "").trim().toLowerCase();
+        const hasValue = (value) => value !== null && value !== undefined && String(value).trim().length > 0;
+        const i18n = () => window.publicPortalI18n;
+        const currentLang = () => i18n()?.currentLanguage?.() || "en";
+        const t = (key) => i18n()?.textFor?.(currentLang(), key) || key;
+        const fillTemplate = (key, values) => {
+            let text = t(key);
+            Object.entries(values || {}).forEach(([name, value]) => {
+                text = text.replaceAll(`{${name}}`, value);
+            });
+            return text;
+        };
+        const translateLiveStatus = (value) => {
+            const normalized = toLower(value);
+            if (!normalized) return "-";
+            if (normalized === "suspendedev" || normalized === "idle") return t("status.badge.pausedVehicle");
+            if (normalized === "suspendedevse") return t("status.badge.pausedCharger");
+            if (normalized === "finishing") return t("status.badge.finishing");
+            if (normalized === "charging") return t("status.badge.charging");
+            if (normalized === "available") return t("map.available");
+            if (normalized === "occupied") return t("map.busy");
+            return value;
+        };
+
+        const resolveConnectorLabel = (data) => {
+            const connectorName = String(data?.connectorName || "").trim();
+            const shortCode = String(data?.publicConnectorShortCode || "").trim();
+            const connectorId = data?.connectorId != null ? String(data.connectorId).trim() : "";
+            const genericConnectorLabel = connectorId ? `Connector ${connectorId}` : "";
+
+            if (connectorName && connectorName.toLowerCase() !== genericConnectorLabel.toLowerCase()) {
+                return connectorName;
+            }
+
+            if (shortCode) {
+                return shortCode;
+            }
+
+            return genericConnectorLabel || "-";
+        };
+
+        const fmtMoney = (cents, currency) => {
+            if (cents === null || cents === undefined) return "-";
+            const num = Number(cents);
+            if (!Number.isFinite(num)) return "-";
+            const ccy = String(currency || "").toUpperCase();
+            return `${(num / 100).toFixed(2)} ${ccy}`.trim();
+        };
+
+        const parseAmount = (value) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num : null;
+        };
+
+        const roundAmount = (value) => {
+            const num = Number(value);
+            return Number.isFinite(num)
+                ? Math.round((num + Number.EPSILON) * 100) / 100
+                : null;
+        };
+
+        const fmtAmount = (value, currency) => {
+            const amount = roundAmount(value);
+            if (amount === null) return "-";
+            const ccy = String(currency || "").toUpperCase();
+            return `${amount.toFixed(2)} ${ccy}`.trim();
+        };
+
+        const sumAmounts = (...values) => {
+            let total = 0;
+            let hasAny = false;
+            values.forEach((value) => {
+                const amount = parseAmount(value);
+                if (amount !== null) {
+                    total += amount;
+                    hasAny = true;
+                }
+            });
+            return hasAny ? roundAmount(total) : null;
+        };
+
+        const fmtNumber = (value, digits = 1) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num.toFixed(digits) : "-";
+        };
+
+        const parseDate = (value) => {
+            if (!value) return null;
+            const raw = String(value).trim();
+            if (!raw) return null;
+            // Server returns timestamps without timezone suffix; treat them as UTC.
+            const hasTz = /([zZ]|[+-]\d\d:\d\d)$/.test(raw);
+            const dt = new Date(hasTz ? raw : `${raw}Z`);
+            return Number.isFinite(dt.getTime()) ? dt : null;
+        };
+
+        const fmtLocal = (dt) => {
+            if (!dt) return "-";
+            return dt.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", " ·");
+        };
+
+        const fmtDuration = (seconds) => {
+            if (!Number.isFinite(seconds) || seconds < 0) return "--:--:--";
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        };
+
+        const buildStartUrl = (chargePointId, connectorId) => {
+            const safeCp = encodeURIComponent(chargePointId || "");
+            const safeConn = encodeURIComponent((connectorId == null ? 1 : connectorId).toString());
+            if (startPathTemplate && startPathTemplate.indexOf("__cp__") >= 0) {
+                return startPathTemplate.replace("__cp__", safeCp).replace("__conn__", safeConn);
+            }
+            return `${startUrlBase}?cp=${safeCp}&conn=${safeConn}`;
+        };
+
+        const setR1Result = (message, isError) => {
+            if (!r1Result) return;
+            r1Result.textContent = message || "";
+            r1Result.classList.toggle("field-help--error", !!isError);
+            r1Result.classList.toggle("field-help--success", !isError && !!message);
+        };
+
+        const resolveState = (data) => {
+            const sessionStage = toLower(data?.sessionStage);
+            if (sessionStage === "waitingfordisconnect") return "waitingForDisconnect";
+            if (sessionStage === "done" || sessionStage === "completed") return "done";
+            if (sessionStage === "charging") return "charging";
+            if (sessionStage === "error") return "error";
+            if (sessionStage === "waiting") return "waiting";
+
+            const status = toLower(data?.status);
+            const live = toLower(data?.liveStatus);
+            const liveOcpp = toLower(data?.liveOcppStatus || data?.liveStatus);
+
+            const hasErrorDetails = hasValue(data?.failureCode) || hasValue(data?.failureMessage) || hasValue(data?.lastError);
+            const isErrorStatus =
+                status === "startrejected" ||
+                status === "starttimeout" ||
+                status === "failed" ||
+                status === "cancelled" ||
+                status === "abandoned" ||
+                status === "error" ||
+                hasErrorDetails;
+
+            if (isErrorStatus) return "error";
+
+            if (!!parseDate(data?.stopTransactionAtUtc) && !parseDate(data?.disconnectedAtUtc)) {
+                return "waitingForDisconnect";
+            }
+
+            const hasStop = !!parseDate(data?.disconnectedAtUtc) || !!parseDate(data?.capturedAtUtc) || data?.capturedAmountCents != null;
+            if (hasStop) return "done";
+
+            const hasChargingViewStatus =
+                liveOcpp === "charging" ||
+                liveOcpp === "suspendedev" ||
+                liveOcpp === "suspendedevse" ||
+                liveOcpp === "finishing" ||
+                liveOcpp === "evconnected" ||
+                liveOcpp === "idle";
+            const hasStart = !!parseDate(data?.startTransactionAtUtc) || data?.activeTransaction === true || live === "occupied" || hasChargingViewStatus;
+            if (hasStart) return "charging";
+
+            const hasAuthorized = !!parseDate(data?.authorizedAtUtc) || data?.activeReservation === true || status === "authorized" || status === "startrequested" || status === "accepted";
+            if (hasAuthorized) return "waiting";
+
+            return "waiting";
+        };
+
+        const setActiveTab = (state) => {
+            const activeStep = state === "waitingForDisconnect" ? "charging" : state;
+            navButtons.forEach(btn => {
+                btn.classList.toggle("active", btn.dataset.step === activeStep);
+            });
+        };
+
+        const setActiveView = (state) => {
+            viewWaiting.classList.toggle("active", state === "waiting");
+            viewCharging.classList.toggle("active", state === "charging" || state === "waitingForDisconnect");
+            viewDone.classList.toggle("active", state === "done");
+            viewError.classList.toggle("active", state === "error");
+        };
+
+        const setHeader = (state, data) => {
+            const cp = data?.chargePointId || "-";
+            const connectorLabel = resolveConnectorLabel(data);
+            const liveStatus = data?.liveOcppStatus || data?.liveStatus || data?.persistedStatus || "-";
+            const liveOcpp = toLower(data?.liveOcppStatus || data?.liveStatus);
+            title.textContent = cp;
+            sub.textContent = `${connectorLabel} · ${translateLiveStatus(liveStatus)}`;
+
+            const fullConnectorCode = String(data?.publicConnectorCode || "").trim();
+            if (connectorCodeRow && connectorCode) {
+                if (fullConnectorCode) {
+                    connectorCode.textContent = fullConnectorCode;
+                    connectorCodeRow.hidden = false;
+                } else {
+                    connectorCode.textContent = "";
+                    connectorCodeRow.hidden = true;
+                }
+            }
+
+            badge.className = "status-badge";
+            if (state === "waitingForDisconnect") {
+                badge.classList.add("charging");
+                badgeText.textContent = t("status.badge.stopPending");
+            } else if (state === "charging") {
+                badge.classList.add("charging");
+                if (liveOcpp === "suspendedev") {
+                    badgeText.textContent = t("status.badge.pausedVehicle");
+                } else if (liveOcpp === "suspendedevse") {
+                    badgeText.textContent = t("status.badge.pausedCharger");
+                } else if (liveOcpp === "finishing") {
+                    badgeText.textContent = t("status.badge.finishing");
+                } else {
+                    badgeText.textContent = t("status.badge.charging");
+                }
+            } else if (state === "done") {
+                badge.classList.add("available");
+                badgeText.textContent = t("status.badge.done");
+                const dot = badge.querySelector(".dot");
+                if (dot) dot.style.animation = "none";
+            } else if (state === "error") {
+                badge.classList.add("error");
+                badgeText.textContent = t("status.badge.error");
+            } else {
+                badge.classList.add("waiting");
+                badgeText.textContent = data?.awaitingPlug === true ? t("status.badge.awaitingPlug") : t("status.badge.waiting");
+            }
+        };
+
+        const renderInvoice = (invoice) => {
+            if (!invoice) {
+                doneInvoiceSection.hidden = true;
+                doneInvoiceActions.hidden = true;
+                doneInvoiceLink.removeAttribute("href");
+                return;
+            }
+
+            doneInvoiceSection.hidden = false;
+            doneInvoiceStatus.textContent = invoice.status || "-";
+            doneInvoiceProvider.textContent = [invoice.provider, invoice.mode].filter(Boolean).join(" · ") || "-";
+            doneInvoiceNumber.textContent = invoice.externalInvoiceNumber || "-";
+            doneInvoiceDocument.textContent = invoice.externalDocumentId || "-";
+            doneInvoiceUpdated.textContent = fmtLocal(parseDate(invoice.completedAtUtc) || parseDate(invoice.createdAtUtc));
+
+            if (invoice.invoiceUrl) {
+                doneInvoiceLink.href = invoice.invoiceUrl;
+                doneInvoiceActions.hidden = false;
+            } else {
+                doneInvoiceLink.removeAttribute("href");
+                doneInvoiceActions.hidden = true;
+            }
+        };
+
+        const renderMaxEnergyNotice = (state, data, maxEnergyKwh) => {
+            if (!maxEnergyAlert || !maxEnergyAlertText) {
+                return;
+            }
+
+            const stopRequested = data?.serverMaxEnergyStopRequested === true;
+            const limitReached = data?.serverMaxEnergyLimitReached === true;
+            if (!(stopRequested || limitReached) || !Number.isFinite(maxEnergyKwh) || maxEnergyKwh <= 0) {
+                maxEnergyAlert.hidden = true;
+                maxEnergyAlertText.textContent = "";
+                maxEnergyAlert.className = "alert-box warning public-cap-alert";
+                return;
+            }
+
+            maxEnergyAlert.hidden = false;
+            maxEnergyAlert.className = `alert-box ${state === "done" ? "info" : "warning"} public-cap-alert`;
+            maxEnergyAlertText.textContent = stopRequested && state !== "done"
+                ? fillTemplate("status.hint.maxEnergyStopping", { energy: fmtNumber(maxEnergyKwh, 1) })
+                : fillTemplate("status.hint.maxEnergyReached", { energy: fmtNumber(maxEnergyKwh, 1) });
+        };
+
+        const render = (state, data) => {
+            setActiveTab(state);
+            setActiveView(state);
+            setHeader(state, data);
+
+            const currency = data?.currency;
+            const authorizedText = fmtMoney(data?.maxAmountCents, currency);
+            const capturedText = fmtMoney(data?.capturedAmountCents, currency);
+
+            const status = toLower(data?.status);
+            const liveOcpp = toLower(data?.liveOcppStatus || data?.liveStatus);
+            const awaitingPlug = data?.awaitingPlug === true;
+            const deadline = parseDate(data?.startDeadlineAtUtc);
+            const secondsRemaining = deadline ? Math.max(0, Math.floor((deadline.getTime() - Date.now()) / 1000)) : null;
+            const idlePausedByWindow = data?.idleBillingPausedByWindow === true;
+
+            if (state === "waitingForDisconnect") {
+                waitStatus.textContent = t("status.badge.stopPending");
+                if (waitHint) waitHint.textContent = idlePausedByWindow ? t("status.hint.stopPendingQuiet") : t("status.hint.stopPending");
+            } else if (liveOcpp === "suspendedev") {
+                waitStatus.textContent = t("status.badge.pausedVehicle");
+                if (waitHint) waitHint.textContent = idlePausedByWindow ? t("status.hint.pausedVehicleQuiet") : t("status.hint.pausedVehicle");
+            } else if (liveOcpp === "suspendedevse") {
+                waitStatus.textContent = t("status.badge.pausedCharger");
+                if (waitHint) waitHint.textContent = t("status.hint.pausedCharger");
+            } else if (awaitingPlug) {
+                waitStatus.textContent = t("status.badge.awaitingPlug");
+                if (waitHint) {
+                    waitHint.textContent = secondsRemaining != null
+                        ? fillTemplate("status.hint.awaitingPlugTimed", { minutes: Math.ceil(secondsRemaining / 60) })
+                        : t("status.hint.awaitingPlug");
+                }
+            } else if (status === "startrequested" || hasValue(data?.remoteStartSentAtUtc)) {
+                waitStatus.textContent = t("status.wait.starting");
+                if (waitHint) waitHint.textContent = t("status.hint.starting");
+            } else if (data?.startable === false && hasValue(data?.startableReason)) {
+                waitStatus.textContent = data.startableReason;
+                if (waitHint) waitHint.textContent = t("status.hint.notReady");
+            } else {
+                waitStatus.textContent = t("status.badge.waiting");
+                if (waitHint) waitHint.textContent = t("status.hint.waitDefault");
+            }
+            waitAuthorized.textContent = authorizedText;
+
+            const startAt = parseDate(data?.startTransactionAtUtc);
+            const stopAt = parseDate(data?.stopTransactionAtUtc);
+            const disconnectedAt = parseDate(data?.disconnectedAtUtc);
+            const now = new Date();
+            const effectiveEndAt = state === "done" ? (disconnectedAt || stopAt || now) : now;
+            const seconds = startAt ? Math.floor((effectiveEndAt.getTime() - startAt.getTime()) / 1000) : NaN;
+            chargeTimer.textContent = fmtDuration(seconds);
+
+            const liveKw = data?.liveChargeRateKw;
+            statPower.textContent = Number.isFinite(Number(liveKw)) ? fmtNumber(liveKw, 1) : "-";
+
+            const maxEnergyKwh = Number(data?.maxEnergyKwh);
+            const actualEnergyKwh = data?.actualEnergyKwh;
+            const liveSessionEnergyKwh = data?.liveSessionEnergyKwh;
+            const txEnergyKwh = data?.transactionEnergyKwh;
+            const liveMeterKwh = data?.liveMeterKwh;
+            const txMeterStart = data?.transactionMeterStart;
+            const txMeterStop = data?.transactionMeterStop;
+
+            let sessionEnergy = null;
+            if (actualEnergyKwh != null) sessionEnergy = Number(actualEnergyKwh);
+            else if (liveSessionEnergyKwh != null) sessionEnergy = Number(liveSessionEnergyKwh);
+            else if (txEnergyKwh != null) sessionEnergy = Number(txEnergyKwh);
+            else if (txMeterStop != null && txMeterStart != null) sessionEnergy = Number(txMeterStop) - Number(txMeterStart);
+            else if (liveMeterKwh != null && txMeterStart != null) sessionEnergy = Number(liveMeterKwh) - Number(txMeterStart);
+            renderMaxEnergyNotice(state, data, maxEnergyKwh);
+
+            statEnergy.textContent = Number.isFinite(sessionEnergy) ? fmtNumber(sessionEnergy, 1) : "-";
+            const pricePerKwh = parseAmount(data?.pricePerKwh);
+            const liveEnergyCost = Number.isFinite(sessionEnergy) && pricePerKwh !== null
+                ? roundAmount(sessionEnergy * pricePerKwh)
+                : null;
+            const persistedEnergyCost = parseAmount(data?.transactionEnergyCost);
+            const preferLiveEnergyCost = state === "charging" || state === "waitingForDisconnect";
+            const energyCost = preferLiveEnergyCost
+                ? (liveEnergyCost ?? persistedEnergyCost)
+                : (persistedEnergyCost ?? liveEnergyCost);
+            const configuredSessionFeeAmount = parseAmount(data?.userSessionFee);
+            const persistedSessionFeeAmount = parseAmount(data?.transactionSessionFeeAmount);
+            const sessionFeeAmount = preferLiveEnergyCost
+                ? (configuredSessionFeeAmount ?? persistedSessionFeeAmount)
+                : (persistedSessionFeeAmount ?? configuredSessionFeeAmount);
+            const idleFeeAmount = parseAmount(data?.liveIdleFeeAmount) ?? parseAmount(data?.transactionIdleFeeAmount);
+            const currentTotalAmount = sumAmounts(energyCost, sessionFeeAmount, idleFeeAmount);
+            statCost.textContent = currentTotalAmount !== null ? fmtAmount(currentTotalAmount, currency) : "-";
+
+            let pct = null;
+            if (Number.isFinite(sessionEnergy) && Number.isFinite(maxEnergyKwh) && maxEnergyKwh > 0) {
+                pct = Math.max(0, Math.min(100, (sessionEnergy / maxEnergyKwh) * 100));
+            }
+            progressFill.style.width = pct != null ? `${pct.toFixed(1)}%` : "0%";
+            progressLeft.textContent = (Number.isFinite(sessionEnergy) && Number.isFinite(maxEnergyKwh) && maxEnergyKwh > 0)
+                ? `${fmtNumber(sessionEnergy, 1)} / ${fmtNumber(maxEnergyKwh, 1)} kWh`
+                : "-";
+            progressRight.textContent = pct != null ? `${pct.toFixed(1)}%` : "-";
+
+            const idleFeeMinutes = data?.liveIdleFeeMinutes != null ? data.liveIdleFeeMinutes : data?.transactionIdleFeeMinutes;
+            bdEnergy.textContent = energyCost !== null ? fmtAmount(energyCost, currency) : "-";
+            bdEnergySub.textContent = Number.isFinite(sessionEnergy) ? `${fmtNumber(sessionEnergy, 1)} kWh` : "-";
+            bdSessionFee.textContent = sessionFeeAmount !== null ? fmtAmount(sessionFeeAmount, currency) : "-";
+            bdIdleFee.textContent = idleFeeAmount !== null ? fmtAmount(idleFeeAmount, currency) : "-";
+            bdIdleSub.textContent = idlePausedByWindow
+                ? t("status.idlePausedByWindow")
+                : (idleFeeMinutes != null ? `${idleFeeMinutes} min` : "-");
+            bdAuthorized.textContent = authorizedText;
+            bdStartTime.textContent = fmtLocal(startAt);
+
+            doneEnergy.textContent = Number.isFinite(sessionEnergy) ? fmtNumber(sessionEnergy, 1) : "-";
+            doneTotal.textContent = capturedText;
+            doneTime.textContent = fmtDuration(seconds);
+            doneAuthorized.textContent = authorizedText;
+            doneCaptured.textContent = capturedText;
+            doneStart.textContent = fmtLocal(startAt);
+            doneStop.textContent = fmtLocal(disconnectedAt || stopAt);
+
+            const maxCents = Number(data?.maxAmountCents);
+            const capturedCents = Number(data?.capturedAmountCents);
+            if (Number.isFinite(maxCents) && Number.isFinite(capturedCents)) {
+                const refund = Math.max(0, maxCents - capturedCents);
+                doneRefund.textContent = fmtMoney(refund, currency);
+                doneRefundCalc.textContent = fillTemplate("status.refundCalc", {
+                    authorized: fmtMoney(maxCents, currency),
+                    captured: fmtMoney(capturedCents, currency),
+                    refund: fmtMoney(refund, currency)
+                });
+            } else {
+                doneRefund.textContent = "-";
+                doneRefundCalc.textContent = "-";
+            }
+
+            renderInvoice(data?.invoice);
+
+            errorPaymentStatus.textContent = data?.status || "-";
+            errorLastStatus.textContent = data?.liveOcppStatus || data?.liveStatus || data?.persistedStatus || "-";
+            if (hasValue(data?.failureMessage)) {
+                errorDesc.textContent = data.failureMessage;
+            } else if (hasValue(data?.lastError)) {
+                errorDesc.textContent = data.lastError;
+            } else {
+                errorDesc.textContent = t("status.hint.errorDefault");
+            }
+
+            if (stopChargingButton) {
+                const stopEnabled = state === "charging" || state === "waiting";
+                stopChargingButton.disabled = !stopEnabled;
+                if (stopChargingLabel) {
+                    stopChargingLabel.textContent = t("status.action.stopCharging");
+                }
+            }
+
+            if (r1Panel) {
+                r1Panel.hidden = state === "error";
+            }
+
+            const cp = data?.chargePointId;
+            const conn = data?.connectorId;
+            if (cp && conn != null) {
+                tryAgain.href = buildStartUrl(cp, conn);
+            }
+        };
+
+        async function submitR1Details() {
+            if (!r1Submit || !r1Oib) return;
+
+            const normalizedOib = String(r1Oib.value || "").replace(/\D/g, "");
+            if (normalizedOib.length !== 11) {
+                setR1Result(t("status.r1.invalidOib"), true);
+                return;
+            }
+
+            r1Submit.disabled = true;
+            setR1Result(t("status.action.savingR1"), false);
+
+            try {
+                const payload = {
+                    reservationId,
+                    buyerCompanyName: (r1Company?.value || "").trim(),
+                    buyerOib: normalizedOib
+                };
+
+                const res = await fetch(requestR1InvoiceUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                let data = null;
+                try {
+                    data = await res.json();
+                } catch (_) {
+                    // ignore parse issues and show fallback message below
+                }
+
+                if (!res.ok || !data?.success) {
+                    setR1Result(data?.message || t("status.r1.failed"), true);
+                    return;
+                }
+
+                r1Oib.value = normalizedOib;
+                setR1Result(data?.message || t("status.r1.saved"), false);
+            } catch (err) {
+                setR1Result(t("status.r1.failed"), true);
+            } finally {
+                r1Submit.disabled = false;
+            }
+        }
+
+        if (r1Submit) {
+            r1Submit.addEventListener("click", submitR1Details);
+        }
+
+        async function submitStop() {
+            if (!stopChargingButton || stopChargingButton.disabled) {
+                return;
+            }
+
+            stopChargingButton.disabled = true;
+            if (stopChargingLabel) {
+                stopChargingLabel.textContent = t("status.action.stopping");
+            }
+
+            try {
+                const res = await fetch(stopUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ reservationId })
+                });
+
+                let data = null;
+                try {
+                    data = await res.json();
+                } catch (_) {
+                    data = null;
+                }
+
+                if (!res.ok) {
+                    throw new Error(data?.message || data?.status || String(res.status));
+                }
+
+                await loadStatus();
+            } catch (err) {
+                badge.className = "status-badge waiting";
+                badgeText.textContent = t("status.badge.stopFailed");
+                if (waitHint) {
+                    waitHint.textContent = t("status.hint.stopFailed");
+                }
+            } finally {
+                if (stopChargingLabel) {
+                    stopChargingLabel.textContent = t("status.action.stopCharging");
+                }
+            }
+        }
+
+        if (stopChargingButton) {
+            stopChargingButton.addEventListener("click", submitStop);
+        }
+
+        async function loadStatus() {
+            try {
+                const res = await fetch(apiUrl, { cache: "no-store" });
+                if (!res.ok) throw new Error(res.status);
+                const data = await res.json();
+                const state = resolveState(data);
+                render(state, data);
+            } catch (err) {
+                setActiveTab("error");
+                setActiveView("error");
+                badge.className = "status-badge error";
+                badgeText.textContent = t("status.badge.error");
+                errorTitle.textContent = t("status.error.title");
+                errorDesc.textContent = t("status.hint.errorDefault");
+                errorPaymentStatus.textContent = "-";
+                errorLastStatus.textContent = "-";
+                renderMaxEnergyNotice("error", null, NaN);
+                renderInvoice(null);
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            i18n()?.applyTranslations?.(currentLang());
+            loadStatus();
+            setInterval(loadStatus, 5000);
+        });
+    </script>

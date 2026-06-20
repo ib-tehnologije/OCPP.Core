@@ -1,0 +1,129 @@
+@model OCPP.Core.Management.Models.PaymentStatusViewModel
+@{
+    ViewData["Title"] = "Payment status";
+    var apiUrl = Url.Action("StatusData", "Payments", new { reservationId = Model.ReservationId });
+}
+
+<div class="container mt-4">
+    <h2>Payment status</h2>
+    <p class="text-muted">Reservation @Model.ReservationId</p>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <dl class="row">
+                <dt class="col-sm-3">Status</dt>
+                <dd class="col-sm-9" id="payment-status">Loading…</dd>
+                <dt class="col-sm-3">Charger</dt>
+                <dd class="col-sm-9" id="connector">-</dd>
+                <dt class="col-sm-3">Charger status</dt>
+                <dd class="col-sm-9" id="charger-status">-</dd>
+                <dt class="col-sm-3">Last update</dt>
+                <dd class="col-sm-9" id="updated-at">-</dd>
+                <dt class="col-sm-3">Transaction</dt>
+                <dd class="col-sm-9" id="transaction-id">-</dd>
+                <dt class="col-sm-3">Authorized amount</dt>
+                <dd class="col-sm-9" id="amount">-</dd>
+                <dt class="col-sm-3">Startable?</dt>
+                <dd class="col-sm-9" id="startable">-</dd>
+                <dt class="col-sm-3">Reasons</dt>
+                <dd class="col-sm-9" id="startable-reason">-</dd>
+                <dt class="col-sm-3">Invoice status</dt>
+                <dd class="col-sm-9" id="invoice-status">-</dd>
+                <dt class="col-sm-3">Invoice provider</dt>
+                <dd class="col-sm-9" id="invoice-provider">-</dd>
+                <dt class="col-sm-3">Invoice number</dt>
+                <dd class="col-sm-9" id="invoice-number">-</dd>
+                <dt class="col-sm-3">Document id</dt>
+                <dd class="col-sm-9" id="invoice-document-id">-</dd>
+                <dt class="col-sm-3">Invoice link</dt>
+                <dd class="col-sm-9"><a id="invoice-link" href="#" target="_blank" rel="noopener" style="display:none;">Open invoice</a><span id="invoice-link-empty">-</span></dd>
+                <dt class="col-sm-3">Invoice updated</dt>
+                <dd class="col-sm-9" id="invoice-updated-at">-</dd>
+            </dl>
+            <button class="btn btn-primary" id="refresh-btn">Refresh</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const apiUrl = "@apiUrl";
+    const paymentStatus = document.getElementById('payment-status');
+    const connector = document.getElementById('connector');
+    const chargerStatus = document.getElementById('charger-status');
+    const updatedAt = document.getElementById('updated-at');
+    const transactionId = document.getElementById('transaction-id');
+    const amount = document.getElementById('amount');
+    const startable = document.getElementById('startable');
+    const startableReason = document.getElementById('startable-reason');
+    const invoiceStatus = document.getElementById('invoice-status');
+    const invoiceProvider = document.getElementById('invoice-provider');
+    const invoiceNumber = document.getElementById('invoice-number');
+    const invoiceDocumentId = document.getElementById('invoice-document-id');
+    const invoiceLink = document.getElementById('invoice-link');
+    const invoiceLinkEmpty = document.getElementById('invoice-link-empty');
+    const invoiceUpdatedAt = document.getElementById('invoice-updated-at');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    const fmtMoney = (cents, currency) => cents != null ? `${(cents/100).toFixed(2)} ${currency?.toUpperCase()||''}` : '-';
+    const fmtReasons = (reasons, fallback) => {
+        if (!reasons || !Array.isArray(reasons) || reasons.length === 0) return fallback;
+        return reasons.join(', ');
+    };
+
+    const parseUtc = (value) => {
+        if (!value) return null;
+        const raw = String(value).trim();
+        if (!raw) return null;
+        const hasTz = /([zZ]|[+-]\d\d:\d\d)$/.test(raw);
+        const dt = new Date(hasTz ? raw : `${raw}Z`);
+        return Number.isFinite(dt.getTime()) ? dt : null;
+    };
+
+    const fmtLocal = (dt) => dt
+        ? dt.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(",", " ·")
+        : "-";
+
+    const renderInvoice = (invoice) => {
+        invoiceStatus.textContent = invoice?.status || '-';
+        invoiceProvider.textContent = [invoice?.provider, invoice?.mode].filter(Boolean).join(' · ') || '-';
+        invoiceNumber.textContent = invoice?.externalInvoiceNumber || '-';
+        invoiceDocumentId.textContent = invoice?.externalDocumentId || '-';
+        const updated = parseUtc(invoice?.completedAtUtc) || parseUtc(invoice?.createdAtUtc);
+        invoiceUpdatedAt.textContent = fmtLocal(updated);
+
+        if (invoice?.invoiceUrl) {
+            invoiceLink.href = invoice.invoiceUrl;
+            invoiceLink.style.display = '';
+            invoiceLinkEmpty.style.display = 'none';
+        } else {
+            invoiceLink.removeAttribute('href');
+            invoiceLink.style.display = 'none';
+            invoiceLinkEmpty.style.display = '';
+        }
+    };
+
+    async function loadStatus() {
+        try {
+            const res = await fetch(apiUrl, { cache: 'no-store' });
+            if (!res.ok) throw new Error(res.status);
+            const data = await res.json();
+            paymentStatus.textContent = data.status || '-';
+            connector.textContent = `${data.chargePointId || '-'} / ${data.connectorId || '-'}`;
+            chargerStatus.textContent = data.liveStatus || data.persistedStatus || '-';
+            const updatedLocal = fmtLocal(parseUtc(data.updatedAtUtc));
+            updatedAt.textContent = data.updatedAtUtc ? `${updatedLocal} (local)` : '-';
+            transactionId.textContent = data.transactionId || '-';
+            amount.textContent = fmtMoney(data.maxAmountCents, data.currency);
+            startable.textContent = data.startable ? 'Yes' : 'No';
+            startableReason.textContent = fmtReasons(data.startableReasons, data.startableReason || '-');
+            renderInvoice(data.invoice);
+        } catch (err) {
+            paymentStatus.textContent = 'Error loading status';
+            renderInvoice(null);
+        }
+    }
+
+    refreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadStatus(); });
+    loadStatus();
+    setInterval(loadStatus, 5000);
+</script>

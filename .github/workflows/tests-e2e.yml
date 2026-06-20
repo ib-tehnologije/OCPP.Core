@@ -1,0 +1,39 @@
+name: Browser and Simulator E2E
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install sqlite3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Install Playwright dependencies
+        run: npm ci --prefix Simulators/playwright
+
+      - name: Install browser
+        run: npx --prefix Simulators/playwright playwright install --with-deps chromium
+
+      - name: Run simulator and browser stack
+        run: node Simulators/run_e2e_stack.mjs

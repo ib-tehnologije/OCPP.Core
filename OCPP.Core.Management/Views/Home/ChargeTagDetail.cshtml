@@ -1,0 +1,201 @@
+﻿@using Microsoft.AspNetCore.Mvc.Localization
+@model ChargeTagViewModel
+@inject IViewLocalizer Localizer
+@{
+    ViewData["Title"] = @Localizer["Title"];
+}
+<br />
+
+@if (Model != null)
+{
+    @using (Html.BeginForm())
+    {
+        @Html.AntiForgeryToken()
+
+        <h4>@Localizer["EditChargeTag"]</h4>
+        <br />
+        <div class="container">
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="TagId">@Localizer["ChargeTagIdLabel"]</label>
+                    </div>
+                </div>
+                @if (Model.CurrentTagId == "@")
+                {
+                    <div class="col-sm-6">
+                        <div class="form-group">
+                            <input type="text" class="form-control" data-val="true" data-val-length="@string.Format(Localizer["FieldMaxLength"].Value, 50)" data-val-length-max="50" data-val-required="@Localizer["RequiredField"]" id="TagId" maxlength="50" name="TagId" placeholder="@Localizer["ChargeTagIdPlaceholder"]" value="@Model.TagId">
+                        </div>
+                    </div>
+                    <div class="col-sm-2">
+                        <span class="field-validation-valid text-danger" data-valmsg-for="TagId" data-valmsg-replace="true"></span>
+                    </div>
+                }
+                else
+                {
+                    <div class="col-sm-6">
+                        <div class="form-group">
+                            <input type="text" readonly class="form-control" id="TagId" name="TagId" placeholder="@Localizer["ChargeTagIdPlaceholder"]" value="@Model.TagId">
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="TagName">@Localizer["ChargeTagNameLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" data-val="true" data-val-length="@string.Format(Localizer["FieldMaxLength"].Value, 200)" data-val-length-max="200" data-val-required="@Localizer["RequiredField"]" id="TagName" maxlength="200" name="TagName" placeholder="@Localizer["ChargeTagNamePlaceholder"]" type="text" value="@Model.TagName" />
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="TagName" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="TagName">@Localizer["GroupNameLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input class="form-control" data-val="true" data-val-length="@string.Format(Localizer["FieldMaxLength"].Value, 50)" data-val-length-max="50" id="ParentTagId" maxlength="50" name="ParentTagId" placeholder="@Localizer["GroupNamePlaceholder"]" type="text" value="@Model.ParentTagId" />
+                    </div>
+                </div>
+                <div class="col-sm-2">
+                    <span class="field-validation-valid text-danger" data-valmsg-for="ParentTagId" data-valmsg-replace="true"></span>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="expiryDatetimepicker">@Localizer["ChargeTagExpirationLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <div class="input-group date" id="expiryDatetimepicker" style="max-width: 180px">
+                            <input type="text" class="form-control" id="ExpiryDate" name="ExpiryDate" value="@Model.ExpiryDate?.ToString(ViewBag.DatePattern)">
+                            <span class="input-group-append"><i class="input-group-text fa fa-calendar" style="padding-top: 10px;"></i></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <label class="form-check-label inline-label" for="Blocked">@Localizer["ChargeTagBlockedLabel"]</label>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-check">
+                        @Html.CheckBoxFor(m => m.Blocked, new { @class = "form-check-input checkbox-lg" })
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <label class="form-check-label inline-label" for="FreeChargingEnabled">@Localizer["FreeChargingLabel"]</label>
+                </div>
+                <div class="col-sm-2">
+                    <div class="form-check">
+                        @Html.CheckBoxFor(m => m.FreeChargingEnabled, new { @class = "form-check-input checkbox-lg", @id = "FreeChargingEnabled" })
+                    </div>
+                </div>
+                <div class="col-sm-4">
+                    <select class="form-control" id="FreeChargePointId" name="FreeChargePointId" @(Model.FreeChargingEnabled ? "" : "disabled")>
+                        <option value="">@Localizer["FreeScopeAll"]</option>
+                        @if (Model.ChargePoints != null)
+                        {
+                            foreach (var cp in Model.ChargePoints)
+                            {
+                                <option value="@cp.ChargePointId" selected="@(cp.ChargePointId == Model.FreeChargePointId ? "selected" : null)">@cp.ChargePointId</option>
+                            }
+                        }
+                    </select>
+                    <small class="form-text text-muted">@Localizer["FreeScopeHint"]</small>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <label class="inline-label" for="PrivilegeNote">@Localizer["PrivilegeNoteLabel"]</label>
+                </div>
+                <div class="col-sm-6">
+                    <input class="form-control" id="PrivilegeNote" name="PrivilegeNote" maxlength="200" value="@Model.PrivilegeNote" placeholder="@Localizer["PrivilegeNotePlaceholder"]" @(Model.FreeChargingEnabled ? "" : "disabled") />
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-12 text-danger">
+                    @ViewBag.ErrorMsg
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-1">
+                    &nbsp;
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2">
+                    <button type="submit" class="btn btn-primary" id="btnSave"><i class=" fas fa-save"></i>&nbsp;@Localizer[(Model.CurrentTagId == "@") ? "SaveNew" : "Save"].Value</button>
+                </div>
+                <div class="col-sm-2">
+                    <button type="button" class="btn btn-secondary" id="btnBack" onclick="history.back()">@Localizer["Back"].Value</button>
+                </div>
+                @if (Model.CurrentTagId != "@")
+                {
+                    <div class="col-sm-2">
+                        <button type="button" class="btn btn-warning" id="btnDelete" onclick="DeleteTag()"><i class="fas fa-trash"></i>&nbsp;@Localizer["Delete"].Value</button>
+                    </div>
+                }
+            </div>
+        </div>
+        <input type="hidden" name="action" id="hidAction" value="" />
+    }
+
+    @section scripts {
+        <script>
+            $(function () {
+                $('#expiryDatetimepicker').datepicker({
+                    weekStart: 1,
+                    todayBtn: true,
+                    language: "@ViewBag.Language",
+                    todayHighlight: true
+                });
+
+                $('#FreeChargingEnabled').change(function () {
+                    var enabled = $(this).is(':checked');
+                    $('#FreeChargePointId').prop('disabled', !enabled);
+                    $('#PrivilegeNote').prop('disabled', !enabled);
+                });
+            });
+
+        function DeleteTag() {
+                var dialog = new BootstrapDialog({
+                    title: '@Localizer["TitleDelete"]',
+                    message: '@Localizer["DialogDelete"]',
+                    //spinicon: 'fa fa-spinner fa-fw',
+                    buttons: [{
+                        id: 'btnDialogReset',
+                        label: '@Localizer["TitleDelete"]',
+                        icon: 'fas fa-trash',
+                        //autospin: true,
+                        action: function (dialogRef) {
+                            $("#hidAction").val('Delete');
+                            $("form").submit();
+                        }
+                    }, {
+                        id: 'btnDialogCancel',
+                        label: '@Localizer["Cancel"]',
+                        action: function (dialogRef) {
+                            dialogRef.close();
+                        }
+                    }]
+                });
+                dialog.open();
+            }
+        </script>
+    }
+}

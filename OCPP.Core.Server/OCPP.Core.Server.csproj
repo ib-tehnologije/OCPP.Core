@@ -1,0 +1,57 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Version>1.6.0</Version>
+    <Company>dallmann consulting GmbH</Company>
+    <Product>OCPP.Core</Product>
+    <Authors>Ulrich Dallmann</Authors>
+    <UserSecretsId>7dbe7593-03ad-445f-a179-41649d06f32e</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="logs\**" />
+    <Compile Remove="Messages_OCPP21\offen\**" />
+    <Content Remove="logs\**" />
+    <Content Remove="Messages_OCPP21\offen\**" />
+    <EmbeddedResource Remove="logs\**" />
+    <EmbeddedResource Remove="Messages_OCPP21\offen\**" />
+    <None Remove="logs\**" />
+    <None Remove="Messages_OCPP21\offen\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="localhost.pfx" Condition="Exists('localhost.pfx')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.16.0" />
+    <PackageReference Include="Hangfire" Version="1.8.17" />
+    <PackageReference Include="Hangfire.SqlServer" Version="1.8.17" />
+    <PackageReference Include="Karambolo.Extensions.Logging.File" Version="3.6.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.17">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Newtonsoft.Json.Schema" Version="3.0.16" />
+    <PackageReference Include="Sentry.AspNetCore" Version="6.2.0" />
+    <PackageReference Include="System.Formats.Asn1" Version="9.0.9" />
+    <PackageReference Include="Stripe.net" Version="50.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OCPP.Core.Database\OCPP.Core.Database.csproj" />
+    <ProjectReference Include="..\OCPP.Core.Server.Extensions\OCPP.Core.Server.Extensions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Extensions\" />
+    <Folder Include="Schema20\" />
+    <Folder Include="Schema16\" />
+  </ItemGroup>
+
+
+</Project>

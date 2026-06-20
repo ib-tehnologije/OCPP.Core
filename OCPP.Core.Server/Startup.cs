@@ -1,0 +1,194 @@
+/*
+ * OCPP.Core - https://github.com/dallmann-consulting/OCPP.Core
+ * Copyright (C) 2020-2021 dallmann consulting GmbH.
+ * All Rights Reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Hangfire;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
+using OCPP.Core.Database;
+using OCPP.Core.Server.Extensions.Hangfire;
+using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Invoices;
+using OCPP.Core.Server.Payments.Invoices.ERacuni;
+
+namespace OCPP.Core.Server
+{
+    public class Startup
+    {
+        /// <summary>
+        /// ILogger object
+        /// </summary>
+        private ILoggerFactory LoggerFactory { get; set; }
+
+        private bool HasSqlServerHangfireStorage =>
+            !string.IsNullOrWhiteSpace(Configuration.GetConnectionString("SqlServer"));
+
+        public Startup(IConfiguration configuration)
+        {
+            if (!configuration.GetSection("ConnectionStrings").Exists())
+            {
+                // Running the exe (Kestrel) hasn't loaded the config at this point!?
+                // => Workaround: use the created configuration from main()
+                configuration = Program._configuration;
+            }            
+
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        // This method gets called by the runtime. Use this method to add services to the container.
+        public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddOCPPDbContext(Configuration);
+            services.AddControllers();
+            services.AddHttpClient();
+            services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
+            services.Configure<Payments.PaymentFlowOptions>(Configuration.GetSection("Payments"));
+            services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
+            services.Configure<InvoiceIntegrationOptions>(Configuration.GetSection("Invoices"));
+            if (HasSqlServerHangfireStorage)
+            {
+                services.AddHangfire((serviceProvider, config) =>
+                {
+                    var cs = Configuration.GetConnectionString("SqlServer");
+                    config.UseSimpleAssemblyNameTypeSerializer()
+                          .UseRecommendedSerializerSettings()
+                          .UseSqlServerStorage(cs);
+                });
+                var hangfireQueue = Configuration.GetValue<string>("Hangfire:Queue") ?? "payments";
+                services.AddHangfireServer(options =>
+                {
+                    options.Queues = new[] { hangfireQueue };
+                });
+            }
+            services.AddSingleton<Payments.StartChargingMediator>();
+            services.AddSingleton<Payments.ReservationLinkService>();
+            services.AddSingleton<Payments.IEmailNotificationService, Payments.EmailNotificationService>();
+            services.AddSingleton<IInvoiceDraftBuilder, InvoiceDraftBuilder>();
+            services.AddSingleton<IERacuniInvoiceRequestFactory, ERacuniInvoiceRequestFactory>();
+            services.AddSingleton<IERacuniApiClient, ERacuniApiClient>();
+            services.AddSingleton<Payments.Invoices.IInvoiceIntegrationService, Payments.Invoices.InvoiceIntegrationService>();
+            services.AddTransient<Payments.PaymentAuthorizationEmailJob>();
+            services.AddTransient<IPaymentAuthorizationEmailJob, Payments.PaymentAuthorizationEmailJob>();
+            bool useMockStripeServices = Configuration.GetValue<bool>("Stripe:UseMockServices");
+            if (useMockStripeServices)
+            {
+                services.AddSingleton<Payments.MockStripeStore>();
+            }
+            services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
+                sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
+                sp.GetRequiredService<IOptions<Payments.PaymentFlowOptions>>(),
+                sp.GetRequiredService<ILogger<StripePaymentCoordinator>>(),
+                useMockStripeServices
+                    ? new Payments.MockStripeSessionService(
+                        sp.GetRequiredService<Payments.MockStripeStore>(),
+                        sp.GetRequiredService<IConfiguration>())
+                    : new Payments.StripeSessionServiceWrapper(),
+                useMockStripeServices
+                    ? new Payments.MockStripePaymentIntentService(sp.GetRequiredService<Payments.MockStripeStore>())
+                    : new Payments.StripePaymentIntentServiceWrapper(),
+                new Payments.StripeEventFactoryWrapper(),
+                () => DateTime.UtcNow,
+                sp.GetService<Payments.IEmailNotificationService>(),
+                sp.GetRequiredService<Payments.StartChargingMediator>(),
+                sp.GetService<IBackgroundJobClient>(),
+                sp.GetService<Payments.Invoices.IInvoiceIntegrationService>(),
+                sp.GetRequiredService<IConfiguration>()));
+            services.AddHostedService<Payments.PaymentReservationCleanupService>();
+            services.AddHostedService<Payments.IdleFeeWarningEmailService>();
+        }
+
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        //public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        public void Configure(IApplicationBuilder app,
+                            IWebHostEnvironment env,
+                            ILoggerFactory loggerFactory,
+                            IServiceScopeFactory serviceScopeFactory)
+        {
+            LoggerFactory = loggerFactory;
+            ILogger logger = loggerFactory.CreateLogger(typeof(Startup));
+            logger.LogTrace("Startup => Configure(...)");
+
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+
+            // Migrate database
+            using var scope = serviceScopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+            // but only when not disabled (needs admin permissions in SQL-Server!)
+            bool dbMigrate = Configuration.GetValue<bool>("AutoMigrateDB", true);
+            if (dbMigrate)
+            {
+                var providerName = dbContext.Database.ProviderName ?? string.Empty;
+                if (providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Existing migrations are SQL Server-oriented; for local SQLite runs create schema directly from model.
+                    dbContext.Database.EnsureCreated();
+                }
+                else
+                {
+                    dbContext.Database.Migrate();
+                }
+            }
+
+            // Startup maintenance: clear stale reservations and stuck connector statuses.
+            StartupMaintenance.Run(dbContext, logger, Configuration);
+
+            // Set WebSocketsOptions
+            var webSocketOptions = new WebSocketOptions() 
+            {
+            };
+
+            // Accept WebSocket
+            app.UseWebSockets(webSocketOptions);
+
+            var enableDashboard = Configuration.GetValue<bool>("Hangfire:EnableDashboard");
+            if (enableDashboard && HasSqlServerHangfireStorage)
+            {
+                var dashboardPath = Configuration.GetValue<string>("Hangfire:DashboardPath") ?? "/hangfire";
+                app.UseHangfireDashboard(dashboardPath, new DashboardOptions
+                {
+                    Authorization = new[] { new HangfireDashboardAuthorization() }
+                });
+            }
+
+            // Integrate custom OCPP middleware for message processing
+            app.UseOCPPMiddleware();
+        }
+    }
+}

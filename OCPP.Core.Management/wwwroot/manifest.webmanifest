@@ -1,0 +1,30 @@
+{
+  "name": "Charging Portal",
+  "short_name": "Charging",
+  "description": "Public charger map, connector selection, and charging session status.",
+  "start_url": "/Public/Map",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f8fb",
+  "theme_color": "#047857",
+  "icons": [
+    {
+      "src": "/img/public-portal-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/img/public-portal-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/img/public-portal-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
