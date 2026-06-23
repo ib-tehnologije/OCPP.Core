@@ -180,11 +180,104 @@
             let activeQuery = '';
             let mapViewportReady = false;
             let selectedChargePointId = null;
+            const mapFallbackTranslations = {
+                hr: {
+                    "map.availableCount": "{available}/{total} dostupno",
+                    "map.noUsableCoordinates": "Nisu pronađene upotrebljive koordinate za oznake na karti.",
+                    "map.unnamedStation": "(Neimenovana postaja)",
+                    "map.expand": "Proširi",
+                    "map.shrink": "Smanji",
+                    "map.offline": "Nedostupno"
+                },
+                en: {
+                    "map.availableCount": "{available}/{total} available",
+                    "map.noUsableCoordinates": "No usable coordinates were found for map markers.",
+                    "map.unnamedStation": "(Unnamed station)",
+                    "map.expand": "Expand",
+                    "map.shrink": "Shrink",
+                    "map.offline": "Offline"
+                },
+                sl: {
+                    "map.availableCount": "{available}/{total} na voljo",
+                    "map.noUsableCoordinates": "Za oznake na zemljevidu ni bilo najdenih uporabnih koordinat.",
+                    "map.unnamedStation": "(Neimenovana postaja)",
+                    "map.expand": "Razširi",
+                    "map.shrink": "Zmanjšaj",
+                    "map.offline": "Nedosegljivo"
+                },
+                it: {
+                    "map.availableCount": "{available}/{total} disponibili",
+                    "map.noUsableCoordinates": "Non sono state trovate coordinate utilizzabili per i marker della mappa.",
+                    "map.unnamedStation": "(Stazione senza nome)",
+                    "map.expand": "Espandi",
+                    "map.shrink": "Riduci",
+                    "map.offline": "Offline"
+                },
+                de: {
+                    "map.availableCount": "{available}/{total} verfügbar",
+                    "map.noUsableCoordinates": "Es wurden keine nutzbaren Koordinaten für Kartenmarker gefunden.",
+                    "map.unnamedStation": "(Unbenannte Station)",
+                    "map.expand": "Vergrößern",
+                    "map.shrink": "Verkleinern",
+                    "map.offline": "Offline"
+                },
+                fr: {
+                    "map.availableCount": "{available}/{total} disponibles",
+                    "map.noUsableCoordinates": "Aucune coordonnée utilisable n'a été trouvée pour les marqueurs de carte.",
+                    "map.unnamedStation": "(Station sans nom)",
+                    "map.expand": "Agrandir",
+                    "map.shrink": "Réduire",
+                    "map.offline": "Hors ligne"
+                }
+            };
             const i18n = () => window.publicPortalI18n;
-            const currentLang = () => i18n()?.currentLanguage?.() || document.documentElement.lang || 'en';
-            const t = (key) => i18n()?.textFor?.(currentLang(), key) || key;
-            const formatText = (key, values) => i18n()?.formatTextFor?.(currentLang(), key, values) || key;
-            const statusText = (value) => i18n()?.statusTextFor?.(currentLang(), value) || value;
+            const currentLang = () => {
+                const activeI18n = i18n();
+                if (activeI18n && typeof activeI18n.currentLanguage === 'function') {
+                    return activeI18n.currentLanguage();
+                }
+
+                const params = new URLSearchParams(window.location.search);
+                const fromQuery = params.get('lang');
+                if (mapFallbackTranslations[fromQuery]) {
+                    return fromQuery;
+                }
+
+                const stored = localStorage.getItem('publicPortalLang');
+                return mapFallbackTranslations[stored] ? stored : 'en';
+            };
+            const t = (key) => {
+                const lang = currentLang();
+                return i18n()?.textFor?.(lang, key)
+                    || mapFallbackTranslations[lang]?.[key]
+                    || mapFallbackTranslations.en[key]
+                    || key;
+            };
+            const formatText = (key, values) => {
+                const lang = currentLang();
+                const formatter = i18n()?.formatTextFor;
+                let text = typeof formatter === 'function'
+                    ? formatter(lang, key, values)
+                    : t(key);
+                Object.entries(values || {}).forEach(([name, value]) => {
+                    text = text.replaceAll(`{${name}}`, value);
+                });
+                return text;
+            };
+            const statusText = (value) => {
+                const lang = currentLang();
+                const translated = i18n()?.statusTextFor?.(lang, value);
+                if (translated) {
+                    return translated;
+                }
+
+                const normalized = String(value || '').trim().toLowerCase();
+                if (normalized === 'offline') {
+                    return t('map.offline');
+                }
+
+                return value;
+            };
 
             const pick = (obj, primary, secondary) => {
                 if (obj[primary] !== undefined && obj[primary] !== null) return obj[primary];
