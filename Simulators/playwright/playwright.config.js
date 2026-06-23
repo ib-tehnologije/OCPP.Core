@@ -6,6 +6,7 @@ const channel = process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || undefined;
 export default defineConfig({
   testDir: "./tests",
   testMatch: [
+    "public-start-localization.spec.js",
     "public-status-lifecycle.spec.js",
     "public-status-ui.spec.js",
     "public-urgent-validation.spec.js",

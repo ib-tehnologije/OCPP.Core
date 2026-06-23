@@ -97,7 +97,10 @@ Known behavior:
 - Public payment redirect/status flow.
 - Public stop request path.
 - R1/company invoice data submission with OIB validation.
+- Public map, start, payment result, and status pages support the language selector for visible step, connector, pricing, session-status, known validation/error, and recovery-copy text.
 - Configurable branding, SEO, QR scanner, light theme, support, and footer settings.
+- The checked PWA manifest and favicon assets use the public `EV.Charge` app name and icon.
+- Customer notification emails use bilingual Croatian/English templates and are not currently tied to the public portal language selector.
 
 Important edge cases:
 

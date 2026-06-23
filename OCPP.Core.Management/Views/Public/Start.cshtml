@@ -8,11 +8,13 @@
     var chargePointLabel = string.IsNullOrWhiteSpace(Model.ChargePointName)
         ? Model.ChargePointId
         : Model.ChargePointName;
+    var connectorFallbackLabel = $"Connector {Model.ConnectorId}";
     var connectorLabel = string.IsNullOrWhiteSpace(Model.ConnectorName)
         ? (!string.IsNullOrWhiteSpace(Model.PublicConnectorShortCode)
             ? Model.PublicConnectorShortCode
-            : $"Connector {Model.ConnectorId}")
+            : connectorFallbackLabel)
         : Model.ConnectorName;
+    var connectorLabelIsGeneric = string.Equals(connectorLabel, connectorFallbackLabel, StringComparison.OrdinalIgnoreCase);
     var selectedConnectorCode = string.IsNullOrWhiteSpace(Model.PublicConnectorCode)
         ? connectorLabel
         : Model.PublicConnectorCode;
@@ -54,11 +56,11 @@
 }
 
     <nav class="public-session-nav" aria-label="Charging session states">
-        <button type="button" class="active" disabled>① Start</button>
-        <button type="button" disabled>② Wait</button>
-        <button type="button" disabled>③ Charge</button>
-        <button type="button" disabled>④ Done</button>
-        <button type="button" disabled>⑤ Error</button>
+        <button type="button" class="active" disabled data-i18n="start.step.start">① Start</button>
+        <button type="button" disabled data-i18n="start.step.wait">② Wait</button>
+        <button type="button" disabled data-i18n="start.step.charge">③ Charge</button>
+        <button type="button" disabled data-i18n="start.step.done">④ Done</button>
+        <button type="button" disabled data-i18n="start.step.error">⑤ Error</button>
     </nav>
 
     <div class="page-wrap">
@@ -66,14 +68,21 @@
             <div class="status-header">
                 <div class="status-badge @badgeClass">
                     <span class="dot"></span>
-                    <span id="connector-status-text">@statusLabel</span>
+                    <span id="connector-status-text" data-i18n-status="@statusLabel">@statusLabel</span>
                 </div>
                 <h1 class="charger-title">@chargePointLabel</h1>
                 @if (!string.IsNullOrWhiteSpace(Model.LocationDescription))
                 {
                     <p class="charger-sub charger-sub--location" id="charger-location">@Model.LocationDescription</p>
                 }
-                <p class="charger-sub" id="charger-sub">@connectorLabel</p>
+                @if (connectorLabelIsGeneric)
+                {
+                    <p class="charger-sub" id="charger-sub" data-i18n-template="status.connectorFallback" data-i18n-param-id="@Model.ConnectorId">@connectorLabel</p>
+                }
+                else
+                {
+                    <p class="charger-sub" id="charger-sub">@connectorLabel</p>
+                }
                 <div class="public-code-row">
                     @if (!string.IsNullOrWhiteSpace(Model.PublicDisplayCode))
                     {
@@ -100,6 +109,8 @@
                                 ? connector.PublicConnectorShortCode
                                 : null;
                             var connectorStatusLabel = string.IsNullOrWhiteSpace(connector.LastStatus) ? "Offline" : connector.LastStatus;
+                            var connectorFallbackPrimaryLabel = $"Connector {connector.ConnectorId}";
+                            var connectorPrimaryLabelIsGeneric = string.Equals(connectorPrimaryLabel, connectorFallbackPrimaryLabel, StringComparison.OrdinalIgnoreCase);
                             if (isFree && string.Equals(connectorStatusLabel, "Available", StringComparison.OrdinalIgnoreCase))
                             {
                                 connectorStatusLabel = "Free charging";
@@ -117,7 +128,14 @@
                                aria-current="@(connector.IsSelected ? "page" : null)">
                                 <div class="connector-option-top">
                                     <div>
-                                        <div class="connector-option-label">@connectorPrimaryLabel</div>
+                                        @if (connectorPrimaryLabelIsGeneric)
+                                        {
+                                            <div class="connector-option-label" data-i18n-template="status.connectorFallback" data-i18n-param-id="@connector.ConnectorId">@connectorPrimaryLabel</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="connector-option-label">@connectorPrimaryLabel</div>
+                                        }
                                         @if (!string.IsNullOrWhiteSpace(connectorSecondaryLabel))
                                         {
                                             <div class="connector-option-sub">@connectorSecondaryLabel</div>
@@ -125,7 +143,7 @@
                                     </div>
                                     <div class="status-badge @connectorBadgeClass">
                                         <span class="dot"></span>
-                                        <span>@connectorStatusLabel</span>
+                                        <span data-i18n-status="@connectorStatusLabel">@connectorStatusLabel</span>
                                     </div>
                                 </div>
                                 @if (!string.IsNullOrWhiteSpace(connector.PublicConnectorCode))
@@ -133,7 +151,11 @@
                                     <div class="connector-option-code">@connector.PublicConnectorCode</div>
                                 }
                                 <div class="connector-option-meta">
-                                    <span data-default-text="Tap to switch" data-selected-text="Selected connector">
+                                    <span data-i18n-option-state="@(connector.IsSelected ? "selected" : "default")"
+                                          data-i18n-default-text="start.tapToSwitch"
+                                          data-i18n-selected-text="start.connectorSelected"
+                                          data-default-text="Tap to switch"
+                                          data-selected-text="Selected connector">
                                         @(connector.IsSelected ? "Selected connector" : "Tap to switch")
                                     </span>
                                 </div>
@@ -149,7 +171,7 @@
                 <div class="info-section-title" data-i18n="start.prices">Prices & fees</div>
                 <div class="info-row">
                     <div class="tile featured">
-                        <div class="label">Energy</div>
+                        <div class="label" data-i18n="start.energy">Energy</div>
                         <div class="value">
                             @if (Model.PricePerKwh > 0)
                             {
@@ -157,12 +179,12 @@
                             }
                             else
                             {
-                                <span class="highlight">Free</span><span class="unit">energy</span>
+                                <span class="highlight" data-i18n="start.free">Free</span><span class="unit" data-i18n="start.energyUnit">energy</span>
                             }
                         </div>
                     </div>
                     <div class="tile">
-                        <div class="label">Session fee</div>
+                        <div class="label" data-i18n="start.sessionFee">Session fee</div>
                         <div class="value">
                             @if (Model.UserSessionFee > 0)
                             {
@@ -178,7 +200,7 @@
 
                 <div class="info-row">
                     <div class="tile full tile--warning">
-                        <div class="label label--warning">⏱ Idle fee</div>
+                        <div class="label label--warning"><span aria-hidden="true">⏱</span> <span data-i18n="start.idleFee">Idle fee</span></div>
                         <div class="value">
                             @if (Model.ConnectorUsageFeePerMinute > 0)
                             {
@@ -192,7 +214,16 @@
                         @if (Model.ConnectorUsageFeePerMinute > 0)
                         {
                             <div class="sub sub--warning">
-                                @(Model.UsageFeeAfterChargingEnds ? "Charged after charging ends" : "Charged from session start") · grace @Model.StartUsageFeeAfterMinutes min · max @Model.MaxUsageFeeBillableMinutes min
+                                @if (Model.UsageFeeAfterChargingEnds)
+                                {
+                                    <span data-i18n="start.chargedAfterChargingEnds">Charged after charging ends</span>
+                                }
+                                else
+                                {
+                                    <span data-i18n="start.chargedFromSessionStart">Charged from session start</span>
+                                }
+                                <span aria-hidden="true"> · </span><span data-i18n="start.grace">grace</span> @Model.StartUsageFeeAfterMinutes min
+                                <span aria-hidden="true"> · </span><span data-i18n="start.max">max</span> @Model.MaxUsageFeeBillableMinutes min
                                 @if (Model.HasIdleFeeExcludedWindow)
                                 {
                                     <span> · <span data-i18n="start.idleFreeWindow">free</span> @Model.IdleFeeExcludedWindow</span>
@@ -204,7 +235,7 @@
 
                 <div class="info-row">
                     <div class="tile">
-                        <div class="label">Max. energy</div>
+                        <div class="label" data-i18n="start.maxEnergy">Max. energy</div>
                         <div class="value">
                             @if (Model.MaxSessionKwh > 0)
                             {
@@ -217,7 +248,7 @@
                         </div>
                     </div>
                     <div class="tile">
-                        <div class="label">Pre-authorization (est.)</div>
+                        <div class="label" data-i18n="start.preAuthorization">Pre-authorization (est.)</div>
                         <div class="value">
                             @if (Model.EstimatedMaxHold > 0)
                             {
@@ -233,7 +264,7 @@
 
                 <div class="info-row">
                     <div class="tile full tile--note">
-                        <div class="sub sub--flush">💡 Final amount = energy + session fee + idle fee (if any). Difference from pre-auth is refunded automatically.</div>
+                        <div class="sub sub--flush"><span aria-hidden="true">💡</span> <span data-i18n="start.finalAmountNote">Final amount = energy + session fee + idle fee (if any). Difference from pre-auth is refunded automatically.</span></div>
                     </div>
                 </div>
             </div>
@@ -244,7 +275,7 @@
             {
                 <div class="alert-box warning alert-box--section" id="availability-message" @(!Model.HasAvailabilityMessage ? "hidden" : null)>
                     <span class="alert-icon">⏳</span>
-                    <span data-availability-text>@Model.AvailabilityMessage</span>
+                    <span data-availability-text data-i18n-message="@Model.AvailabilityMessage">@Model.AvailabilityMessage</span>
                 </div>
             }
 
@@ -253,15 +284,15 @@
                 <div class="form-section">
                     <div class="alert-box warning alert-box--stack">
                         <span class="alert-icon">⏳</span>
-                        <span>@Model.RecoveryMessage</span>
+                        <span data-i18n-message="@Model.RecoveryMessage">@Model.RecoveryMessage</span>
                     </div>
 
-                    <div class="field-help field-help--spaced">Reservation <span class="mono">@Model.RecoveryReservationId</span> · status @Model.RecoveryReservationStatus</div>
+                    <div class="field-help field-help--spaced"><span data-i18n="start.recoveryReservation">Reservation</span> <span class="mono">@Model.RecoveryReservationId</span> · <span data-i18n="start.recoveryStatus">status</span> @Model.RecoveryReservationStatus</div>
 
                     @if (Model.CanResumeRecovery)
                     {
                         <a class="btn-primary" href="@Model.RecoveryCheckoutUrl">
-                            <span>Resume payment</span>
+                            <span data-i18n="start.resumePayment">Resume payment</span>
                             <span class="arrow" aria-hidden="true">→</span>
                         </a>
                     }
@@ -271,10 +302,10 @@
                         <input type="hidden" name="chargePointId" value="@Model.ChargePointId" />
                         <input type="hidden" name="connectorId" value="@Model.ConnectorId" />
                         <input type="hidden" name="reservationId" value="@Model.RecoveryReservationId" />
-                        <button type="submit" class="btn-secondary">Cancel previous attempt</button>
+                        <button type="submit" class="btn-secondary" data-i18n="start.cancelPreviousAttempt">Cancel previous attempt</button>
                     </form>
 
-                    <a class="btn-secondary stack-gap-sm" href="@mapUrl">Back to map</a>
+                    <a class="btn-secondary stack-gap-sm" href="@mapUrl" data-i18n="start.backToMap">Back to map</a>
                 </div>
             }
             else
@@ -289,7 +320,7 @@
                             <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
                             <div class="r1-label">
                                 <strong data-i18n="start.companyInvoice">Company invoice</strong>
-                                <span class="r1-hint">If you need an R1 invoice, enter your company info below or add it later from the session status page.</span>
+                                <span class="r1-hint" data-i18n="start.r1Hint">If you need an R1 invoice, enter your company info below or add it later from the session status page.</span>
                             </div>
                         </label>
 
@@ -299,7 +330,7 @@
 
                             <label for="buyerOib" class="field-label field-label--spaced" data-i18n="start.oib">OIB (required for R1)</label>
                             <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" data-i18n-placeholder="start.oibPlaceholder" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
-                            <div class="field-help">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
+                            <div class="field-help" data-i18n="start.r1MetadataHint">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
                         </div>
 
                         <button type="submit" class="btn-primary">
@@ -357,6 +388,7 @@
 
                             const meta = option.querySelector('.connector-option-meta span');
                             if (meta) {
+                                meta.dataset.i18nOptionState = option === activeOption ? 'selected' : 'default';
                                 meta.textContent = option === activeOption
                                     ? (meta.dataset.selectedText || meta.textContent)
                                     : (meta.dataset.defaultText || meta.textContent);
@@ -386,16 +418,45 @@
                         const connectorId = option.dataset.connectorId || '';
                         const statusText = option.dataset.lastStatus || 'Offline';
                         const badgeClass = option.dataset.badgeClass || 'waiting';
-                        const displayLabel = option.dataset.connectorLabel || option.dataset.connectorName || `Connector ${connectorId}`;
+                        const portalI18n = window.publicPortalI18n;
+                        const activeLanguage = portalI18n && typeof portalI18n.currentLanguage === 'function'
+                            ? portalI18n.currentLanguage()
+                            : (document.documentElement.lang || 'en');
+                        const rawDisplayLabel = option.dataset.connectorLabel || option.dataset.connectorName || `Connector ${connectorId}`;
+                        const genericConnectorLabel = connectorId ? `Connector ${connectorId}` : '';
+                        const usesGenericConnectorLabel = !!genericConnectorLabel && rawDisplayLabel.toLowerCase() === genericConnectorLabel.toLowerCase();
+                        const displayLabel = usesGenericConnectorLabel && portalI18n && typeof portalI18n.formatTextFor === 'function'
+                            ? portalI18n.formatTextFor(activeLanguage, 'status.connectorFallback', { id: connectorId })
+                            : rawDisplayLabel;
                         const publicCode = option.dataset.publicCode || displayLabel;
                         const availabilityMessage = option.dataset.availabilityMessage || '';
 
                         connectorInput.value = connectorId;
                         badge.className = `status-badge ${badgeClass}`;
-                        badgeText.textContent = statusText;
+                        badgeText.setAttribute('data-i18n-status', statusText);
+                        badgeText.textContent = portalI18n && typeof portalI18n.statusTextFor === 'function'
+                            ? portalI18n.statusTextFor(activeLanguage, statusText)
+                            : statusText;
                         connectorName.textContent = displayLabel;
+                        if (usesGenericConnectorLabel) {
+                            connectorName.setAttribute('data-i18n-template', 'status.connectorFallback');
+                            connectorName.setAttribute('data-i18n-param-id', connectorId);
+                        } else {
+                            connectorName.removeAttribute('data-i18n-template');
+                            connectorName.removeAttribute('data-i18n-param-id');
+                        }
                         connectorCode.textContent = publicCode;
-                        updateAvailability(availabilityMessage);
+                        const translatedAvailability = portalI18n && typeof portalI18n.messageTextFor === 'function'
+                            ? portalI18n.messageTextFor(activeLanguage, availabilityMessage)
+                            : availabilityMessage;
+                        if (availabilityText) {
+                            if (availabilityMessage) {
+                                availabilityText.setAttribute('data-i18n-message', availabilityMessage);
+                            } else {
+                                availabilityText.removeAttribute('data-i18n-message');
+                            }
+                        }
+                        updateAvailability(translatedAvailability);
                         syncMeta(option);
 
                         const nextUrl = option.getAttribute('href');
@@ -421,7 +482,7 @@
             {
                 <div class="alert-box danger alert-box--flush">
                     <span class="alert-icon">⚠️</span>
-                    <span>@Model.ErrorMessage</span>
+                    <span data-i18n-message="@Model.ErrorMessage">@Model.ErrorMessage</span>
                 </div>
             }
             else if (Model.HasRecoveryOptions)

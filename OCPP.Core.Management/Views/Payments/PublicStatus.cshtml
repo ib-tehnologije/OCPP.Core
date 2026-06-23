@@ -397,6 +397,7 @@
         const i18n = () => window.publicPortalI18n;
         const currentLang = () => i18n()?.currentLanguage?.() || "en";
         const t = (key) => i18n()?.textFor?.(currentLang(), key) || key;
+        const translateMessage = (value) => i18n()?.messageTextFor?.(currentLang(), value) || value;
         const fillTemplate = (key, values) => {
             let text = t(key);
             Object.entries(values || {}).forEach(([name, value]) => {
@@ -413,6 +414,9 @@
             if (normalized === "charging") return t("status.badge.charging");
             if (normalized === "available") return t("map.available");
             if (normalized === "occupied") return t("map.busy");
+            if (normalized === "offline") return t("map.offline");
+            if (normalized === "unavailable") return t("start.status.unavailable");
+            if (normalized === "faulted") return t("start.status.faulted");
             return value;
         };
 
@@ -420,9 +424,12 @@
             const connectorName = String(data?.connectorName || "").trim();
             const shortCode = String(data?.publicConnectorShortCode || "").trim();
             const connectorId = data?.connectorId != null ? String(data.connectorId).trim() : "";
-            const genericConnectorLabel = connectorId ? `Connector ${connectorId}` : "";
+            const englishGenericConnectorLabel = connectorId ? `Connector ${connectorId}` : "";
+            const genericConnectorLabel = connectorId ? fillTemplate("status.connectorFallback", { id: connectorId }) : "";
 
-            if (connectorName && connectorName.toLowerCase() !== genericConnectorLabel.toLowerCase()) {
+            if (connectorName &&
+                connectorName.toLowerCase() !== englishGenericConnectorLabel.toLowerCase() &&
+                connectorName.toLowerCase() !== genericConnectorLabel.toLowerCase()) {
                 return connectorName;
             }
 
@@ -707,7 +714,10 @@
                 waitStatus.textContent = t("status.wait.starting");
                 if (waitHint) waitHint.textContent = t("status.hint.starting");
             } else if (data?.startable === false && hasValue(data?.startableReason)) {
-                waitStatus.textContent = data.startableReason;
+                const translatedReason = translateMessage(data.startableReason);
+                waitStatus.textContent = translatedReason === data.startableReason
+                    ? t("status.hint.notReady")
+                    : translatedReason;
                 if (waitHint) waitHint.textContent = t("status.hint.notReady");
             } else {
                 waitStatus.textContent = t("status.badge.waiting");
@@ -810,9 +820,9 @@
             errorPaymentStatus.textContent = data?.status || "-";
             errorLastStatus.textContent = data?.liveOcppStatus || data?.liveStatus || data?.persistedStatus || "-";
             if (hasValue(data?.failureMessage)) {
-                errorDesc.textContent = data.failureMessage;
+                errorDesc.textContent = translateMessage(data.failureMessage);
             } else if (hasValue(data?.lastError)) {
-                errorDesc.textContent = data.lastError;
+                errorDesc.textContent = translateMessage(data.lastError);
             } else {
                 errorDesc.textContent = t("status.hint.errorDefault");
             }
@@ -871,12 +881,12 @@
                 }
 
                 if (!res.ok || !data?.success) {
-                    setR1Result(data?.message || t("status.r1.failed"), true);
+                    setR1Result(data?.status === "InvalidOib" ? t("status.r1.invalidOib") : t("status.r1.failed"), true);
                     return;
                 }
 
                 r1Oib.value = normalizedOib;
-                setR1Result(data?.message || t("status.r1.saved"), false);
+                setR1Result(t("status.r1.saved"), false);
             } catch (err) {
                 setR1Result(t("status.r1.failed"), true);
             } finally {

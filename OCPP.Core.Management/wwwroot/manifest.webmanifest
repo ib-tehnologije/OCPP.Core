@@ -1,7 +1,7 @@
 {
-  "name": "Charging Portal",
-  "short_name": "Charging",
-  "description": "Public charger map, connector selection, and charging session status.",
+  "name": "EV.Charge",
+  "short_name": "EV.Charge",
+  "description": "EV.Charge public charger map, connector selection, and charging session status.",
   "start_url": "/Public/Map",
   "scope": "/",
   "display": "standalone",
@@ -19,12 +19,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
-    },
-    {
-      "src": "/img/public-portal-icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
     }
   ]
 }

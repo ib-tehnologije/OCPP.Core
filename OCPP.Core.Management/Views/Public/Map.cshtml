@@ -22,10 +22,10 @@
                     @if (hasCoords)
                     {
                         <div class="map-stage">
-                            <button id="gpsBtn" type="button" title="Center on your location" class="map-control-btn map-control-btn--gps">
+                            <button id="gpsBtn" type="button" title="Center on your location" data-i18n-title="map.centerOnLocation" class="map-control-btn map-control-btn--gps">
                                 <span data-i18n="map.gps">GPS</span>
                             </button>
-                            <button id="mapExpandBtn" type="button" title="Expand map" class="map-control-btn map-control-btn--expand">
+                            <button id="mapExpandBtn" type="button" title="Expand map" data-i18n-title="map.expandTitle" class="map-control-btn map-control-btn--expand">
                                 <span data-i18n="map.expand">Expand</span>
                             </button>
                             <div id="map"></div>
@@ -50,7 +50,7 @@
                     <div class="map-search">
                         <span class="map-search-icon">🔍</span>
                         <input type="text" id="mapSearch" placeholder="Search by name, location, or charge point id..." data-i18n-placeholder="map.search" autocomplete="off" />
-                        <button type="button" class="map-search-clear" id="mapSearchClear" aria-label="Clear search">&times;</button>
+                        <button type="button" class="map-search-clear" id="mapSearchClear" aria-label="Clear search" data-i18n-aria-label="map.clearSearch">&times;</button>
                     </div>
                 </div>
 
@@ -95,7 +95,7 @@
                             <div class="charger-card cp-card" data-search="@searchText" data-cp-id="@cp.ChargePointId">
                                 <div class="cc-top">
                                     <div class="cc-name">@cp.Name</div>
-                                    <div class="cc-status @statusClass">@cp.Status</div>
+                                    <div class="cc-status @statusClass" data-i18n-status="@cp.Status">@cp.Status</div>
                                 </div>
                                 <div class="cc-code">@publicStationCode</div>
                                 <div class="cc-detail">@cp.LocationDescription</div>
@@ -163,6 +163,7 @@
             const clearSearch = document.getElementById('mapSearchClear');
             const gpsBtn = document.getElementById('gpsBtn');
             const mapExpandBtn = document.getElementById('mapExpandBtn');
+            const mapExpandLabel = mapExpandBtn ? mapExpandBtn.querySelector('[data-i18n]') : null;
             const chargerCountValue = document.querySelector('.charger-count span:first-child');
             const emptyStateEl = document.getElementById('charger-list-empty');
             const publicStyles = getComputedStyle(document.documentElement);
@@ -179,6 +180,11 @@
             let activeQuery = '';
             let mapViewportReady = false;
             let selectedChargePointId = null;
+            const i18n = () => window.publicPortalI18n;
+            const currentLang = () => i18n()?.currentLanguage?.() || document.documentElement.lang || 'en';
+            const t = (key) => i18n()?.textFor?.(currentLang(), key) || key;
+            const formatText = (key, values) => i18n()?.formatTextFor?.(currentLang(), key, values) || key;
+            const statusText = (value) => i18n()?.statusTextFor?.(currentLang(), value) || value;
 
             const pick = (obj, primary, secondary) => {
                 if (obj[primary] !== undefined && obj[primary] !== null) return obj[primary];
@@ -210,7 +216,7 @@
                 map.setView([0, 0], 2);
                 const mapRoot = document.getElementById('map');
                 if (mapRoot) {
-                    mapRoot.insertAdjacentHTML('beforeend', '<div class="public-empty-state">No usable coordinates were found for map markers.</div>');
+                    mapRoot.insertAdjacentHTML('beforeend', `<div class="public-empty-state">${escapeHtml(t('map.noUsableCoordinates'))}</div>`);
                 }
             }
 
@@ -220,15 +226,15 @@
 
             hasLocation.forEach(p => {
                 const chargePointId = pick(p, 'ChargePointId', 'chargePointId');
-                const name = (pick(p, 'Name', 'name') || '').trim() || '(Unnamed station)';
+                const name = (pick(p, 'Name', 'name') || '').trim() || t('map.unnamedStation');
                 const status = (pick(p, 'Status', 'status') || '').toLowerCase();
                 const publicDisplayCode = (pick(p, 'PublicDisplayCode', 'publicDisplayCode') || '').trim();
                 const publicStationCode = publicDisplayCode || chargePointId;
                 const connectorCount = Number(pick(p, 'ConnectorCount', 'connectorCount')) || 0;
                 const availableConnectorCount = Number(pick(p, 'AvailableConnectorCount', 'availableConnectorCount')) || 0;
                 const availabilitySummary = status === 'offline'
-                    ? 'Offline'
-                    : `${availableConnectorCount}/${connectorCount} available`;
+                    ? statusText('Offline')
+                    : formatText('map.availableCount', { available: availableConnectorCount, total: connectorCount });
                 let color = markerColors.available;
                 if (status.includes('offline')) {
                     color = markerColors.offline;
@@ -528,7 +534,13 @@
                 if (!mapEl) return;
                 const expanded = mapEl.classList.toggle('expanded');
                 if (mapExpandBtn) {
-                    mapExpandBtn.textContent = expanded ? '🗺 Shrink' : '🗺 Expand';
+                    const labelKey = expanded ? 'map.shrink' : 'map.expand';
+                    if (mapExpandLabel) {
+                        mapExpandLabel.setAttribute('data-i18n', labelKey);
+                        mapExpandLabel.textContent = t(labelKey);
+                    } else {
+                        mapExpandBtn.textContent = t(labelKey);
+                    }
                 }
                 requestAnimationFrame(() => {
                     map.invalidateSize();

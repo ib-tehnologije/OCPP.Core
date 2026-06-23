@@ -2,6 +2,7 @@
 @{
     Layout = "_PublicPortalLayout";
     var heading = Model.Success ? "Payment authorized" : "Payment status";
+    var headingKey = Model.Success ? "result.paymentAuthorized" : "result.paymentStatus";
     var message = Model.Message ?? (Model.Success ? "Charging session will start shortly." : "Something went wrong.");
     var cta = "Start a new session";
     var returnUrl = string.IsNullOrWhiteSpace(Model.ReturnUrl) ? Url.Action("Start", "Public") : Model.ReturnUrl;
@@ -11,11 +12,11 @@
     var badgeClass = Model.Success ? "available status-badge--static" : "error";
 }
     <nav class="public-session-nav" aria-label="Charging session states">
-        <button type="button" class="active" disabled>① Start</button>
-        <button type="button" disabled>② Wait</button>
-        <button type="button" disabled>③ Charge</button>
-        <button type="button" disabled>④ Done</button>
-        <button type="button" disabled>⑤ Error</button>
+        <button type="button" class="active" disabled data-i18n="status.step.start">① Start</button>
+        <button type="button" disabled data-i18n="status.step.wait">② Wait</button>
+        <button type="button" disabled data-i18n="status.step.charge">③ Charge</button>
+        <button type="button" disabled data-i18n="status.step.done">④ Done</button>
+        <button type="button" disabled data-i18n="status.step.error">⑤ Error</button>
     </nav>
 
     <div class="page-wrap">
@@ -23,10 +24,10 @@
             <div class="status-header">
                 <div class="status-badge @badgeClass">
                     <span class="dot"></span>
-                    <span>@heading</span>
+                    <span data-i18n="@headingKey">@heading</span>
                 </div>
-                <h1 class="charger-title">@heading</h1>
-                <p class="charger-sub">@message</p>
+                <h1 class="charger-title" data-i18n="@headingKey">@heading</h1>
+                <p class="charger-sub" data-i18n-message="@message">@message</p>
             </div>
 
             <div class="divider"></div>
