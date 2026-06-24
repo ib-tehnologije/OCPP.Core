@@ -47,7 +47,11 @@ test("public result, status, and map views expose localization hooks for dynamic
   const mapView = fs.readFileSync(mapViewPath, "utf8");
   const publicResultView = fs.readFileSync(publicResultViewPath, "utf8");
   const publicStatusView = fs.readFileSync(publicStatusViewPath, "utf8");
+  const publicLayout = fs.readFileSync(publicLayoutPath, "utf8");
   const requiredSnippets = [
+    [publicLayout, "defaultPublicPortalTagline"],
+    [publicLayout, 'data-i18n="@(localizeDefaultTagline ? "brand.tagline" : null)"'],
+    [publicLayout, 'data-i18n="@(localizeDefaultFooterLegalLine ? "brand.tagline" : null)"'],
     [publicResultView, 'data-i18n="status.step.start"'],
     [publicResultView, 'data-i18n="@headingKey"'],
     [publicResultView, 'data-i18n-message="@message"'],
@@ -64,6 +68,30 @@ test("public result, status, and map views expose localization hooks for dynamic
   for (const [source, snippet] of requiredSnippets) {
     expect(source, `view should contain ${snippet}`).toContain(snippet);
   }
+});
+
+test("public portal translations localize default branding copy", async ({ page }) => {
+  const publicPortalScript = fs.readFileSync(publicPortalScriptPath, "utf8");
+
+  await page.route("http://public.local/Public/Start?lang=it", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: `<!doctype html>
+        <html lang="en">
+          <body>
+            <p id="tagline" data-i18n="brand.tagline">Use fast chargers with clear pricing and instant session start.</p>
+            <div id="footer-tagline" data-i18n="brand.tagline">Use fast chargers with clear pricing and instant session start.</div>
+            <script>${publicPortalScript}</script>
+          </body>
+        </html>`,
+    });
+  });
+
+  await page.goto("http://public.local/Public/Start?lang=it");
+
+  await expect(page.locator("#tagline")).toHaveText("Usa le colonnine rapide con prezzi chiari e avvio immediato della sessione.");
+  await expect(page.locator("#footer-tagline")).toHaveText("Usa le colonnine rapide con prezzi chiari e avvio immediato della sessione.");
 });
 
 test("public portal translations localize Italian start-flow labels", async ({ page }) => {

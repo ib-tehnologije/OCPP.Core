@@ -18,6 +18,9 @@
     var publicThemeHtmlClass = portal.LightThemeEnabled ? "public-theme-light" : "public-theme-dark";
     var publicThemeBodyClass = portal.LightThemeEnabled ? "theme-light" : "theme-dark";
     var publicThemeColor = portal.LightThemeEnabled ? "#047857" : "#080d1a";
+    const string defaultPublicPortalTagline = "Use fast chargers with clear pricing and instant session start.";
+    var localizeDefaultTagline = string.Equals(portal.Tagline, defaultPublicPortalTagline, StringComparison.Ordinal);
+    var localizeDefaultFooterLegalLine = string.Equals(portal.FooterLegalLine, defaultPublicPortalTagline, StringComparison.Ordinal);
 }
 <!DOCTYPE html>
 <html lang="en" class="@publicThemeHtmlClass">
@@ -81,7 +84,7 @@
                     <h1 class="public-brand-title">@portal.BrandName</h1>
                     @if (!string.IsNullOrWhiteSpace(portal.Tagline))
                     {
-                        <p class="public-brand-sub">@portal.Tagline</p>
+                        <p class="public-brand-sub" data-i18n="@(localizeDefaultTagline ? "brand.tagline" : null)">@portal.Tagline</p>
                     }
                 </div>
             </div>
@@ -146,7 +149,7 @@
             }
             @if (!string.IsNullOrWhiteSpace(portal.FooterLegalLine))
             {
-                <div class="company-footer-info">@portal.FooterLegalLine</div>
+                <div class="company-footer-info" data-i18n="@(localizeDefaultFooterLegalLine ? "brand.tagline" : null)">@portal.FooterLegalLine</div>
             }
             @if (!string.IsNullOrWhiteSpace(portal.SupportEmail) || !string.IsNullOrWhiteSpace(portal.SupportPhone))
             {
