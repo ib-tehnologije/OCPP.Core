@@ -17,8 +17,14 @@ namespace OCPP.Core.Server.Payments
                 EnableReservationProfile = fallback?.EnableReservationProfile ?? configuration?.GetValue<bool?>("Payments:EnableReservationProfile") ?? false,
                 IdleFeeExcludedWindow = fallback?.IdleFeeExcludedWindow ?? configuration?.GetValue<string>("Payments:IdleFeeExcludedWindow"),
                 IdleFeeExcludedTimeZoneId = fallback?.IdleFeeExcludedTimeZoneId ?? configuration?.GetValue<string>("Payments:IdleFeeExcludedTimeZoneId") ?? DefaultIdleFeeExcludedTimeZoneId,
-                IdleAutoStopMinutes = fallback?.IdleAutoStopMinutes ?? configuration?.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0
+                IdleAutoStopMinutes = fallback?.IdleAutoStopMinutes ?? configuration?.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0,
+                MinimumSessionFeeKwh = fallback?.MinimumSessionFeeKwh ?? configuration?.GetValue<decimal?>("Payments:MinimumSessionFeeKwh") ?? 1.0m
             };
+
+            if (options.MinimumSessionFeeKwh < 0)
+            {
+                options.MinimumSessionFeeKwh = 0;
+            }
 
             if (dbContext == null)
             {
