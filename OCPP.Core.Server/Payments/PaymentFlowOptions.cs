@@ -29,5 +29,12 @@ namespace OCPP.Core.Server.Payments
         /// Set to 0 to disable.
         /// </summary>
         public int IdleAutoStopMinutes { get; set; } = 0;
+
+        /// <summary>
+        /// Minimum delivered energy required before the fixed session fee is charged.
+        /// Missing or inconsistent delivered-energy readings never qualify for the fixed session fee.
+        /// Set to 0 to allow the fixed session fee for any valid delivered-energy reading.
+        /// </summary>
+        public decimal MinimumSessionFeeKwh { get; set; } = 1.0m;
     }
 }

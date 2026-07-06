@@ -926,8 +926,12 @@ namespace OCPP.Core.Server.Payments
                 transaction.ConnectorId,
                 reservation.Status);
 
+            bool hasValidDeliveredEnergy = transaction.MeterStop.HasValue &&
+                                           transaction.MeterStart >= 0 &&
+                                           transaction.MeterStop.Value >= 0 &&
+                                           transaction.MeterStop.Value >= transaction.MeterStart;
             double actualEnergy = 0;
-            if (transaction.MeterStop.HasValue)
+            if (hasValidDeliveredEnergy)
             {
                 actualEnergy = Math.Max(0, transaction.MeterStop.Value - transaction.MeterStart);
             }
@@ -944,9 +948,31 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
-            var energyCostCents = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
-            var sessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
             var flowOptions = ResolveFlowOptions(dbContext);
+            var energyCostCents = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
+            var configuredSessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
+            var sessionFeeCents = ShouldChargeSessionFee(
+                reservation,
+                actualEnergy,
+                hasValidDeliveredEnergy,
+                flowOptions,
+                out var sessionFeeSuppressionReason)
+                ? configuredSessionFeeCents
+                : 0L;
+
+            if (configuredSessionFeeCents > 0 && sessionFeeCents == 0)
+            {
+                _logger.LogInformation(
+                    "Stripe/Complete => Suppressed session fee reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId} energyKwh={EnergyKwh:0.###} minimumSessionFeeKwh={MinimumSessionFeeKwh:0.###} reason={Reason}",
+                    reservation.ReservationId,
+                    transaction.TransactionId,
+                    reservation.ChargePointId,
+                    reservation.ConnectorId,
+                    actualEnergy,
+                    flowOptions.MinimumSessionFeeKwh,
+                    sessionFeeSuppressionReason ?? "no configured session fee");
+            }
+
             var idleSnapshot = IdleFeeCalculator.ApplyFinalSnapshot(
                 transaction,
                 reservation,
@@ -1015,6 +1041,11 @@ namespace OCPP.Core.Server.Payments
                             paymentIntent.Id,
                             BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
                         reservation.Status = PaymentReservationStatus.Cancelled;
+                        reservation.CapturedAmountCents = 0;
+                        reservation.CapturedAtUtc = null;
+                        reservation.LastError = string.IsNullOrWhiteSpace(sessionFeeSuppressionReason)
+                            ? "No billable amount to capture."
+                            : $"No billable amount to capture ({sessionFeeSuppressionReason}).";
 
                         _logger.LogInformation(
                             "Stripe/Complete => Cancelled zero-amount capture reservation={ReservationId} paymentIntent={PaymentIntentId}",
@@ -1049,8 +1080,12 @@ namespace OCPP.Core.Server.Payments
                 dbContext.SaveChanges();
 
                 PersistTransactionBreakdown(dbContext, transaction, reservation, actualEnergy, energyCostCents, usageFeeMinutes, usageFeeCents, sessionFeeCents, amountToCapture);
-                TryHandleInvoiceIntegration(dbContext, reservation, transaction);
-                TrySendCompletionNotifications(dbContext, reservation, transaction);
+                if (string.Equals(reservation.Status, PaymentReservationStatus.Completed, StringComparison.OrdinalIgnoreCase) &&
+                    amountToCapture > 0)
+                {
+                    TryHandleInvoiceIntegration(dbContext, reservation, transaction);
+                    TrySendCompletionNotifications(dbContext, reservation, transaction);
+                }
             }
             catch (StripeException sex)
             {
@@ -1938,6 +1973,42 @@ namespace OCPP.Core.Server.Payments
             if (amount <= 0) return 0;
             var subtotal = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
             return (long)Math.Round(subtotal * 100m, 0, MidpointRounding.AwayFromZero);
+        }
+
+        private static bool ShouldChargeSessionFee(
+            ChargePaymentReservation reservation,
+            double actualEnergyKwh,
+            bool hasValidDeliveredEnergy,
+            PaymentFlowOptions flowOptions,
+            out string suppressionReason)
+        {
+            suppressionReason = null;
+
+            if (reservation == null || reservation.UserSessionFee <= 0)
+            {
+                return false;
+            }
+
+            if (!hasValidDeliveredEnergy)
+            {
+                suppressionReason = "missing or inconsistent delivered energy";
+                return false;
+            }
+
+            var minimumSessionFeeKwh = flowOptions?.MinimumSessionFeeKwh ?? 1.0m;
+            if (minimumSessionFeeKwh < 0)
+            {
+                minimumSessionFeeKwh = 0;
+            }
+
+            if (minimumSessionFeeKwh > 0 &&
+                Convert.ToDecimal(actualEnergyKwh) < minimumSessionFeeKwh)
+            {
+                suppressionReason = $"delivered energy below {minimumSessionFeeKwh:0.###} kWh";
+                return false;
+            }
+
+            return true;
         }
 
         private static void PersistTransactionBreakdown(

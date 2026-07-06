@@ -25,6 +25,37 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Resolve_DefaultsMinimumSessionFeeToOneKwh()
+        {
+            using var context = CreateContext();
+
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>())
+                .Build();
+
+            var resolved = PaymentFlowOptionsResolver.Resolve(configuration, context);
+
+            Assert.Equal(1.0m, resolved.MinimumSessionFeeKwh);
+        }
+
+        [Fact]
+        public void Resolve_ClampsNegativeMinimumSessionFeeToZero()
+        {
+            using var context = CreateContext();
+
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Payments:MinimumSessionFeeKwh"] = "-1"
+                })
+                .Build();
+
+            var resolved = PaymentFlowOptionsResolver.Resolve(configuration, context);
+
+            Assert.Equal(0m, resolved.MinimumSessionFeeKwh);
+        }
+
+        [Fact]
         public void Resolve_UsesDatabaseQuietHoursWhenEnabled()
         {
             using var context = CreateContext();

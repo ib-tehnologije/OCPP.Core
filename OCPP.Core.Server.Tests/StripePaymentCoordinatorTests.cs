@@ -33,16 +33,17 @@ namespace OCPP.Core.Server.Tests
             FakeSessionService sessionService,
             FakePaymentIntentService intentService,
             StripeOptions? stripeOptions = null,
+            PaymentFlowOptions? flowOptions = null,
             Func<DateTime>? now = null,
             FakeEventFactory? eventFactory = null,
             IEmailNotificationService? emailService = null,
             IInvoiceIntegrationService? invoiceIntegrationService = null)
         {
             var options = Options.Create(stripeOptions ?? new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" });
-            var flowOptions = Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 });
+            var paymentFlowOptions = Options.Create(flowOptions ?? new PaymentFlowOptions { StartWindowMinutes = 7 });
             return new StripePaymentCoordinator(
                 options,
-                flowOptions,
+                paymentFlowOptions,
                 NullLogger<StripePaymentCoordinator>.Instance,
                 sessionService,
                 intentService,
@@ -1169,6 +1170,176 @@ namespace OCPP.Core.Server.Tests
             Assert.True(intentService.CaptureCalled);
             Assert.Equal(reservation.CapturedAmountCents, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
             Assert.True(reservation.CapturedAmountCents > 0);
+        }
+
+        [Fact]
+        public void CompleteReservation_SuppressesSessionFeeBelowMinimumKwh_AndCapturesEnergyOnly()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-MIN-FEE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-MIN-FEE",
+                StripePaymentIntentId = "pi_min_fee",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 0,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 430,
+                ChargePointId = "CP-MIN-FEE",
+                ConnectorId = 1,
+                StartTagId = "TAG-MIN-FEE",
+                StartTime = new DateTime(2026, 7, 5, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 7, 5, 12, 5, 0, DateTimeKind.Utc),
+                StopReason = "EVDisconnected",
+                MeterStart = 0,
+                MeterStop = 0.999
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_min_fee", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                flowOptions: new PaymentFlowOptions { MinimumSessionFeeKwh = 1.0m });
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.True(intentService.CaptureCalled);
+            Assert.Equal(50, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
+            Assert.Equal(0.999, transaction.EnergyKwh, 3);
+            Assert.Equal(0.50m, transaction.EnergyCost);
+            Assert.Equal(0m, transaction.UserSessionFeeAmount);
+        }
+
+        [Theory]
+        [InlineData(null, 0.0)]
+        [InlineData(-1.0, 0.0)]
+        [InlineData(100.0, 99.5)]
+        public void CompleteReservation_CancelsSessionFeeOnlyCharge_WhenEnergyIsMissingOrInvalid(double? meterStart, double? meterStop)
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-NO-ENERGY",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-NO-ENERGY",
+                StripePaymentIntentId = "pi_no_energy",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 0,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 431,
+                ChargePointId = "CP-NO-ENERGY",
+                ConnectorId = 1,
+                StartTagId = "TAG-NO-ENERGY",
+                StartTime = new DateTime(2026, 7, 5, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 7, 5, 12, 5, 0, DateTimeKind.Utc),
+                StopReason = "EVDisconnected",
+                MeterStart = meterStart ?? 0,
+                MeterStop = meterStop
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_no_energy", Status = "requires_capture", Amount = 10_000 }
+            };
+            var invoiceIntegration = new FakeInvoiceIntegrationService();
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                flowOptions: new PaymentFlowOptions { MinimumSessionFeeKwh = 1.0m },
+                invoiceIntegrationService: invoiceIntegration);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
+            Assert.True(intentService.CancelCalled);
+            Assert.False(intentService.CaptureCalled);
+            Assert.Equal(0m, transaction.UserSessionFeeAmount);
+            Assert.Equal(0, invoiceIntegration.HandleCompletedReservationCount);
+        }
+
+        [Fact]
+        public void CompleteReservation_KeepsSessionFeeAtConfiguredMinimumKwh()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-MIN-ALLOW",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-MIN-ALLOW",
+                StripePaymentIntentId = "pi_min_allow",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 0,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 432,
+                ChargePointId = "CP-MIN-ALLOW",
+                ConnectorId = 1,
+                StartTagId = "TAG-MIN-ALLOW",
+                StartTime = new DateTime(2026, 7, 5, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 7, 5, 12, 5, 0, DateTimeKind.Utc),
+                StopReason = "EVDisconnected",
+                MeterStart = 0,
+                MeterStop = 1.0
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_min_allow", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                flowOptions: new PaymentFlowOptions { MinimumSessionFeeKwh = 1.0m });
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.True(intentService.CaptureCalled);
+            Assert.Equal(100, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
+            Assert.Equal(0.50m, transaction.UserSessionFeeAmount);
         }
 
         [Fact]

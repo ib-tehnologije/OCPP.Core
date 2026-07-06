@@ -126,6 +126,7 @@ Known behavior:
 - Hosted cleanup abandons stale pending reservations and marks start timeouts.
 - Public payment status exposes reservation and transaction state.
 - Idle fee calculation and idle warning emails are supported.
+- The fixed session fee is suppressed when delivered energy is missing, inconsistent, or below `Payments:MinimumSessionFeeKwh` (default `1.0` kWh). Energy and time fees remain independent; if no billable line remains, the uncaptured payment intent is cancelled and invoice integration is skipped.
 - Free-tag access can bypass paid flow for configured tag/charge point combinations.
 
 Important edge cases:
