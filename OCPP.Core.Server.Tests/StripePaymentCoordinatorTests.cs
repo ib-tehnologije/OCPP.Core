@@ -1230,6 +1230,7 @@ namespace OCPP.Core.Server.Tests
 
         [Theory]
         [InlineData(null, 0.0)]
+        [InlineData(0.0, null)]
         [InlineData(-1.0, 0.0)]
         [InlineData(100.0, 99.5)]
         public void CompleteReservation_CancelsSessionFeeOnlyCharge_WhenEnergyIsMissingOrInvalid(double? meterStart, double? meterStop)
@@ -1404,6 +1405,79 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(transaction.StopTime, transaction.ChargingEndedAtUtc);
             Assert.False(intentService.CaptureCalled);
             Assert.False(intentService.CancelCalled);
+        }
+
+        [Fact]
+        public void HandleConnectorAvailable_SuppressesSessionFeeBelowMinimumKwhAfterDeferredCompletion()
+        {
+            using var context = CreateContext();
+            var now = new DateTime(2026, 7, 5, 12, 20, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-DEFER-MIN-FEE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-DEFER-MIN-FEE",
+                StripePaymentIntentId = "pi_defer_min_fee",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 0,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur",
+                StartTransactionAtUtc = now.AddMinutes(-15)
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 315,
+                ChargePointId = "CP-DEFER-MIN-FEE",
+                ConnectorId = 1,
+                StartTagId = "TAG-DEFER-MIN-FEE",
+                StartTime = now.AddMinutes(-15),
+                StopTime = now.AddMinutes(-2),
+                MeterStart = 0,
+                MeterStop = 0.5
+            };
+
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.ConnectorStatuses.Add(new ConnectorStatus
+            {
+                ChargePointId = "CP-DEFER-MIN-FEE",
+                ConnectorId = 1,
+                LastStatus = "Occupied",
+                LastStatusTime = now.AddMinutes(-1)
+            });
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_defer_min_fee", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                flowOptions: new PaymentFlowOptions { MinimumSessionFeeKwh = 1.0m },
+                now: () => now);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.WaitingForDisconnect, reservation.Status);
+            Assert.False(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+
+            coordinator.HandleConnectorAvailable(context, "CP-DEFER-MIN-FEE", 1, now.AddMinutes(-1));
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.True(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+            Assert.Equal(25, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
+            Assert.Equal(0.5, transaction.EnergyKwh, 3);
+            Assert.Equal(0.25m, transaction.EnergyCost);
+            Assert.Equal(0m, transaction.UserSessionFeeAmount);
         }
 
         [Fact]
