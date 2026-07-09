@@ -36,5 +36,11 @@ namespace OCPP.Core.Server.Payments
         /// Set to 0 to allow the fixed session fee for any valid delivered-energy reading.
         /// </summary>
         public decimal MinimumSessionFeeKwh { get; set; } = 1.0m;
+
+        /// <summary>
+        /// Minimum positive capture amount in the payment currency minor unit.
+        /// Set to 0 to disable the positive-amount minimum guard.
+        /// </summary>
+        public long MinimumChargeAmountCents { get; set; } = 50;
     }
 }

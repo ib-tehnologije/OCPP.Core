@@ -127,6 +127,7 @@ Known behavior:
 - Public payment status exposes reservation and transaction state.
 - Idle fee calculation and idle warning emails are supported.
 - The fixed session fee is suppressed when delivered energy is missing, inconsistent, or below `Payments:MinimumSessionFeeKwh` (default `1.0` kWh). Energy and time fees remain independent; if no billable line remains, the uncaptured payment intent is cancelled and invoice integration is skipped.
+- Positive final capture amounts below `Payments:MinimumChargeAmountCents` (default `50`) are cancelled before Stripe capture. Exactly the configured minimum is capturable; invoice integration and completion emails only run after a successful paid completion.
 - Free-tag access can bypass paid flow for configured tag/charge point combinations.
 
 Important edge cases:

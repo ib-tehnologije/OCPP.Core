@@ -39,6 +39,54 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Resolve_DefaultsMinimumChargeAmountToFiftyCents()
+        {
+            using var context = CreateContext();
+
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>())
+                .Build();
+
+            var resolved = PaymentFlowOptionsResolver.Resolve(configuration, context);
+
+            Assert.Equal(50, resolved.MinimumChargeAmountCents);
+        }
+
+        [Fact]
+        public void Resolve_UsesConfiguredMinimumChargeAmount()
+        {
+            using var context = CreateContext();
+
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Payments:MinimumChargeAmountCents"] = "25"
+                })
+                .Build();
+
+            var resolved = PaymentFlowOptionsResolver.Resolve(configuration, context);
+
+            Assert.Equal(25, resolved.MinimumChargeAmountCents);
+        }
+
+        [Fact]
+        public void Resolve_ClampsNegativeMinimumChargeAmountToZero()
+        {
+            using var context = CreateContext();
+
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Payments:MinimumChargeAmountCents"] = "-1"
+                })
+                .Build();
+
+            var resolved = PaymentFlowOptionsResolver.Resolve(configuration, context);
+
+            Assert.Equal(0, resolved.MinimumChargeAmountCents);
+        }
+
+        [Fact]
         public void Resolve_ClampsNegativeMinimumSessionFeeToZero()
         {
             using var context = CreateContext();

@@ -987,9 +987,10 @@ namespace OCPP.Core.Server.Payments
                 : 0L;
 
             var amountToCapture = energyCostCents + usageFeeCents + sessionFeeCents;
+            var minimumChargeAmountCents = Math.Max(0, flowOptions.MinimumChargeAmountCents);
 
             _logger.LogInformation(
-                "Stripe/Complete => Calculated amounts reservation={ReservationId} tx={TransactionId} energyKwh={EnergyKwh:0.###} energyCents={EnergyCents} usageMinutes={UsageMinutes} usageCents={UsageCents} sessionFeeCents={SessionFeeCents} amountToCapture={AmountToCapture}",
+                "Stripe/Complete => Calculated amounts reservation={ReservationId} tx={TransactionId} energyKwh={EnergyKwh:0.###} energyCents={EnergyCents} usageMinutes={UsageMinutes} usageCents={UsageCents} sessionFeeCents={SessionFeeCents} amountToCapture={AmountToCapture} minimumChargeAmountCents={MinimumChargeAmountCents}",
                 reservation.ReservationId,
                 transaction.TransactionId,
                 actualEnergy,
@@ -997,7 +998,8 @@ namespace OCPP.Core.Server.Payments
                 usageFeeMinutes,
                 usageFeeCents,
                 sessionFeeCents,
-                amountToCapture);
+                amountToCapture,
+                minimumChargeAmountCents);
 
             _logger.LogInformation(
                 "Stripe/Complete => Final idle snapshot reservation={ReservationId} tx={TransactionId} minutes={IdleMinutes} amount={IdleAmount}",
@@ -1016,24 +1018,62 @@ namespace OCPP.Core.Server.Payments
                     {
                         var paymentIntentAmount = (long?)paymentIntent.Amount;
                         var maxCaptureAmount = paymentIntentAmount ?? amountToCapture;
-                        var captureOptions = new PaymentIntentCaptureOptions
+                        var finalCaptureAmount = Math.Min(amountToCapture, maxCaptureAmount);
+                        if (finalCaptureAmount > 0 &&
+                            minimumChargeAmountCents > 0 &&
+                            finalCaptureAmount < minimumChargeAmountCents)
                         {
-                            AmountToCapture = Math.Min(amountToCapture, maxCaptureAmount)
-                        };
-                        var captured = _paymentIntentService.Capture(
-                            paymentIntent.Id,
-                            captureOptions,
-                            BuildIdempotencyOptions(IdempotencyCapture, reservation.ReservationId, captureOptions.AmountToCapture));
-                        reservation.CapturedAmountCents = captureOptions.AmountToCapture;
-                        reservation.CapturedAtUtc = _utcNow();
-                        reservation.Status = PaymentReservationStatus.Completed;
+                            _paymentIntentService.Cancel(
+                                paymentIntent.Id,
+                                BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
+                            reservation.Status = PaymentReservationStatus.Cancelled;
+                            reservation.CapturedAmountCents = 0;
+                            reservation.CapturedAtUtc = null;
+                            reservation.LastError = $"Payment capture skipped because calculated capture amount {finalCaptureAmount} cents is below configured minimum charge amount {minimumChargeAmountCents} cents.";
 
-                        _logger.LogInformation(
-                            "Stripe/Complete => Captured payment reservation={ReservationId} paymentIntent={PaymentIntentId} capturedCents={CapturedCents} status={PaymentIntentStatus}",
-                            reservation.ReservationId,
-                            paymentIntent.Id,
-                            captureOptions.AmountToCapture,
-                            captured.Status);
+                            _logger.LogInformation(
+                                "Stripe/Complete => Cancelled below-minimum capture reservation={ReservationId} paymentIntent={PaymentIntentId} captureCents={CaptureCents} minimumChargeAmountCents={MinimumChargeAmountCents}",
+                                reservation.ReservationId,
+                                paymentIntent.Id,
+                                finalCaptureAmount,
+                                minimumChargeAmountCents);
+                        }
+                        else if (finalCaptureAmount > 0)
+                        {
+                            var captureOptions = new PaymentIntentCaptureOptions
+                            {
+                                AmountToCapture = finalCaptureAmount
+                            };
+                            var captured = _paymentIntentService.Capture(
+                                paymentIntent.Id,
+                                captureOptions,
+                                BuildIdempotencyOptions(IdempotencyCapture, reservation.ReservationId, captureOptions.AmountToCapture));
+                            reservation.CapturedAmountCents = captureOptions.AmountToCapture;
+                            reservation.CapturedAtUtc = _utcNow();
+                            reservation.Status = PaymentReservationStatus.Completed;
+
+                            _logger.LogInformation(
+                                "Stripe/Complete => Captured payment reservation={ReservationId} paymentIntent={PaymentIntentId} capturedCents={CapturedCents} status={PaymentIntentStatus}",
+                                reservation.ReservationId,
+                                paymentIntent.Id,
+                                captureOptions.AmountToCapture,
+                                captured.Status);
+                        }
+                        else
+                        {
+                            _paymentIntentService.Cancel(
+                                paymentIntent.Id,
+                                BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
+                            reservation.Status = PaymentReservationStatus.Cancelled;
+                            reservation.CapturedAmountCents = 0;
+                            reservation.CapturedAtUtc = null;
+                            reservation.LastError = "No capturable amount available on the Stripe payment intent.";
+
+                            _logger.LogInformation(
+                                "Stripe/Complete => Cancelled non-capturable payment intent reservation={ReservationId} paymentIntent={PaymentIntentId}",
+                                reservation.ReservationId,
+                                paymentIntent.Id);
+                        }
                     }
                     else
                     {

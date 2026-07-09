@@ -60,7 +60,7 @@ Important configuration areas:
 | Server API | `ApiKey`, `ServerApiUrl` in management |
 | OCPP | `MessageDumpDir`, `DbMessageLog`, `ShowIndexInfo`, `MaxMessageSize`, `ValidateMessages`, `DenyConcurrentTx`, `HeartBeatInterval` |
 | Maintenance | `Maintenance:PendingPaymentTimeoutMinutes`, `Maintenance:ReservationTimeoutMinutes`, `Maintenance:StatusReleaseMinutes`, `Maintenance:CleanupIntervalSeconds`, `Maintenance:IdleWarningSweepSeconds`, `Maintenance:AvailableStatusOpenTransactionGraceMinutes` |
-| Payments | `Payments:RequirePreparingBeforeRemoteStart`, `Payments:RemoteStartIdTokenType`, `Payments:StartWindowMinutes`, `Payments:MinimumSessionFeeKwh`, `Payments:IdleFeeExcludedWindow`, `Payments:IdleFeeExcludedTimeZoneId`, `Payments:IdleAutoStopMinutes`, `Payments:ChargerResponseTimeoutMs` |
+| Payments | `Payments:RequirePreparingBeforeRemoteStart`, `Payments:RemoteStartIdTokenType`, `Payments:StartWindowMinutes`, `Payments:MinimumSessionFeeKwh`, `Payments:MinimumChargeAmountCents`, `Payments:IdleFeeExcludedWindow`, `Payments:IdleFeeExcludedTimeZoneId`, `Payments:IdleAutoStopMinutes`, `Payments:ChargerResponseTimeoutMs` |
 | Stripe | `Stripe:Enabled`, `Stripe:UseMockServices`, `Stripe:ApiKey`, `Stripe:WebhookSecret`, `Stripe:AllowInsecureWebhooks`, `Stripe:Currency`, `Stripe:ReturnBaseUrl`, `Stripe:ProductName`, `Stripe:MockCustomerEmail`, `Stripe:MockDiagnosticsDirectory` |
 | Notifications | `Notifications:EnableCustomerEmails`, `Notifications:IdleWarningLeadMinutes`, `Notifications:SinkDirectory`, `Notifications:FromAddress`, `Notifications:FromName`, `Notifications:ReplyToAddress`, `Notifications:BccAddress`, `Notifications:Smtp:*` |
 | Invoices | `Invoices:Enabled`, `Invoices:Provider`, `Invoices:Mode`, `Invoices:ERacuni:*` |
@@ -142,6 +142,7 @@ Unknown / verify:
 - Hangfire-dependent behavior is absent under SQLite.
 - SQL Server migrations are not validated by SQLite E2E runs.
 - `Payments:MinimumSessionFeeKwh` defaults to `1.0`. Completed sessions with missing, inconsistent, or lower delivered-energy readings suppress only the fixed session fee. If no other energy or time fee remains, the uncaptured payment intent is cancelled and invoice creation is skipped.
+- `Payments:MinimumChargeAmountCents` defaults to `50`. Positive final amounts below the configured minimum cancel the uncaptured payment intent and skip invoice creation and paid-completion emails. Exactly the configured minimum remains capturable.
 - Public payment behavior depends on server, management, database, Stripe/mock Stripe, and time-based cleanup settings.
 - OCPP schema validation is optional and logs/continues on validation errors.
 - Do not expose Hangfire dashboard or appsettings-derived secrets without deployment-specific access controls.
