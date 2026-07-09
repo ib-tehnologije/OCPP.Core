@@ -18,12 +18,18 @@ namespace OCPP.Core.Server.Payments
                 IdleFeeExcludedWindow = fallback?.IdleFeeExcludedWindow ?? configuration?.GetValue<string>("Payments:IdleFeeExcludedWindow"),
                 IdleFeeExcludedTimeZoneId = fallback?.IdleFeeExcludedTimeZoneId ?? configuration?.GetValue<string>("Payments:IdleFeeExcludedTimeZoneId") ?? DefaultIdleFeeExcludedTimeZoneId,
                 IdleAutoStopMinutes = fallback?.IdleAutoStopMinutes ?? configuration?.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0,
-                MinimumSessionFeeKwh = fallback?.MinimumSessionFeeKwh ?? configuration?.GetValue<decimal?>("Payments:MinimumSessionFeeKwh") ?? 1.0m
+                MinimumSessionFeeKwh = fallback?.MinimumSessionFeeKwh ?? configuration?.GetValue<decimal?>("Payments:MinimumSessionFeeKwh") ?? 1.0m,
+                MinimumChargeAmountCents = fallback?.MinimumChargeAmountCents ?? configuration?.GetValue<long?>("Payments:MinimumChargeAmountCents") ?? 50
             };
 
             if (options.MinimumSessionFeeKwh < 0)
             {
                 options.MinimumSessionFeeKwh = 0;
+            }
+
+            if (options.MinimumChargeAmountCents < 0)
+            {
+                options.MinimumChargeAmountCents = 0;
             }
 
             if (dbContext == null)
