@@ -141,8 +141,8 @@ Unknown / verify:
 - WebSocket remote actions fail if the charge point is offline or connected to a different server instance.
 - Hangfire-dependent behavior is absent under SQLite.
 - SQL Server migrations are not validated by SQLite E2E runs.
-- `Payments:MinimumSessionFeeKwh` defaults to `1.0`. Completed sessions with missing, inconsistent, or lower delivered-energy readings suppress only the fixed session fee. If no other energy or time fee remains, the uncaptured payment intent is cancelled and invoice creation is skipped.
-- `Payments:MinimumChargeAmountCents` defaults to `50`. Positive final amounts below the configured minimum cancel the uncaptured payment intent and skip invoice creation and paid-completion emails. Exactly the configured minimum remains capturable.
+- `Payments:MinimumSessionFeeKwh` defaults to `1.0`. Completed sessions with missing, inconsistent, or lower delivered-energy readings are no-charge: billable line amounts are zeroed, the uncaptured payment intent is cancelled, and invoice creation plus paid-completion emails are skipped.
+- `Payments:MinimumChargeAmountCents` defaults to `50`. Positive final amounts at or above the delivered-energy threshold but below the configured minimum cancel the uncaptured payment intent and skip invoice creation and paid-completion emails. Exactly the configured minimum remains capturable.
 - Public payment behavior depends on server, management, database, Stripe/mock Stripe, and time-based cleanup settings.
 - OCPP schema validation is optional and logs/continues on validation errors.
 - Do not expose Hangfire dashboard or appsettings-derived secrets without deployment-specific access controls.

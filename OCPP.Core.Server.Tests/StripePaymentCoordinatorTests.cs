@@ -1173,7 +1173,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void CompleteReservation_SuppressesSessionFeeBelowMinimumKwh_AndCapturesEnergyOnly()
+        public void CompleteReservation_CancelsBelowMinimumKwhEvenWhenEnergyExceedsMinimumCharge()
         {
             using var context = CreateContext();
             var reservation = new ChargePaymentReservation
@@ -1182,9 +1182,10 @@ namespace OCPP.Core.Server.Tests
                 ChargePointId = "CP-MIN-FEE",
                 ConnectorId = 1,
                 ChargeTagId = "TAG-MIN-FEE",
+                StripeCheckoutSessionId = "sess_min_fee",
                 StripePaymentIntentId = "pi_min_fee",
                 Status = PaymentReservationStatus.Charging,
-                PricePerKwh = 0.50m,
+                PricePerKwh = 1.00m,
                 UserSessionFee = 0.50m,
                 UsageFeePerMinute = 0m,
                 StartUsageFeeAfterMinutes = 0,
@@ -1203,7 +1204,7 @@ namespace OCPP.Core.Server.Tests
                 StopTime = new DateTime(2026, 7, 5, 12, 5, 0, DateTimeKind.Utc),
                 StopReason = "EVDisconnected",
                 MeterStart = 0,
-                MeterStop = 0.999
+                MeterStop = 0.9
             };
             context.Transactions.Add(transaction);
             context.SaveChanges();
@@ -1212,24 +1213,50 @@ namespace OCPP.Core.Server.Tests
             {
                 GetResponse = new PaymentIntent { Id = "pi_min_fee", Status = "requires_capture", Amount = 10_000 }
             };
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_min_fee",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "min-fee@example.com"
+                    },
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["invoice_type"] = "R1"
+                    }
+                }
+            };
+            var emailService = new FakeEmailNotificationService();
+            var invoiceIntegration = new FakeInvoiceIntegrationService();
             var coordinator = CreateCoordinator(
                 context,
-                new FakeSessionService(),
+                sessionService,
                 intentService,
-                flowOptions: new PaymentFlowOptions { MinimumSessionFeeKwh = 1.0m });
+                flowOptions: new PaymentFlowOptions { MinimumSessionFeeKwh = 1.0m },
+                emailService: emailService,
+                invoiceIntegrationService: invoiceIntegration);
 
             coordinator.CompleteReservation(context, transaction);
 
-            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
-            Assert.True(intentService.CaptureCalled);
-            Assert.Equal(50, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
-            Assert.Equal(0.999, transaction.EnergyKwh, 3);
-            Assert.Equal(0.50m, transaction.EnergyCost);
+            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
+            Assert.True(intentService.CancelCalled);
+            Assert.False(intentService.CaptureCalled);
+            Assert.Equal(0, reservation.CapturedAmountCents);
+            Assert.Null(reservation.CapturedAtUtc);
+            Assert.Contains("below configured minimum session energy", reservation.LastError);
+            Assert.Equal(0.9, transaction.EnergyKwh, 3);
+            Assert.Equal(0m, transaction.EnergyCost);
             Assert.Equal(0m, transaction.UserSessionFeeAmount);
+            Assert.Equal(0, invoiceIntegration.HandleCompletedReservationCount);
+            Assert.Equal(0, emailService.ChargingCompletedCount);
+            Assert.Equal(0, emailService.SessionReceiptCount);
+            Assert.Equal(0, emailService.R1InvoiceReadyCount);
         }
 
         [Fact]
-        public void CompleteReservation_CancelsSubMinimumEnergyOnlyCaptureAndSuppressesSideEffects()
+        public void CompleteReservation_CancelsBelowMinimumKwhIncidentShapeAndSuppressesSideEffects()
         {
             using var context = CreateContext();
             var reservation = new ChargePaymentReservation
@@ -1241,7 +1268,7 @@ namespace OCPP.Core.Server.Tests
                 StripeCheckoutSessionId = "sess_min_charge",
                 StripePaymentIntentId = "pi_min_charge",
                 Status = PaymentReservationStatus.Charging,
-                PricePerKwh = 0.50m,
+                PricePerKwh = 0.69m,
                 UserSessionFee = 0.50m,
                 UsageFeePerMinute = 0m,
                 StartUsageFeeAfterMinutes = 0,
@@ -1260,7 +1287,90 @@ namespace OCPP.Core.Server.Tests
                 StopTime = new DateTime(2026, 7, 9, 8, 5, 0, DateTimeKind.Utc),
                 StopReason = "EVDisconnected",
                 MeterStart = 0,
-                MeterStop = 0.5
+                MeterStop = 0.712
+            };
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_min_charge", Status = "requires_capture", Amount = 10_000 }
+            };
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_min_charge",
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "min-charge@example.com"
+                    },
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["invoice_type"] = "R1"
+                    }
+                }
+            };
+            var emailService = new FakeEmailNotificationService();
+            var invoiceIntegration = new FakeInvoiceIntegrationService();
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                flowOptions: new PaymentFlowOptions { MinimumSessionFeeKwh = 1.0m },
+                emailService: emailService,
+                invoiceIntegrationService: invoiceIntegration);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
+            Assert.True(intentService.CancelCalled);
+            Assert.False(intentService.CaptureCalled);
+            Assert.Equal(0, reservation.CapturedAmountCents);
+            Assert.Null(reservation.CapturedAtUtc);
+            Assert.Contains("below configured minimum session energy", reservation.LastError);
+            Assert.Equal(0.712, transaction.EnergyKwh, 3);
+            Assert.Equal(0m, transaction.EnergyCost);
+            Assert.Equal(0m, transaction.UserSessionFeeAmount);
+            Assert.Equal(0, invoiceIntegration.HandleCompletedReservationCount);
+            Assert.Equal(0, emailService.ChargingCompletedCount);
+            Assert.Equal(0, emailService.SessionReceiptCount);
+            Assert.Equal(0, emailService.R1InvoiceReadyCount);
+        }
+
+        [Fact]
+        public void CompleteReservation_CancelsSubMinimumChargeWhenEnergyMeetsSessionThreshold()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-MIN-CHARGE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-MIN-CHARGE",
+                StripeCheckoutSessionId = "sess_min_charge",
+                StripePaymentIntentId = "pi_min_charge",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.25m,
+                UserSessionFee = 0m,
+                UsageFeePerMinute = 0m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 0,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 435,
+                ChargePointId = "CP-MIN-CHARGE",
+                ConnectorId = 1,
+                StartTagId = "TAG-MIN-CHARGE",
+                StartTime = new DateTime(2026, 7, 9, 8, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 7, 9, 8, 5, 0, DateTimeKind.Utc),
+                StopReason = "EVDisconnected",
+                MeterStart = 0,
+                MeterStop = 1.0
             };
             context.Transactions.Add(transaction);
             context.SaveChanges();
@@ -1302,6 +1412,7 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0, reservation.CapturedAmountCents);
             Assert.Null(reservation.CapturedAtUtc);
             Assert.Contains("below configured minimum charge amount", reservation.LastError);
+            Assert.Equal(1.0, transaction.EnergyKwh, 3);
             Assert.Equal(0.25m, transaction.EnergyCost);
             Assert.Equal(0m, transaction.UserSessionFeeAmount);
             Assert.Equal(0, invoiceIntegration.HandleCompletedReservationCount);
@@ -1311,7 +1422,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void CompleteReservation_AllowsSubFiftyCentCaptureWhenConfiguredMinimumIsLower()
+        public void CompleteReservation_AllowsBelowDefaultMinimumChargeWhenEnergyMeetsSessionThresholdAndConfiguredMinimumIsLower()
         {
             using var context = CreateContext();
             var reservation = new ChargePaymentReservation
@@ -1322,8 +1433,8 @@ namespace OCPP.Core.Server.Tests
                 ChargeTagId = "TAG-MIN-CHARGE-OVERRIDE",
                 StripePaymentIntentId = "pi_min_charge_override",
                 Status = PaymentReservationStatus.Charging,
-                PricePerKwh = 0.50m,
-                UserSessionFee = 0.50m,
+                PricePerKwh = 0.25m,
+                UserSessionFee = 0m,
                 UsageFeePerMinute = 0m,
                 StartUsageFeeAfterMinutes = 0,
                 MaxUsageFeeMinutes = 0,
@@ -1341,7 +1452,7 @@ namespace OCPP.Core.Server.Tests
                 StopTime = new DateTime(2026, 7, 9, 8, 5, 0, DateTimeKind.Utc),
                 StopReason = "EVDisconnected",
                 MeterStart = 0,
-                MeterStop = 0.5
+                MeterStop = 1.0
             };
             context.Transactions.Add(transaction);
             context.SaveChanges();
@@ -1362,6 +1473,7 @@ namespace OCPP.Core.Server.Tests
             Assert.True(intentService.CaptureCalled);
             Assert.False(intentService.CancelCalled);
             Assert.Equal(25, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
+            Assert.Equal(1.0, transaction.EnergyKwh, 3);
             Assert.Equal(0.25m, transaction.EnergyCost);
             Assert.Equal(0m, transaction.UserSessionFeeAmount);
         }
@@ -1546,7 +1658,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void HandleConnectorAvailable_SuppressesSessionFeeBelowMinimumKwhAfterDeferredCompletion()
+        public void HandleConnectorAvailable_CancelsBelowMinimumKwhAfterDeferredCompletion()
         {
             using var context = CreateContext();
             var now = new DateTime(2026, 7, 5, 12, 20, 0, DateTimeKind.Utc);
@@ -1613,9 +1725,9 @@ namespace OCPP.Core.Server.Tests
             Assert.False(intentService.CaptureCalled);
             Assert.True(intentService.CancelCalled);
             Assert.Equal(0, reservation.CapturedAmountCents);
-            Assert.Contains("below configured minimum charge amount", reservation.LastError);
+            Assert.Contains("below configured minimum session energy", reservation.LastError);
             Assert.Equal(0.5, transaction.EnergyKwh, 3);
-            Assert.Equal(0.25m, transaction.EnergyCost);
+            Assert.Equal(0m, transaction.EnergyCost);
             Assert.Equal(0m, transaction.UserSessionFeeAmount);
         }
 
@@ -1995,7 +2107,7 @@ namespace OCPP.Core.Server.Tests
                 ChargingEndedAtUtc = suspendedAtUtc,
                 StopTime = stopAtUtc,
                 MeterStart = 20,
-                MeterStop = 20
+                MeterStop = 21
             };
 
             context.ChargePaymentReservations.Add(reservation);
@@ -2050,7 +2162,7 @@ namespace OCPP.Core.Server.Tests
                 StartTime = stopAtUtc.AddMinutes(-30),
                 StopTime = stopAtUtc,
                 MeterStart = 10,
-                MeterStop = 10
+                MeterStop = 11
             };
 
             context.ChargePaymentReservations.Add(reservation);

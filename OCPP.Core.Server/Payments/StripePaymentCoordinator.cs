@@ -949,16 +949,29 @@ namespace OCPP.Core.Server.Payments
             }
 
             var flowOptions = ResolveFlowOptions(dbContext);
-            var energyCostCents = CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
+            var shouldNoChargeForDeliveredEnergy = ShouldTreatAsNoChargeForDeliveredEnergy(
+                actualEnergy,
+                hasValidDeliveredEnergy,
+                flowOptions,
+                out var deliveredEnergyNoChargeReason);
+            var energyCostCents = shouldNoChargeForDeliveredEnergy
+                ? 0L
+                : CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
             var configuredSessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
-            var sessionFeeCents = ShouldChargeSessionFee(
+            string sessionFeeSuppressionReason = null;
+            var shouldChargeSessionFee = !shouldNoChargeForDeliveredEnergy && ShouldChargeSessionFee(
                 reservation,
                 actualEnergy,
                 hasValidDeliveredEnergy,
                 flowOptions,
-                out var sessionFeeSuppressionReason)
+                out sessionFeeSuppressionReason);
+            var sessionFeeCents = shouldChargeSessionFee
                 ? configuredSessionFeeCents
                 : 0L;
+            if (shouldNoChargeForDeliveredEnergy)
+            {
+                sessionFeeSuppressionReason = deliveredEnergyNoChargeReason;
+            }
 
             if (configuredSessionFeeCents > 0 && sessionFeeCents == 0)
             {
@@ -973,18 +986,34 @@ namespace OCPP.Core.Server.Payments
                     sessionFeeSuppressionReason ?? "no configured session fee");
             }
 
-            var idleSnapshot = IdleFeeCalculator.ApplyFinalSnapshot(
-                transaction,
-                reservation,
-                flowOptions,
-                reservation.DisconnectedAtUtc ?? now,
-                _logger);
-            var usageFeeMinutes = reservation.UsageFeeAnchorMinutes == 1
-                ? idleSnapshot.TotalMinutes
-                : CalculateUsageFeeMinutes(transaction, reservation, flowOptions, now);
-            var usageFeeCents = usageFeeMinutes > 0
-                ? CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute)
-                : 0L;
+            if (shouldNoChargeForDeliveredEnergy)
+            {
+                _logger.LogInformation(
+                    "Stripe/Complete => Treating session as no-charge reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId} energyKwh={EnergyKwh:0.###} reason={Reason}",
+                    reservation.ReservationId,
+                    transaction.TransactionId,
+                    reservation.ChargePointId,
+                    reservation.ConnectorId,
+                    actualEnergy,
+                    deliveredEnergyNoChargeReason);
+            }
+
+            var idleSnapshot = shouldNoChargeForDeliveredEnergy
+                ? new IdleFeeSnapshot()
+                : IdleFeeCalculator.ApplyFinalSnapshot(
+                    transaction,
+                    reservation,
+                    flowOptions,
+                    reservation.DisconnectedAtUtc ?? now,
+                    _logger);
+            var usageFeeMinutes = shouldNoChargeForDeliveredEnergy
+                ? 0
+                : reservation.UsageFeeAnchorMinutes == 1
+                    ? idleSnapshot.TotalMinutes
+                    : CalculateUsageFeeMinutes(transaction, reservation, flowOptions, now);
+            var usageFeeCents = shouldNoChargeForDeliveredEnergy || usageFeeMinutes <= 0
+                ? 0L
+                : CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute);
 
             var amountToCapture = energyCostCents + usageFeeCents + sessionFeeCents;
             var minimumChargeAmountCents = Math.Max(0, flowOptions.MinimumChargeAmountCents);
@@ -2049,6 +2078,36 @@ namespace OCPP.Core.Server.Payments
             }
 
             return true;
+        }
+
+        private static bool ShouldTreatAsNoChargeForDeliveredEnergy(
+            double actualEnergyKwh,
+            bool hasValidDeliveredEnergy,
+            PaymentFlowOptions flowOptions,
+            out string reason)
+        {
+            reason = null;
+
+            if (!hasValidDeliveredEnergy)
+            {
+                reason = "missing or inconsistent delivered energy";
+                return true;
+            }
+
+            var minimumSessionFeeKwh = flowOptions?.MinimumSessionFeeKwh ?? 1.0m;
+            if (minimumSessionFeeKwh < 0)
+            {
+                minimumSessionFeeKwh = 0;
+            }
+
+            if (minimumSessionFeeKwh > 0 &&
+                Convert.ToDecimal(actualEnergyKwh) < minimumSessionFeeKwh)
+            {
+                reason = $"delivered energy below configured minimum session energy {minimumSessionFeeKwh:0.###} kWh";
+                return true;
+            }
+
+            return false;
         }
 
         private static void PersistTransactionBreakdown(
