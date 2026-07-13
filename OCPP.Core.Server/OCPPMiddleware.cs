@@ -2465,21 +2465,11 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            request.BuyerOib = NormalizeOibDigits(request.BuyerOib);
-            request.BuyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim();
-
-            if (string.IsNullOrWhiteSpace(request.BuyerOib) || !IsValidOib(request.BuyerOib))
-            {
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync("{\"status\":\"InvalidOib\",\"error\":\"Valid OIB (11 digits) is required.\"}");
-                return;
-            }
-
             _logger.LogInformation(
-                "Payments/RequestR1 => Incoming request reservation={ReservationId} hasCompany={HasCompany} ip={RemoteIp}",
+                "Payments/RequestR1 => Incoming request reservation={ReservationId} hasCompany={HasCompany} country={Country} ip={RemoteIp}",
                 request.ReservationId,
                 !string.IsNullOrWhiteSpace(request.BuyerCompanyName),
+                string.IsNullOrWhiteSpace(request.BuyerCountry) ? "(none)" : request.BuyerCountry.Trim().ToUpperInvariant(),
                 context.Connection.RemoteIpAddress?.ToString() ?? "(unknown)");
 
             var updateResult = _paymentCoordinator.RequestR1Invoice(dbContext, request);
@@ -2504,7 +2494,9 @@ namespace OCPP.Core.Server
                 status = updateResult.Status ?? "Updated",
                 reservationId = updateResult.Reservation?.ReservationId ?? request.ReservationId,
                 buyerCompanyName = updateResult.BuyerCompanyName,
-                buyerOib = updateResult.BuyerOib
+                buyerOib = updateResult.BuyerOib,
+                buyerCountry = updateResult.BuyerCountry,
+                buyerTaxIdentifier = updateResult.BuyerTaxIdentifier
             }));
         }
 

@@ -1067,7 +1067,9 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme d.o.o.",
-                BuyerOib = "12345678903"
+                BuyerOib = "12345678903",
+                BuyerCountry = "HR",
+                BuyerDataConfirmed = true
             });
 
             Assert.True(result.Success);
@@ -1113,13 +1115,93 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme",
-                BuyerOib = "12345678901"
+                BuyerOib = "12345678901",
+                BuyerCountry = "HR",
+                BuyerDataConfirmed = true
             });
 
             Assert.False(result.Success);
             Assert.Equal("InvalidOib", result.Status);
             Assert.Null(sessionService.LastUpdateOptions);
             Assert.Null(intentService.LastUpdateOptions);
+        }
+
+        [Fact]
+        public void RequestR1Invoice_PersistsForeignBuyerSnapshotAndRejectsConflictingChange()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_foreign_buyer",
+                StripePaymentIntentId = "pi_foreign_buyer",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_foreign_buyer",
+                    PaymentIntentId = "pi_foreign_buyer",
+                    Metadata = new Dictionary<string, string>()
+                }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_foreign_buyer", Metadata = new Dictionary<string, string>() }
+            };
+            var now = new DateTime(2026, 7, 14, 0, 30, 0, DateTimeKind.Utc);
+            var coordinator = CreateCoordinator(context, sessionService, intentService, now: () => now);
+            var request = new PaymentR1InvoiceRequest
+            {
+                ReservationId = reservationId,
+                BuyerCountry = "CZ",
+                BuyerCompanyName = "Example s.r.o.",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerRegistrationNumber = "C 12345",
+                BuyerIdentifierIsVatRegistration = false,
+                BuyerDataConfirmed = true
+            };
+
+            var first = coordinator.RequestR1Invoice(context, request);
+            var identicalRetry = coordinator.RequestR1Invoice(context, request);
+            var conflicting = coordinator.RequestR1Invoice(context, new PaymentR1InvoiceRequest
+            {
+                ReservationId = reservationId,
+                BuyerCountry = "CZ",
+                BuyerCompanyName = "Changed s.r.o.",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerDataConfirmed = true
+            });
+
+            Assert.True(first.Success);
+            Assert.True(identicalRetry.Success);
+            Assert.False(conflicting.Success);
+            Assert.Equal("BuyerDataLocked", conflicting.Status);
+            Assert.Equal("CZ", reservation.InvoiceBuyerCountry);
+            Assert.Equal("Example s.r.o.", reservation.InvoiceBuyerCompanyName);
+            Assert.Equal("CZ 123-ABC", reservation.InvoiceBuyerTaxIdentifier);
+            Assert.Equal("C 12345", reservation.InvoiceBuyerRegistrationNumber);
+            Assert.False(reservation.InvoiceBuyerIdentifierIsVatRegistration);
+            Assert.Equal(now, reservation.InvoiceBuyerConfirmedAtUtc);
         }
 
         [Fact]

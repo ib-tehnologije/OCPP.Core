@@ -651,19 +651,28 @@ namespace OCPP.Core.Server.Payments
                 return result;
             }
 
-            var normalizedOib = NormalizeOibDigits(request.BuyerOib);
-            if (string.IsNullOrWhiteSpace(normalizedOib) || !IsValidOib(normalizedOib))
+            var buyerValidation = InvoiceBuyerDataValidator.ValidateAndNormalize(request);
+            if (!buyerValidation.Success)
             {
-                result.Status = "InvalidOib";
-                result.Error = "Valid OIB (11 digits) is required for R1 invoice.";
+                result.Status = buyerValidation.Status;
+                result.Error = buyerValidation.Error;
                 return result;
             }
+            var buyerData = buyerValidation.Data;
 
             var reservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
             if (reservation == null)
             {
                 result.Status = "NotFound";
                 result.Error = "Reservation not found.";
+                return result;
+            }
+
+            if (reservation.InvoiceBuyerConfirmedAtUtc.HasValue && !MatchesConfirmedBuyer(reservation, buyerData))
+            {
+                result.Status = "BuyerDataLocked";
+                result.Error = "Confirmed invoice buyer data can no longer be changed in the customer flow.";
+                result.Reservation = reservation;
                 return result;
             }
 
@@ -675,8 +684,18 @@ namespace OCPP.Core.Server.Payments
                 return result;
             }
 
-            var buyerCompanyName = TrimMetadataValue(request.BuyerCompanyName, 200);
-            var buyerOibForMetadata = TrimMetadataValue(normalizedOib, 32);
+            if (!reservation.InvoiceBuyerConfirmedAtUtc.HasValue)
+            {
+                ApplyConfirmedBuyer(reservation, buyerData, _utcNow());
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+            }
+
+            var buyerCompanyName = buyerData.CompanyName;
+            var buyerTaxIdentifier = buyerData.TaxIdentifier;
+            var buyerOibForMetadata = string.Equals(buyerData.Country, "HR", StringComparison.OrdinalIgnoreCase)
+                ? TrimMetadataValue(buyerTaxIdentifier, 32)
+                : null;
 
             try
             {
@@ -695,7 +714,9 @@ namespace OCPP.Core.Server.Payments
                     session.Metadata ?? new Dictionary<string, string>(),
                     StringComparer.OrdinalIgnoreCase);
                 sessionMetadata["invoice_type"] = "R1";
-                sessionMetadata["buyer_oib"] = buyerOibForMetadata;
+                SetOrRemoveMetadata(sessionMetadata, "buyer_oib", buyerOibForMetadata);
+                SetOrRemoveMetadata(sessionMetadata, "buyer_country", buyerData.Country);
+                SetOrRemoveMetadata(sessionMetadata, "buyer_tax_identifier", TrimMetadataValue(buyerTaxIdentifier, 64));
                 if (!string.IsNullOrWhiteSpace(buyerCompanyName))
                 {
                     sessionMetadata["buyer_company"] = buyerCompanyName;
@@ -722,7 +743,9 @@ namespace OCPP.Core.Server.Payments
                         paymentIntent?.Metadata ?? new Dictionary<string, string>(),
                         StringComparer.OrdinalIgnoreCase);
                     intentMetadata["invoice_type"] = "R1";
-                    intentMetadata["buyer_oib"] = buyerOibForMetadata;
+                    SetOrRemoveMetadata(intentMetadata, "buyer_oib", buyerOibForMetadata);
+                    SetOrRemoveMetadata(intentMetadata, "buyer_country", buyerData.Country);
+                    SetOrRemoveMetadata(intentMetadata, "buyer_tax_identifier", TrimMetadataValue(buyerTaxIdentifier, 64));
                     if (!string.IsNullOrWhiteSpace(buyerCompanyName))
                     {
                         intentMetadata["buyer_company"] = buyerCompanyName;
@@ -755,6 +778,8 @@ namespace OCPP.Core.Server.Payments
                 result.Reservation = reservation;
                 result.BuyerCompanyName = buyerCompanyName;
                 result.BuyerOib = buyerOibForMetadata;
+                result.BuyerCountry = buyerData.Country;
+                result.BuyerTaxIdentifier = buyerTaxIdentifier;
 
                 _logger.LogInformation(
                     "Stripe/R1Request => Updated metadata reservation={ReservationId} sessionId={SessionId} hasCompany={HasCompany}",
@@ -772,6 +797,39 @@ namespace OCPP.Core.Server.Payments
                 result.Reservation = reservation;
                 return result;
             }
+        }
+
+        private static void ApplyConfirmedBuyer(ChargePaymentReservation reservation, InvoiceBuyerData buyer, DateTime confirmedAtUtc)
+        {
+            reservation.InvoiceBuyerCountry = buyer.Country;
+            reservation.InvoiceBuyerCompanyName = buyer.CompanyName;
+            reservation.InvoiceBuyerStreet = buyer.Street;
+            reservation.InvoiceBuyerPostalCode = buyer.PostalCode;
+            reservation.InvoiceBuyerCity = buyer.City;
+            reservation.InvoiceBuyerEmail = buyer.Email;
+            reservation.InvoiceBuyerTaxIdentifier = buyer.TaxIdentifier;
+            reservation.InvoiceBuyerRegistrationNumber = buyer.RegistrationNumber;
+            reservation.InvoiceBuyerIdentifierIsVatRegistration = buyer.IdentifierIsVatRegistration;
+            reservation.InvoiceBuyerConfirmedAtUtc = confirmedAtUtc;
+        }
+
+        private static bool MatchesConfirmedBuyer(ChargePaymentReservation reservation, InvoiceBuyerData buyer)
+        {
+            return string.Equals(reservation.InvoiceBuyerCountry, buyer.Country, StringComparison.Ordinal) &&
+                   string.Equals(reservation.InvoiceBuyerCompanyName, buyer.CompanyName, StringComparison.Ordinal) &&
+                   string.Equals(reservation.InvoiceBuyerStreet, buyer.Street, StringComparison.Ordinal) &&
+                   string.Equals(reservation.InvoiceBuyerPostalCode, buyer.PostalCode, StringComparison.Ordinal) &&
+                   string.Equals(reservation.InvoiceBuyerCity, buyer.City, StringComparison.Ordinal) &&
+                   string.Equals(reservation.InvoiceBuyerEmail, buyer.Email, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(reservation.InvoiceBuyerTaxIdentifier, buyer.TaxIdentifier, StringComparison.Ordinal) &&
+                   string.Equals(reservation.InvoiceBuyerRegistrationNumber, buyer.RegistrationNumber, StringComparison.Ordinal) &&
+                   reservation.InvoiceBuyerIdentifierIsVatRegistration == buyer.IdentifierIsVatRegistration;
+        }
+
+        private static void SetOrRemoveMetadata(IDictionary<string, string> metadata, string key, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) metadata.Remove(key);
+            else metadata[key] = value;
         }
 
         public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason)
