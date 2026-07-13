@@ -147,5 +147,57 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(1.20m, usageLine.LineAmount);
             Assert.Equal(3.30m, draft.TotalAmount);
         }
+
+        [Fact]
+        public void Build_PrefersConfirmedReservationBuyerSnapshotOverStripeMetadata()
+        {
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-4",
+                ConnectorId = 1,
+                Currency = "EUR",
+                InvoiceBuyerCountry = "CZ",
+                InvoiceBuyerCompanyName = "Confirmed s.r.o.",
+                InvoiceBuyerStreet = "Pražská 1",
+                InvoiceBuyerPostalCode = "110 00",
+                InvoiceBuyerCity = "Praha",
+                InvoiceBuyerEmail = "confirmed@example.cz",
+                InvoiceBuyerTaxIdentifier = "CZ 123-ABC",
+                InvoiceBuyerRegistrationNumber = "C 12345",
+                InvoiceBuyerIdentifierIsVatRegistration = false,
+                InvoiceBuyerConfirmedAtUtc = DateTime.UtcNow
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 10,
+                StartTime = DateTime.UtcNow.AddHours(-1),
+                StopTime = DateTime.UtcNow,
+                EnergyKwh = 1,
+                EnergyCost = 1m
+            };
+            var session = new Session
+            {
+                CustomerDetails = new SessionCustomerDetails { Email = "stripe@example.com" },
+                Metadata = new System.Collections.Generic.Dictionary<string, string>
+                {
+                    ["invoice_type"] = "R1",
+                    ["buyer_company"] = "Mutable Stripe Company",
+                    ["buyer_oib"] = "12345678903"
+                }
+            };
+
+            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, session);
+
+            Assert.Equal("CZ", draft.BuyerCountry);
+            Assert.Equal("Confirmed s.r.o.", draft.BuyerCompanyName);
+            Assert.Equal("Pražská 1", draft.BuyerStreet);
+            Assert.Equal("110 00", draft.BuyerPostalCode);
+            Assert.Equal("Praha", draft.BuyerCity);
+            Assert.Equal("confirmed@example.cz", draft.BuyerEmail);
+            Assert.Equal("CZ 123-ABC", draft.BuyerTaxIdentifier);
+            Assert.Equal("C 12345", draft.BuyerRegistrationNumber);
+            Assert.False(draft.BuyerIdentifierIsVatRegistration);
+        }
     }
 }

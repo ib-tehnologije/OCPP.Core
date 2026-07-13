@@ -21,15 +21,34 @@ namespace OCPP.Core.Server.Payments.Invoices
             {
                 ReservationId = reservation.ReservationId,
                 TransactionId = transaction.TransactionId,
-                InvoiceKind = IsR1Requested(checkoutSession) ? "R1" : "Retail",
+                InvoiceKind = reservation.InvoiceBuyerConfirmedAtUtc.HasValue || IsR1Requested(checkoutSession) ? "R1" : "Retail",
                 IssueDateUtc = reservation.CapturedAtUtc ?? transaction.StopTime ?? reservation.UpdatedAtUtc,
                 ServiceDateFromUtc = transaction.StartTime,
                 ServiceDateToUtc = transaction.StopTime,
                 Currency = NormalizeCurrency(reservation.Currency ?? transaction.Currency),
-                BuyerCompanyName = GetMetadataValue(checkoutSession, "buyer_company"),
+                BuyerCompanyName = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                    ? reservation.InvoiceBuyerCompanyName
+                    : GetMetadataValue(checkoutSession, "buyer_company"),
                 BuyerPersonalName = checkoutSession?.CustomerDetails?.Name?.Trim(),
-                BuyerOib = GetMetadataValue(checkoutSession, "buyer_oib"),
-                BuyerEmail = checkoutSession?.CustomerDetails?.Email?.Trim(),
+                BuyerOib = reservation.InvoiceBuyerConfirmedAtUtc.HasValue && string.Equals(reservation.InvoiceBuyerCountry, "HR", StringComparison.OrdinalIgnoreCase)
+                    ? reservation.InvoiceBuyerTaxIdentifier
+                    : GetMetadataValue(checkoutSession, "buyer_oib"),
+                BuyerCountry = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                    ? reservation.InvoiceBuyerCountry
+                    : GetMetadataValue(checkoutSession, "buyer_country") ?? "HR",
+                BuyerStreet = reservation.InvoiceBuyerStreet,
+                BuyerPostalCode = reservation.InvoiceBuyerPostalCode,
+                BuyerCity = reservation.InvoiceBuyerCity,
+                BuyerTaxIdentifier = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                    ? reservation.InvoiceBuyerTaxIdentifier
+                    : GetMetadataValue(checkoutSession, "buyer_tax_identifier") ?? GetMetadataValue(checkoutSession, "buyer_oib"),
+                BuyerRegistrationNumber = reservation.InvoiceBuyerRegistrationNumber,
+                BuyerIdentifierIsVatRegistration = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                    ? reservation.InvoiceBuyerIdentifierIsVatRegistration
+                    : null,
+                BuyerEmail = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                    ? reservation.InvoiceBuyerEmail
+                    : checkoutSession?.CustomerDetails?.Email?.Trim(),
                 ChargePointId = reservation.ChargePointId,
                 ConnectorId = reservation.ConnectorId,
                 StripeCheckoutSessionId = reservation.StripeCheckoutSessionId,

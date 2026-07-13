@@ -85,6 +85,15 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         [JsonProperty("buyerCountry")]
         public string BuyerCountry { get; set; }
 
+        [JsonProperty("buyerStreet")]
+        public string BuyerStreet { get; set; }
+
+        [JsonProperty("buyerPostalCode")]
+        public string BuyerPostalCode { get; set; }
+
+        [JsonProperty("buyerCity")]
+        public string BuyerCity { get; set; }
+
         [JsonProperty("buyerTaxNumber")]
         public string BuyerTaxNumber { get; set; }
 
