@@ -285,25 +285,79 @@
                 </div>
                 <div class="info-row">
                     <div class="tile full">
-                        <label for="r1-company" class="field-label" data-i18n="status.r1.companyName">Company name (optional)</label>
+                        <label for="r1-country" class="field-label" data-i18n="status.r1.country">Company country</label>
+                        <select class="field-input" id="r1-country" autocomplete="country">
+                            <option value="HR">Croatia (HR)</option>
+                            <option value="AT">Austria (AT)</option>
+                            <option value="BE">Belgium (BE)</option>
+                            <option value="BG">Bulgaria (BG)</option>
+                            <option value="CY">Cyprus (CY)</option>
+                            <option value="CZ">Czechia (CZ)</option>
+                            <option value="DE">Germany (DE)</option>
+                            <option value="DK">Denmark (DK)</option>
+                            <option value="EE">Estonia (EE)</option>
+                            <option value="GR">Greece (GR)</option>
+                            <option value="ES">Spain (ES)</option>
+                            <option value="FI">Finland (FI)</option>
+                            <option value="FR">France (FR)</option>
+                            <option value="HU">Hungary (HU)</option>
+                            <option value="IE">Ireland (IE)</option>
+                            <option value="IT">Italy (IT)</option>
+                            <option value="LT">Lithuania (LT)</option>
+                            <option value="LU">Luxembourg (LU)</option>
+                            <option value="LV">Latvia (LV)</option>
+                            <option value="MT">Malta (MT)</option>
+                            <option value="NL">Netherlands (NL)</option>
+                            <option value="PL">Poland (PL)</option>
+                            <option value="PT">Portugal (PT)</option>
+                            <option value="RO">Romania (RO)</option>
+                            <option value="SE">Sweden (SE)</option>
+                            <option value="SI">Slovenia (SI)</option>
+                            <option value="SK">Slovakia (SK)</option>
+                        </select>
+
+                        <label for="r1-company" class="field-label field-label--spaced" data-i18n="status.r1.companyName">Legal company name</label>
                         <input type="text"
                                class="field-input"
                                id="r1-company"
                                data-i18n-placeholder="start.companyNamePlaceholder"
                                placeholder="Company / organization name"
-                               autocomplete="organization" />
+                               autocomplete="organization"
+                               maxlength="200" />
 
-                        <label for="r1-oib" class="field-label field-label--spaced" data-i18n="status.r1.oib">OIB (required for R1)</label>
+                        <label for="r1-street" class="field-label field-label--spaced" data-i18n="status.r1.street">Street address</label>
                         <input type="text"
                                class="field-input"
-                               id="r1-oib"
-                               data-i18n-placeholder="start.oibPlaceholder"
-                               placeholder="11 digits"
-                               inputmode="numeric"
-                               autocomplete="off"
-                               pattern="[0-9]{11}"
-                               maxlength="11" />
-                        <div class="field-help" data-i18n="status.r1.oibHelp">OIB is validated before the request is saved.</div>
+                               id="r1-street"
+                               autocomplete="street-address"
+                               maxlength="200" />
+
+                        <label for="r1-postal-code" class="field-label field-label--spaced" data-i18n="status.r1.postalCode">Postal code</label>
+                        <input type="text" class="field-input" id="r1-postal-code" autocomplete="postal-code" maxlength="32" />
+
+                        <label for="r1-city" class="field-label field-label--spaced" data-i18n="status.r1.city">City</label>
+                        <input type="text" class="field-input" id="r1-city" autocomplete="address-level2" maxlength="100" />
+
+                        <label for="r1-email" class="field-label field-label--spaced" data-i18n="status.r1.email">Billing email</label>
+                        <input type="email" class="field-input" id="r1-email" autocomplete="email" maxlength="254" />
+
+                        <label for="r1-tax-identifier" class="field-label field-label--spaced" data-i18n="status.r1.taxIdentifier">OIB / VAT / tax identifier</label>
+                        <input type="text" class="field-input" id="r1-tax-identifier" autocomplete="off" maxlength="64" />
+                        <div class="field-help" data-i18n="status.r1.taxIdentifierHelp">Croatian OIB is checksum validated. Foreign identifiers are issued exactly as entered and are not registry-verified.</div>
+
+                        <label for="r1-registration-number" class="field-label field-label--spaced" data-i18n="status.r1.registrationNumber">Legal registration number (optional)</label>
+                        <input type="text" class="field-input" id="r1-registration-number" autocomplete="off" maxlength="64" />
+
+                        <label class="field-label field-label--spaced">
+                            <input type="checkbox" id="r1-vat-registration" />
+                            <span data-i18n="status.r1.vatRegistration">The tax identifier is a VAT registration number</span>
+                        </label>
+
+                        <div id="r1-review" class="field-help field-help--spaced" aria-live="polite"></div>
+                        <label class="field-label field-label--spaced">
+                            <input type="checkbox" id="r1-confirm" />
+                            <span data-i18n="status.r1.confirm">I confirm these invoice details are correct and may be issued exactly as entered.</span>
+                        </label>
 
                         <div class="form-section form-section--inline">
                             <button type="button" id="r1-submit" class="btn-secondary" data-i18n="status.action.saveR1">Save R1 details</button>
@@ -385,8 +439,17 @@
         const tryAgain = document.getElementById("try-again");
 
         const r1Panel = document.getElementById("r1-panel");
+        const r1Country = document.getElementById("r1-country");
         const r1Company = document.getElementById("r1-company");
-        const r1Oib = document.getElementById("r1-oib");
+        const r1Street = document.getElementById("r1-street");
+        const r1PostalCode = document.getElementById("r1-postal-code");
+        const r1City = document.getElementById("r1-city");
+        const r1Email = document.getElementById("r1-email");
+        const r1TaxIdentifier = document.getElementById("r1-tax-identifier");
+        const r1RegistrationNumber = document.getElementById("r1-registration-number");
+        const r1VatRegistration = document.getElementById("r1-vat-registration");
+        const r1Review = document.getElementById("r1-review");
+        const r1Confirm = document.getElementById("r1-confirm");
         const r1Submit = document.getElementById("r1-submit");
         const r1Result = document.getElementById("r1-result");
 
@@ -847,11 +910,12 @@
         };
 
         async function submitR1Details() {
-            if (!r1Submit || !r1Oib) return;
+            if (!r1Submit || !r1Country || !r1TaxIdentifier || !r1Confirm) return;
 
-            const normalizedOib = String(r1Oib.value || "").replace(/\D/g, "");
-            if (normalizedOib.length !== 11) {
-                setR1Result(t("status.r1.invalidOib"), true);
+            const country = String(r1Country.value || "").trim().toUpperCase();
+            const taxIdentifier = String(r1TaxIdentifier.value || "").trim();
+            if (!r1Confirm.checked) {
+                setR1Result(t("status.r1.confirmRequired"), true);
                 return;
             }
 
@@ -862,7 +926,16 @@
                 const payload = {
                     reservationId,
                     buyerCompanyName: (r1Company?.value || "").trim(),
-                    buyerOib: normalizedOib
+                    buyerCountry: country,
+                    buyerStreet: (r1Street?.value || "").trim(),
+                    buyerPostalCode: (r1PostalCode?.value || "").trim(),
+                    buyerCity: (r1City?.value || "").trim(),
+                    buyerEmail: (r1Email?.value || "").trim(),
+                    buyerTaxIdentifier: taxIdentifier,
+                    buyerOib: country === "HR" ? taxIdentifier.replace(/\D/g, "") : null,
+                    buyerRegistrationNumber: (r1RegistrationNumber?.value || "").trim(),
+                    buyerIdentifierIsVatRegistration: Boolean(r1VatRegistration?.checked),
+                    buyerDataConfirmed: r1Confirm.checked
                 };
 
                 const res = await fetch(requestR1InvoiceUrl, {
@@ -885,7 +958,6 @@
                     return;
                 }
 
-                r1Oib.value = normalizedOib;
                 setR1Result(t("status.r1.saved"), false);
             } catch (err) {
                 setR1Result(t("status.r1.failed"), true);
@@ -897,6 +969,23 @@
         if (r1Submit) {
             r1Submit.addEventListener("click", submitR1Details);
         }
+
+        const updateR1Review = () => {
+            if (!r1Review) return;
+            const parts = [
+                (r1Company?.value || "").trim(),
+                (r1Street?.value || "").trim(),
+                [(r1PostalCode?.value || "").trim(), (r1City?.value || "").trim()].filter(Boolean).join(" "),
+                (r1Country?.value || "").trim(),
+                (r1TaxIdentifier?.value || "").trim(),
+                (r1Email?.value || "").trim()
+            ].filter(Boolean);
+            r1Review.textContent = parts.length ? parts.join(" · ") : t("status.r1.reviewEmpty");
+        };
+        [r1Country, r1Company, r1Street, r1PostalCode, r1City, r1Email, r1TaxIdentifier, r1RegistrationNumber]
+            .filter(Boolean)
+            .forEach(element => element.addEventListener("input", updateR1Review));
+        updateR1Review();
 
         async function submitStop() {
             if (!stopChargingButton || stopChargingButton.disabled) {

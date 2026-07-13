@@ -490,6 +490,46 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("\"status\":\"Error\"", contentResult.Content, StringComparison.Ordinal);
         }
 
+        [Fact]
+        public async Task PaymentsRequestR1Invoice_ForwardsConfirmedForeignBuyerPayload()
+        {
+            Guid reservationId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+            using var server = TestHttpServer.Start(request =>
+            {
+                Assert.Equal("POST", request.Method);
+                Assert.Equal("/Payments/RequestR1", request.Path);
+                Assert.Contains("\"buyerCountry\":\"CZ\"", request.Body, StringComparison.Ordinal);
+                Assert.Contains("\"buyerStreet\":\"Pražská 1\"", request.Body, StringComparison.Ordinal);
+                Assert.Contains("\"buyerTaxIdentifier\":\"CZ 123-ABC\"", request.Body, StringComparison.Ordinal);
+                Assert.Contains("\"buyerDataConfirmed\":true", request.Body, StringComparison.OrdinalIgnoreCase);
+                return TestHttpResponse.Json("{\"status\":\"Updated\",\"buyerCountry\":\"CZ\",\"buyerTaxIdentifier\":\"CZ 123-ABC\"}");
+            });
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-r1-foreign-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.RequestR1Invoice(new PaymentsController.R1InvoicePayload
+            {
+                ReservationId = reservationId,
+                BuyerCountry = "CZ",
+                BuyerCompanyName = "Example s.r.o.",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerRegistrationNumber = "C 12345",
+                BuyerIdentifierIsVatRegistration = false,
+                BuyerDataConfirmed = true
+            });
+
+            var json = Assert.IsType<JsonResult>(result);
+            Assert.NotNull(json.Value);
+            Assert.Equal(StatusCodes.Status200OK, controller.Response.StatusCode);
+        }
+
         private static HomeController CreateHomeController(OCPPCoreContext dbContext, IDictionary<string, string?> configValues)
         {
             IConfiguration configuration = new ConfigurationBuilder()

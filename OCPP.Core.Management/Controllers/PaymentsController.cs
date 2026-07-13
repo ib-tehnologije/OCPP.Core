@@ -237,24 +237,26 @@ namespace OCPP.Core.Management.Controllers
                 return Json(new { success = false, status = "Invalid", message = "Reservation id is required." });
             }
 
-            var normalizedOib = NormalizeOib(request.BuyerOib);
-            if (string.IsNullOrWhiteSpace(normalizedOib))
+            if (!request.BuyerDataConfirmed)
             {
                 Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
-                return Json(new { success = false, status = "InvalidOib", message = "For an R1 (company) invoice, please enter your OIB (11 digits)." });
-            }
-
-            if (!IsValidOib(normalizedOib))
-            {
-                Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
-                return Json(new { success = false, status = "InvalidOib", message = "The OIB you entered is not valid. Please check the 11 digits and try again." });
+                return Json(new { success = false, status = "ConfirmationRequired", message = "Confirm that invoice data is correct before saving." });
             }
 
             var apiResult = await PostAsync("Payments/RequestR1", new
             {
                 reservationId = request.ReservationId,
                 buyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim(),
-                buyerOib = normalizedOib
+                buyerOib = NormalizeOib(request.BuyerOib),
+                buyerCountry = (request.BuyerCountry ?? string.Empty).Trim().ToUpperInvariant(),
+                buyerStreet = (request.BuyerStreet ?? string.Empty).Trim(),
+                buyerPostalCode = (request.BuyerPostalCode ?? string.Empty).Trim(),
+                buyerCity = (request.BuyerCity ?? string.Empty).Trim(),
+                buyerEmail = (request.BuyerEmail ?? string.Empty).Trim(),
+                buyerTaxIdentifier = (request.BuyerTaxIdentifier ?? string.Empty).Trim(),
+                buyerRegistrationNumber = (request.BuyerRegistrationNumber ?? string.Empty).Trim(),
+                buyerIdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration,
+                buyerDataConfirmed = request.BuyerDataConfirmed
             });
 
             var status = ExtractStatus(apiResult.Payload) ?? "Error";
@@ -274,7 +276,8 @@ namespace OCPP.Core.Management.Controllers
                 success = true,
                 status,
                 message = "R1 invoice details were saved successfully.",
-                buyerOib = normalizedOib,
+                buyerCountry = (request.BuyerCountry ?? string.Empty).Trim().ToUpperInvariant(),
+                buyerTaxIdentifier = (request.BuyerTaxIdentifier ?? request.BuyerOib ?? string.Empty).Trim(),
                 buyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim()
             });
         }
@@ -562,6 +565,15 @@ namespace OCPP.Core.Management.Controllers
             public Guid ReservationId { get; set; }
             public string BuyerCompanyName { get; set; }
             public string BuyerOib { get; set; }
+            public string BuyerCountry { get; set; }
+            public string BuyerStreet { get; set; }
+            public string BuyerPostalCode { get; set; }
+            public string BuyerCity { get; set; }
+            public string BuyerEmail { get; set; }
+            public string BuyerTaxIdentifier { get; set; }
+            public string BuyerRegistrationNumber { get; set; }
+            public bool BuyerIdentifierIsVatRegistration { get; set; }
+            public bool BuyerDataConfirmed { get; set; }
         }
     }
 }
