@@ -441,6 +441,39 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CreateCheckoutSession_DoesNotTreatUnreviewedR1IntentAsConfirmedBuyerData()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_r1", Url = "https://checkout/r1", PaymentIntentId = "pi_r1" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1",
+                RequestR1Invoice = true,
+                BuyerCompanyName = "Unreviewed Company",
+                BuyerOib = "12345678903"
+            });
+
+            Assert.Equal("true", sessionService.LastCreateOptions?.Metadata?["invoice_review_requested"]);
+            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("invoice_type"));
+            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("buyer_company"));
+            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("buyer_oib"));
+        }
+
+        [Fact]
         public void ConfirmReservation_CompletesWhenSessionAndIntentValid()
         {
             using var context = CreateContext();

@@ -29,4 +29,3 @@ Validation errors are field-safe and do not echo credentials or raw provider pay
 ## Testing
 
 Tests cover Croatian checksum behavior, foreign normalization and control-character rejection, exact length limits, required fields, confirmation, idempotent retry, immutable conflicting retry, reservation persistence, legacy fallback, e-racuni field mapping, VAT-registration semantics, omitted `buyerCode`, controller payload forwarding, Razor review/confirmation hooks, migration metadata, and the full solution build/test suite.
-

@@ -118,4 +118,3 @@
 - [ ] Run focused tests, full `dotnet test`, `dotnet build`, and `git diff --check`.
 - [ ] Review the diff for secrets/private context and commit the final slice.
 - [ ] Push the request branch, open or update a draft PR, and record validation evidence.
-

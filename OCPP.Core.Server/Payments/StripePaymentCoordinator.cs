@@ -202,19 +202,9 @@ namespace OCPP.Core.Server.Payments
 
             if (request.RequestR1Invoice)
             {
-                metadata["invoice_type"] = "R1";
-            }
-
-            var buyerOib = NormalizeOibDigits(request.BuyerOib);
-            if (!string.IsNullOrWhiteSpace(buyerOib))
-            {
-                metadata["buyer_oib"] = TrimMetadataValue(buyerOib, 32);
-            }
-
-            var buyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(buyerCompanyName))
-            {
-                metadata["buyer_company"] = TrimMetadataValue(buyerCompanyName, 200);
+                // The checkout checkbox records intent only. Buyer data becomes invoice-authoritative
+                // after the dedicated review and confirmation step on the secure status page.
+                metadata["invoice_review_requested"] = "true";
             }
 
             var sessionOptions = new SessionCreateOptions
