@@ -658,6 +658,18 @@ namespace OCPP.Core.Server.Payments
                 return result;
             }
 
+            if (InvoiceSubmissionLogLookup.HasSubmittedOrExternalInvoice(
+                    dbContext,
+                    reservation.ReservationId,
+                    _logger,
+                    "Payments/RequestR1"))
+            {
+                result.Status = "InvoiceAlreadyIssued";
+                result.Error = "Invoice buyer data cannot be changed after submission. Use the supported provider correction, storno, or reissue process.";
+                result.Reservation = reservation;
+                return result;
+            }
+
             if (reservation.InvoiceBuyerConfirmedAtUtc.HasValue && !MatchesConfirmedBuyer(reservation, buyerData))
             {
                 result.Status = "BuyerDataLocked";
@@ -678,7 +690,22 @@ namespace OCPP.Core.Server.Payments
             {
                 ApplyConfirmedBuyer(reservation, buyerData, _utcNow());
                 reservation.UpdatedAtUtc = _utcNow();
-                dbContext.SaveChanges();
+                try
+                {
+                    dbContext.SaveChanges();
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    var entry = dbContext.Entry(reservation);
+                    entry.Reload();
+                    if (!reservation.InvoiceBuyerConfirmedAtUtc.HasValue || !MatchesConfirmedBuyer(reservation, buyerData))
+                    {
+                        result.Status = "BuyerDataLocked";
+                        result.Error = "Confirmed invoice buyer data can no longer be changed in the customer flow.";
+                        result.Reservation = reservation;
+                        return result;
+                    }
+                }
             }
 
             var buyerCompanyName = buyerData.CompanyName;

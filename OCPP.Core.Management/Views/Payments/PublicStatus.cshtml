@@ -219,6 +219,7 @@
                             <div class="value mono" id="done-invoice-updated">-</div>
                         </div>
                     </div>
+                    <div class="field-help field-help--spaced" id="done-invoice-message" hidden></div>
                     <div class="form-section form-section--flush-top" id="done-invoice-actions" hidden>
                         <a class="btn-secondary" id="done-invoice-link" href="#" target="_blank" rel="noopener" data-i18n="status.action.openInvoice">Open invoice</a>
                     </div>
@@ -429,6 +430,7 @@
         const doneInvoiceNumber = document.getElementById("done-invoice-number");
         const doneInvoiceDocument = document.getElementById("done-invoice-document");
         const doneInvoiceUpdated = document.getElementById("done-invoice-updated");
+        const doneInvoiceMessage = document.getElementById("done-invoice-message");
         const doneInvoiceActions = document.getElementById("done-invoice-actions");
         const doneInvoiceLink = document.getElementById("done-invoice-link");
 
@@ -452,6 +454,9 @@
         const r1Confirm = document.getElementById("r1-confirm");
         const r1Submit = document.getElementById("r1-submit");
         const r1Result = document.getElementById("r1-result");
+        const r1Controls = [r1Country, r1Company, r1Street, r1PostalCode, r1City, r1Email,
+            r1TaxIdentifier, r1RegistrationNumber, r1VatRegistration, r1Confirm, r1Submit].filter(Boolean);
+        let r1BuyerDataLocked = false;
 
         const stopChargingLabel = stopChargingButton ? stopChargingButton.querySelector("[data-i18n]") : null;
 
@@ -701,6 +706,10 @@
                 doneInvoiceSection.hidden = true;
                 doneInvoiceActions.hidden = true;
                 doneInvoiceLink.removeAttribute("href");
+                if (doneInvoiceMessage) {
+                    doneInvoiceMessage.hidden = true;
+                    doneInvoiceMessage.textContent = "";
+                }
                 return;
             }
 
@@ -710,6 +719,16 @@
             doneInvoiceNumber.textContent = invoice.externalInvoiceNumber || "-";
             doneInvoiceDocument.textContent = invoice.externalDocumentId || "-";
             doneInvoiceUpdated.textContent = fmtLocal(parseDate(invoice.completedAtUtc) || parseDate(invoice.createdAtUtc));
+            if (doneInvoiceMessage) {
+                doneInvoiceMessage.textContent = invoice.customerMessage || "";
+                doneInvoiceMessage.hidden = !invoice.customerMessage;
+            }
+
+            r1BuyerDataLocked = invoice.customerBuyerDataLocked === true;
+            r1Controls.forEach(control => { control.disabled = r1BuyerDataLocked; });
+            if (r1BuyerDataLocked) {
+                setR1Result(t("status.r1.lockedAfterIssue"), true);
+            }
 
             if (invoice.invoiceUrl) {
                 doneInvoiceLink.href = invoice.invoiceUrl;
@@ -954,7 +973,15 @@
                 }
 
                 if (!res.ok || !data?.success) {
-                    setR1Result(data?.status === "InvalidOib" ? t("status.r1.invalidOib") : t("status.r1.failed"), true);
+                    const locked = data?.status === "InvoiceAlreadyIssued" || data?.status === "BuyerDataLocked";
+                    setR1Result(
+                        locked ? t("status.r1.lockedAfterIssue") :
+                            (data?.status === "InvalidOib" ? t("status.r1.invalidOib") : t("status.r1.failed")),
+                        true);
+                    if (locked) {
+                        r1BuyerDataLocked = true;
+                        r1Controls.forEach(control => { control.disabled = true; });
+                    }
                     return;
                 }
 
@@ -962,7 +989,7 @@
             } catch (err) {
                 setR1Result(t("status.r1.failed"), true);
             } finally {
-                r1Submit.disabled = false;
+                r1Submit.disabled = r1BuyerDataLocked;
             }
         }
 

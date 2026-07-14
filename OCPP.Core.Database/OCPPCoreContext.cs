@@ -408,7 +408,8 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.InvoiceBuyerTaxIdentifier).HasMaxLength(64);
                 entity.Property(e => e.InvoiceBuyerRegistrationNumber).HasMaxLength(64);
                 entity.Property(e => e.InvoiceBuyerIdentifierIsVatRegistration);
-                entity.Property(e => e.InvoiceBuyerConfirmedAtUtc);
+                entity.Property(e => e.InvoiceBuyerConfirmedAtUtc)
+                    .IsConcurrencyToken();
 
                 entity.HasIndex(e => e.StripeCheckoutSessionId)
                     .HasDatabaseName("IX_PaymentReservations_StripeSession");

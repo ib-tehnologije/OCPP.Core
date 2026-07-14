@@ -94,6 +94,7 @@ namespace OCPP.Core.Database.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime?>("InvoiceBuyerConfirmedAtUtc")
+                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<string>("InvoiceBuyerCountry")

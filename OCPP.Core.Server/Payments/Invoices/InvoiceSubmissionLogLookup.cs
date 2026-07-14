@@ -63,6 +63,53 @@ namespace OCPP.Core.Server.Payments.Invoices
             return string.IsNullOrWhiteSpace(log.ExternalPublicUrl) ? null : log.ExternalPublicUrl;
         }
 
+        public static bool HasSubmittedOrExternalInvoice(
+            OCPPCoreContext dbContext,
+            Guid reservationId,
+            ILogger logger,
+            string reason)
+        {
+            if (dbContext == null || reservationId == Guid.Empty)
+            {
+                return false;
+            }
+
+            try
+            {
+                return dbContext.InvoiceSubmissionLogs.AsNoTracking().Any(log =>
+                    log.ReservationId == reservationId &&
+                    (log.Status == "Submitted" ||
+                     log.ExternalDocumentId != null ||
+                     log.ExternalInvoiceNumber != null ||
+                     log.ExternalPublicUrl != null ||
+                     log.ExternalPdfUrl != null));
+            }
+            catch (Exception ex)
+            {
+                logger?.LogDebug(
+                    ex,
+                    "Invoice/Lookup => Unable to determine issued state reservation={ReservationId} reason={Reason}",
+                    reservationId,
+                    reason);
+                return false;
+            }
+        }
+
+        public static string GetCustomerSafeError(InvoiceSubmissionLog log)
+        {
+            if (log == null || !string.Equals(log.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (log.HttpStatusCode is >= 400 and <= 499)
+            {
+                return "The invoice provider rejected the buyer details. Review the invoice data or contact support for correction.";
+            }
+
+            return "Invoice submission could not be completed. Contact support before retrying or correcting the invoice.";
+        }
+
         private static InvoiceSubmissionLog TryQuery(
             OCPPCoreContext dbContext,
             Guid reservationId,

@@ -646,6 +646,7 @@
       "status.r1.invalidOib": "Unesite ispravan OIB (11 znamenki).",
       "status.r1.saved": "R1 podaci su uspješno spremljeni.",
       "status.r1.failed": "R1 podatke trenutno nije moguće spremiti. Pokušajte ponovno.",
+      "status.r1.lockedAfterIssue": "Podaci kupca više se ne mogu mijenjati nakon predaje računa. Za ispravak se obratite podršci.",
       "status.refundCalc": "Autorizacija {authorized} - naplaćeno {captured} = povrat {refund}"
     },
     en: {
@@ -741,6 +742,7 @@
       "status.r1.invalidOib": "Please enter a valid OIB (11 digits).",
       "status.r1.saved": "R1 details saved successfully.",
       "status.r1.failed": "Unable to save R1 details right now. Please try again.",
+      "status.r1.lockedAfterIssue": "Buyer details cannot be changed after invoice submission. Contact support for a correction.",
       "status.refundCalc": "Pre-auth {authorized} - charged {captured} = refund {refund}"
     },
     sl: {
@@ -836,6 +838,7 @@
       "status.r1.invalidOib": "Vnesite veljavno davčno številko (11 številk).",
       "status.r1.saved": "R1 podatki so uspešno shranjeni.",
       "status.r1.failed": "R1 podatkov trenutno ni mogoče shraniti. Poskusite znova.",
+      "status.r1.lockedAfterIssue": "Podatkov kupca po oddaji računa ni več mogoče spreminjati. Za popravek se obrnite na podporo.",
       "status.refundCalc": "Predavtorizacija {authorized} - zaračunano {captured} = vračilo {refund}"
     },
     it: {
@@ -931,6 +934,7 @@
       "status.r1.invalidOib": "Inserisci un OIB valido (11 cifre).",
       "status.r1.saved": "Dati R1 salvati correttamente.",
       "status.r1.failed": "Impossibile salvare i dati R1 in questo momento. Riprova.",
+      "status.r1.lockedAfterIssue": "I dati dell'acquirente non possono essere modificati dopo l'invio della fattura. Contatta l'assistenza per una correzione.",
       "status.refundCalc": "Pre-autorizzazione {authorized} - addebitato {captured} = rimborso {refund}"
     },
     de: {
@@ -1026,6 +1030,7 @@
       "status.r1.invalidOib": "Bitte geben Sie eine gültige OIB ein (11 Ziffern).",
       "status.r1.saved": "R1-Daten erfolgreich gespeichert.",
       "status.r1.failed": "R1-Daten können derzeit nicht gespeichert werden. Bitte versuchen Sie es erneut.",
+      "status.r1.lockedAfterIssue": "Käuferdaten können nach der Rechnungsübermittlung nicht mehr geändert werden. Wenden Sie sich für eine Korrektur an den Support.",
       "status.refundCalc": "Vorautorisierung {authorized} - belastet {captured} = Rückerstattung {refund}"
     },
     fr: {
@@ -1121,6 +1126,7 @@
       "status.r1.invalidOib": "Veuillez saisir un OIB valide (11 chiffres).",
       "status.r1.saved": "Données R1 enregistrées avec succès.",
       "status.r1.failed": "Impossible d'enregistrer les données R1 pour le moment. Veuillez réessayer.",
+      "status.r1.lockedAfterIssue": "Les données de l'acheteur ne peuvent plus être modifiées après l'envoi de la facture. Contactez l'assistance pour une correction.",
       "status.refundCalc": "Préautorisation {authorized} - facturé {captured} = remboursement {refund}"
     }
   };

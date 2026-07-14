@@ -2548,6 +2548,13 @@ namespace OCPP.Core.Server
                 _logger,
                 "Payments/Status");
             var latestInvoiceUrl = InvoiceSubmissionLogLookup.GetPreferredDocumentUrl(latestInvoiceLog);
+            var customerInvoiceMessage = InvoiceSubmissionLogLookup.GetCustomerSafeError(latestInvoiceLog);
+            var customerBuyerDataLocked = reservation.InvoiceBuyerConfirmedAtUtc.HasValue ||
+                InvoiceSubmissionLogLookup.HasSubmittedOrExternalInvoice(
+                    dbContext,
+                    reservation.ReservationId,
+                    _logger,
+                    "Payments/Status");
 
             TryResolveLiveChargePointStatus(reservation.ChargePointId, "Payments/Status", out var cpStatus, logIfMissing: false);
             if (cpStatus?.OnlineConnectors != null &&
@@ -2753,6 +2760,8 @@ namespace OCPP.Core.Server
                         externalPdfUrl = latestInvoiceLog.ExternalPdfUrl,
                         invoiceUrl = latestInvoiceUrl,
                         providerResponseStatus = latestInvoiceLog.ProviderResponseStatus,
+                        customerMessage = customerInvoiceMessage,
+                        customerBuyerDataLocked,
                         createdAtUtc = latestInvoiceLog.CreatedAtUtc,
                         completedAtUtc = latestInvoiceLog.CompletedAtUtc
                     }

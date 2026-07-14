@@ -77,6 +77,8 @@ Confirmed company invoice buyer data is stored as nullable bounded columns on `C
 
 Foreign tax identifiers are not registry-verified by the application. Provider validation failures must remain sanitized in customer responses and logs; do not expose e-racuni credentials or raw authenticated request envelopes while diagnosing invoice submission.
 
+Once an invoice submission log is marked submitted or contains an external document identifier, number, or URL, the public buyer-data endpoint is locked. Corrections must use the provider-supported correction, storno, or reissue process rather than mutating the reservation snapshot.
+
 SQL Server:
 
 - EF migrations live in `OCPP.Core.Database/Migrations`.

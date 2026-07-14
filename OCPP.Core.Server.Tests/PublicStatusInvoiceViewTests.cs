@@ -22,6 +22,9 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("id=\"r1-review\"", view);
             Assert.Contains("id=\"r1-confirm\"", view);
             Assert.Contains("buyerDataConfirmed: r1Confirm.checked", view);
+            Assert.Contains("id=\"done-invoice-message\"", view);
+            Assert.Contains("invoice.customerMessage", view);
+            Assert.Contains("invoice.customerBuyerDataLocked", view);
         }
 
         private static string ReadView()
