@@ -399,6 +399,17 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.StopTransactionAtUtc);
                 entity.Property(e => e.DisconnectedAtUtc);
                 entity.Property(e => e.LastOcppEventAtUtc);
+                entity.Property(e => e.InvoiceBuyerCountry).HasMaxLength(2);
+                entity.Property(e => e.InvoiceBuyerCompanyName).HasMaxLength(200);
+                entity.Property(e => e.InvoiceBuyerStreet).HasMaxLength(200);
+                entity.Property(e => e.InvoiceBuyerPostalCode).HasMaxLength(32);
+                entity.Property(e => e.InvoiceBuyerCity).HasMaxLength(100);
+                entity.Property(e => e.InvoiceBuyerEmail).HasMaxLength(254);
+                entity.Property(e => e.InvoiceBuyerTaxIdentifier).HasMaxLength(64);
+                entity.Property(e => e.InvoiceBuyerRegistrationNumber).HasMaxLength(64);
+                entity.Property(e => e.InvoiceBuyerIdentifierIsVatRegistration);
+                entity.Property(e => e.InvoiceBuyerConfirmedAtUtc)
+                    .IsConcurrencyToken();
 
                 entity.HasIndex(e => e.StripeCheckoutSessionId)
                     .HasDatabaseName("IX_PaymentReservations_StripeSession");

@@ -65,5 +65,15 @@ namespace OCPP.Core.Database
         public DateTime? LastOcppEventAtUtc { get; set; }
         public bool? AwaitingPlug { get; set; }
         public int? StartTransactionId { get; set; }
+        public string InvoiceBuyerCountry { get; set; }
+        public string InvoiceBuyerCompanyName { get; set; }
+        public string InvoiceBuyerStreet { get; set; }
+        public string InvoiceBuyerPostalCode { get; set; }
+        public string InvoiceBuyerCity { get; set; }
+        public string InvoiceBuyerEmail { get; set; }
+        public string InvoiceBuyerTaxIdentifier { get; set; }
+        public string InvoiceBuyerRegistrationNumber { get; set; }
+        public bool? InvoiceBuyerIdentifierIsVatRegistration { get; set; }
+        public DateTime? InvoiceBuyerConfirmedAtUtc { get; set; }
     }
 }

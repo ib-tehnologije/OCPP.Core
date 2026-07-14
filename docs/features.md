@@ -138,6 +138,12 @@ Important edge cases:
 
 ## Invoice and Email Integrations
 
+Company invoice requests support a confirmed reservation-bound buyer snapshot. Croatian companies retain strict OIB checksum validation. Foreign companies provide an ISO two-letter country, legal name and address, billing email, a required free-form tax/VAT/company identifier, and an optional legal registration number. Foreign identifiers are treated as user-supplied and unverified; registry or VIES availability does not block payment or invoice issuance. The public status flow shows a final review and requires explicit confirmation. First confirmation is concurrency-protected, and customer-side edits are rejected after confirmation or provider submission; corrections use the provider-supported correction, storno, or reissue path.
+
+The e-racuni payload maps supported buyer name, street, postal code, city, country, tax identifier, email, and explicit VAT-registration status. Legal registration numbers remain in the internal confirmed snapshot because the provider contract has no dedicated supported field; they are not mapped into `buyerCode`.
+
+Failed provider validation is exposed on payment status only as a bounded customer-safe message. Raw provider bodies, credentials, and buyer diagnostics remain outside the public response.
+
 Code locations:
 
 - `OCPP.Core.Server/Payments/Invoices/`

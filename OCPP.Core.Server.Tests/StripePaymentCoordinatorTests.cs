@@ -441,6 +441,39 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CreateCheckoutSession_DoesNotTreatUnreviewedR1IntentAsConfirmedBuyerData()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_r1", Url = "https://checkout/r1", PaymentIntentId = "pi_r1" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1",
+                RequestR1Invoice = true,
+                BuyerCompanyName = "Unreviewed Company",
+                BuyerOib = "12345678903"
+            });
+
+            Assert.Equal("true", sessionService.LastCreateOptions?.Metadata?["invoice_review_requested"]);
+            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("invoice_type"));
+            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("buyer_company"));
+            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("buyer_oib"));
+        }
+
+        [Fact]
         public void ConfirmReservation_CompletesWhenSessionAndIntentValid()
         {
             using var context = CreateContext();
@@ -1067,7 +1100,9 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme d.o.o.",
-                BuyerOib = "12345678903"
+                BuyerOib = "12345678903",
+                BuyerCountry = "HR",
+                BuyerDataConfirmed = true
             });
 
             Assert.True(result.Success);
@@ -1113,7 +1148,9 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme",
-                BuyerOib = "12345678901"
+                BuyerOib = "12345678901",
+                BuyerCountry = "HR",
+                BuyerDataConfirmed = true
             });
 
             Assert.False(result.Success);
@@ -1121,6 +1158,231 @@ namespace OCPP.Core.Server.Tests
             Assert.Null(sessionService.LastUpdateOptions);
             Assert.Null(intentService.LastUpdateOptions);
         }
+
+        [Fact]
+        public void RequestR1Invoice_PersistsForeignBuyerSnapshotAndRejectsConflictingChange()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_foreign_buyer",
+                StripePaymentIntentId = "pi_foreign_buyer",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_foreign_buyer",
+                    PaymentIntentId = "pi_foreign_buyer",
+                    Metadata = new Dictionary<string, string>()
+                }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_foreign_buyer", Metadata = new Dictionary<string, string>() }
+            };
+            var now = new DateTime(2026, 7, 14, 0, 30, 0, DateTimeKind.Utc);
+            var coordinator = CreateCoordinator(context, sessionService, intentService, now: () => now);
+            var request = new PaymentR1InvoiceRequest
+            {
+                ReservationId = reservationId,
+                BuyerCountry = "CZ",
+                BuyerCompanyName = "Example s.r.o.",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerRegistrationNumber = "C 12345",
+                BuyerIdentifierIsVatRegistration = false,
+                BuyerDataConfirmed = true
+            };
+
+            var first = coordinator.RequestR1Invoice(context, request);
+            var identicalRetry = coordinator.RequestR1Invoice(context, request);
+            var conflicting = coordinator.RequestR1Invoice(context, new PaymentR1InvoiceRequest
+            {
+                ReservationId = reservationId,
+                BuyerCountry = "CZ",
+                BuyerCompanyName = "Changed s.r.o.",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerDataConfirmed = true
+            });
+
+            Assert.True(first.Success);
+            Assert.True(identicalRetry.Success);
+            Assert.False(conflicting.Success);
+            Assert.Equal("BuyerDataLocked", conflicting.Status);
+            Assert.Equal("CZ", reservation.InvoiceBuyerCountry);
+            Assert.Equal("Example s.r.o.", reservation.InvoiceBuyerCompanyName);
+            Assert.Equal("CZ 123-ABC", reservation.InvoiceBuyerTaxIdentifier);
+            Assert.Equal("C 12345", reservation.InvoiceBuyerRegistrationNumber);
+            Assert.False(reservation.InvoiceBuyerIdentifierIsVatRegistration);
+            Assert.Equal(now, reservation.InvoiceBuyerConfirmedAtUtc);
+        }
+
+        [Fact]
+        public void RequestR1Invoice_RejectsCustomerChangesAfterInvoiceSubmission()
+        {
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_issued",
+                Status = PaymentReservationStatus.Completed,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            context.InvoiceSubmissionLogs.Add(new InvoiceSubmissionLog
+            {
+                ReservationId = reservationId,
+                Provider = "ERacuni",
+                Mode = "Submit",
+                Status = "Submitted",
+                ExternalDocumentId = "invoice-42",
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService();
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            var result = coordinator.RequestR1Invoice(context, CreateForeignBuyerRequest(reservationId, "Too late s.r.o."));
+
+            Assert.False(result.Success);
+            Assert.Equal("InvoiceAlreadyIssued", result.Status);
+            Assert.Contains("correction", result.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.Null(sessionService.LastUpdateOptions);
+        }
+
+        [Fact]
+        public void RequestR1Invoice_TwoContextsCannotOverwriteFirstConfirmation()
+        {
+            var databaseName = Guid.NewGuid().ToString();
+            var reservationId = Guid.NewGuid();
+            using (var setup = CreateContext(databaseName))
+            {
+                setup.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP1",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG1",
+                    StripeCheckoutSessionId = "sess_race",
+                    Status = PaymentReservationStatus.Authorized,
+                    Currency = "eur",
+                    CreatedAtUtc = DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.UtcNow
+                });
+                setup.SaveChanges();
+            }
+
+            using var firstContext = CreateContext(databaseName);
+            using var secondContext = CreateContext(databaseName);
+            Assert.NotNull(firstContext.ChargePaymentReservations.Find(reservationId));
+            Assert.NotNull(secondContext.ChargePaymentReservations.Find(reservationId));
+
+            var firstCoordinator = CreateCoordinator(
+                firstContext,
+                CreateInvoiceSessionService("sess_race"),
+                new FakePaymentIntentService());
+            var secondCoordinator = CreateCoordinator(
+                secondContext,
+                CreateInvoiceSessionService("sess_race"),
+                new FakePaymentIntentService());
+
+            var first = firstCoordinator.RequestR1Invoice(firstContext, CreateForeignBuyerRequest(reservationId, "First s.r.o."));
+            var second = secondCoordinator.RequestR1Invoice(secondContext, CreateForeignBuyerRequest(reservationId, "Second s.r.o."));
+
+            Assert.True(first.Success);
+            Assert.False(second.Success);
+            Assert.Equal("BuyerDataLocked", second.Status);
+            using var verification = CreateContext(databaseName);
+            Assert.Equal("First s.r.o.", verification.ChargePaymentReservations.Find(reservationId)?.InvoiceBuyerCompanyName);
+        }
+
+        [Fact]
+        public void RequestR1Invoice_TwoContextsTreatIdenticalFirstConfirmationAsIdempotent()
+        {
+            var databaseName = Guid.NewGuid().ToString();
+            var reservationId = Guid.NewGuid();
+            using (var setup = CreateContext(databaseName))
+            {
+                setup.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP1",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG1",
+                    StripeCheckoutSessionId = "sess_idempotent_race",
+                    Status = PaymentReservationStatus.Authorized,
+                    Currency = "eur",
+                    CreatedAtUtc = DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.UtcNow
+                });
+                setup.SaveChanges();
+            }
+
+            using var firstContext = CreateContext(databaseName);
+            using var secondContext = CreateContext(databaseName);
+            Assert.NotNull(firstContext.ChargePaymentReservations.Find(reservationId));
+            Assert.NotNull(secondContext.ChargePaymentReservations.Find(reservationId));
+
+            var request = CreateForeignBuyerRequest(reservationId, "Same s.r.o.");
+            var first = CreateCoordinator(firstContext, CreateInvoiceSessionService("sess_idempotent_race"), new FakePaymentIntentService())
+                .RequestR1Invoice(firstContext, request);
+            var second = CreateCoordinator(secondContext, CreateInvoiceSessionService("sess_idempotent_race"), new FakePaymentIntentService())
+                .RequestR1Invoice(secondContext, request);
+
+            Assert.True(first.Success);
+            Assert.True(second.Success);
+            using var verification = CreateContext(databaseName);
+            Assert.Equal("Same s.r.o.", verification.ChargePaymentReservations.Find(reservationId)?.InvoiceBuyerCompanyName);
+        }
+
+        private static PaymentR1InvoiceRequest CreateForeignBuyerRequest(Guid reservationId, string companyName) => new()
+        {
+            ReservationId = reservationId,
+            BuyerCountry = "CZ",
+            BuyerCompanyName = companyName,
+            BuyerStreet = "Pražská 1",
+            BuyerPostalCode = "110 00",
+            BuyerCity = "Praha",
+            BuyerEmail = "billing@example.cz",
+            BuyerTaxIdentifier = "CZ12345678",
+            BuyerIdentifierIsVatRegistration = true,
+            BuyerDataConfirmed = true
+        };
+
+        private static FakeSessionService CreateInvoiceSessionService(string sessionId) => new()
+        {
+            GetResponse = new Session
+            {
+                Id = sessionId,
+                Metadata = new Dictionary<string, string>()
+            }
+        };
 
         [Fact]
         public void CompleteReservation_CapturesWhenAmountDue()

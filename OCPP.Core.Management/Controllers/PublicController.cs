@@ -69,8 +69,8 @@ namespace OCPP.Core.Management.Controllers
             int requestedConnectorId = request?.ConnectorId ?? 1;
             var model = await BuildViewModelAsync(request?.ChargePointId, requestedConnectorId);
             model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
-            model.BuyerCompanyName = request?.BuyerCompanyName;
-            model.BuyerOib = request?.BuyerOib;
+            model.BuyerCompanyName = null;
+            model.BuyerOib = null;
 
             if (string.IsNullOrWhiteSpace(model.ChargePointId))
             {
@@ -85,31 +85,6 @@ namespace OCPP.Core.Management.Controllers
                 return View(model);
             }
 
-            if (model.RequestR1Invoice)
-            {
-                var normalizedOib = NormalizeOib(model.BuyerOib);
-                if (string.IsNullOrWhiteSpace(normalizedOib))
-                {
-                    model.ErrorMessage = "For an R1 (company) invoice, please enter your OIB (11 digits).";
-                    return View(model);
-                }
-
-                if (!IsValidOib(normalizedOib))
-                {
-                    model.ErrorMessage = "The OIB you entered is not valid. Please check the 11 digits and try again.";
-                    return View(model);
-                }
-
-                model.BuyerOib = normalizedOib;
-                model.BuyerCompanyName = (model.BuyerCompanyName ?? string.Empty).Trim();
-            }
-            else
-            {
-                // Avoid leaking stale hidden form values when R1 is not requested.
-                model.BuyerOib = null;
-                model.BuyerCompanyName = null;
-            }
-
             var chargeTagId = $"WEB-{Guid.NewGuid():N}";
             model.ChargeTagId = chargeTagId;
 
@@ -119,8 +94,6 @@ namespace OCPP.Core.Management.Controllers
                 connectorId = model.ConnectorId,
                 chargeTagId = chargeTagId,
                 requestR1Invoice = model.RequestR1Invoice,
-                buyerCompanyName = model.BuyerCompanyName,
-                buyerOib = model.BuyerOib,
                 origin = "public",
                 returnBaseUrl = $"{Request.Scheme}://{Request.Host}"
             });

@@ -320,17 +320,12 @@
                             <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
                             <div class="r1-label">
                                 <strong data-i18n="start.companyInvoice">Company invoice</strong>
-                                <span class="r1-hint" data-i18n="start.r1Hint">If you need an R1 invoice, enter your company info below or add it later from the session status page.</span>
+                                <span class="r1-hint" data-i18n="start.r1Hint">After checkout, review and confirm your company details on the secure session status page.</span>
                             </div>
                         </label>
 
                         <div id="r1Fields" class="r1-fields" @(Model.RequestR1Invoice ? null : "hidden")>
-                            <label for="buyerCompanyName" class="field-label" data-i18n="start.companyName">Company name (optional)</label>
-                            <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" placeholder="Company / organization name" data-i18n-placeholder="start.companyNamePlaceholder" autocomplete="organization" />
-
-                            <label for="buyerOib" class="field-label field-label--spaced" data-i18n="start.oib">OIB (required for R1)</label>
-                            <input type="text" class="field-input" id="buyerOib" name="BuyerOib" value="@Model.BuyerOib" placeholder="11 digits" data-i18n-placeholder="start.oibPlaceholder" inputmode="numeric" autocomplete="off" pattern="[0-9]{11}" maxlength="11" />
-                            <div class="field-help" data-i18n="start.r1MetadataHint">We will include this information in Stripe metadata so you can issue an R1 invoice.</div>
+                            <div class="field-help" data-i18n="start.r1MetadataHint">Buyer data is collected after checkout, reviewed before confirmation, and stored with the charging reservation rather than as payment data.</div>
                         </div>
 
                         <button type="submit" class="btn-primary">

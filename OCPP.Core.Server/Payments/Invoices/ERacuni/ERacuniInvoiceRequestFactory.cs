@@ -34,6 +34,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
 
             if (string.Equals(draft.InvoiceKind, "R1", StringComparison.OrdinalIgnoreCase) &&
                 eracuni.RequireBuyerTaxNumberForR1 &&
+                string.IsNullOrWhiteSpace(draft.BuyerTaxIdentifier) &&
                 string.IsNullOrWhiteSpace(draft.BuyerOib))
             {
                 throw new InvalidOperationException("R1 invoice requires buyer OIB/tax number before e-racuni submission.");
@@ -62,8 +63,11 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 DateOfSupplyUntil = FormatDate(supplyUntilDate),
                 VatTransactionType = NullIfWhiteSpace(eracuni.VatTransactionType),
                 BuyerName = ResolveBuyerName(draft),
-                BuyerCountry = "HR",
-                BuyerTaxNumber = NullIfWhiteSpace(draft.BuyerOib),
+                BuyerCountry = NullIfWhiteSpace(draft.BuyerCountry)?.ToUpperInvariant() ?? "HR",
+                BuyerStreet = NullIfWhiteSpace(draft.BuyerStreet),
+                BuyerPostalCode = NullIfWhiteSpace(draft.BuyerPostalCode),
+                BuyerCity = NullIfWhiteSpace(draft.BuyerCity),
+                BuyerTaxNumber = NullIfWhiteSpace(draft.BuyerTaxIdentifier) ?? NullIfWhiteSpace(draft.BuyerOib),
                 BuyerVatRegistration = ResolveBuyerVatRegistration(draft, eracuni),
                 BuyerCode = ResolveBuyerCode(draft),
                 BuyerEMail = NullIfWhiteSpace(draft.BuyerEmail),
@@ -171,9 +175,14 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
 
         private static string ResolveBuyerVatRegistration(InvoiceDraft draft, ERacuniInvoiceOptions options)
         {
-            if (draft == null || string.IsNullOrWhiteSpace(draft.BuyerOib))
+            if (draft == null || (string.IsNullOrWhiteSpace(draft.BuyerTaxIdentifier) && string.IsNullOrWhiteSpace(draft.BuyerOib)))
             {
                 return null;
+            }
+
+            if (draft.BuyerIdentifierIsVatRegistration.HasValue)
+            {
+                return draft.BuyerIdentifierIsVatRegistration.Value ? "Registered" : "Unknown";
             }
 
             return NullIfWhiteSpace(options?.BuyerVatRegistration) ?? "Registered";

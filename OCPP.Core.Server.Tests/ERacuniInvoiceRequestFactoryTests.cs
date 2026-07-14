@@ -27,6 +27,13 @@ namespace OCPP.Core.Server.Tests
                 BuyerCompanyName = "Acme d.o.o.",
                 BuyerPersonalName = "Denis Draguzet",
                 BuyerOib = "12345678901",
+                BuyerCountry = "CZ",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerRegistrationNumber = "C 12345",
+                BuyerIdentifierIsVatRegistration = false,
                 BuyerEmail = "billing@example.com",
                 ChargePointId = "CP-42",
                 ConnectorId = 2,
@@ -82,9 +89,13 @@ namespace OCPP.Core.Server.Tests
             Assert.Null(invoice.MethodOfPayment);
             Assert.Equal("Retail", invoice.Type);
             Assert.Equal("Acme d.o.o.", invoice.BuyerName);
-            Assert.Equal("12345678901", invoice.BuyerTaxNumber);
+            Assert.Equal("CZ", invoice.BuyerCountry);
+            Assert.Equal("Pražská 1", invoice.BuyerStreet);
+            Assert.Equal("110 00", invoice.BuyerPostalCode);
+            Assert.Equal("Praha", invoice.BuyerCity);
+            Assert.Equal("CZ 123-ABC", invoice.BuyerTaxNumber);
             Assert.Null(invoice.BuyerCode);
-            Assert.Equal("Registered", invoice.BuyerVatRegistration);
+            Assert.Equal("Unknown", invoice.BuyerVatRegistration);
             Assert.Equal("billing@example.com", invoice.BuyerEMail);
             Assert.Equal("STRIPE-pi_123", invoice.Reference);
             Assert.Equal("EVSE-42", invoice.OrderReference);

@@ -181,6 +181,62 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task HandlePaymentStatusAsync_SurfacesSanitizedProviderValidationMessage()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-invoice-error-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-STATUS",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-STATUS",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Completed,
+                        CreatedAtUtc = DateTime.UtcNow,
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.InvoiceSubmissionLogs.Add(new InvoiceSubmissionLog
+                    {
+                        ReservationId = reservationId,
+                        Provider = "ERacuni",
+                        Mode = "Submit",
+                        Status = "Failed",
+                        HttpStatusCode = 422,
+                        Error = "raw provider payload with secret-token and customer tax data",
+                        CreatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.Method = "GET";
+                httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                httpContext.Response.Body = new MemoryStream();
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                }
+
+                httpContext.Response.Body.Position = 0;
+                var payload = JObject.Parse(await new StreamReader(httpContext.Response.Body).ReadToEndAsync());
+                var message = payload["invoice"]?["customerMessage"]?.Value<string>();
+                Assert.Contains("buyer", message, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("secret-token", message, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("tax data", message, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task HandlePaymentStatusAsync_IncludesPublicConnectorPresentationFields()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-public-connector-{Guid.NewGuid():N}.sqlite");
