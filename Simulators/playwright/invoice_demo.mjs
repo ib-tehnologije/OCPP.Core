@@ -45,6 +45,145 @@ export const invoiceDemoMessages = Object.freeze({
   saved: "R1 details saved successfully.",
 });
 
+export const invoiceDemoRecordingContract = Object.freeze({
+  billingExplainer: Object.freeze({
+    filename: "billing-rules-explainer.webm",
+    maximumDurationSeconds: 180,
+    minimumDurationSeconds: 60,
+  }),
+  uiWalkthrough: Object.freeze({
+    filename: "ui-walkthrough.webm",
+    maximumDurationSeconds: 360,
+    minimumDurationSeconds: 180,
+  }),
+});
+
+export const invoiceDemoOverlayIds = Object.freeze({
+  caption: "invoice-demo-caption",
+  cursor: "invoice-demo-cursor",
+  explainer: "invoice-demo-explainer",
+});
+
+export function buildBuyerEntrySteps(buyer) {
+  const type = (selector, label, value) => ({
+    action: "type",
+    dwellAfterMs: 2_000,
+    label,
+    selector,
+    typingDelayMs: 80,
+    value,
+  });
+  return [
+    { action: "select", dwellAfterMs: 2_000, label: "Country", selector: "#r1-country", value: buyer.country },
+    type("#r1-company", "Company name", buyer.companyName),
+    type("#r1-street", "Street and number", buyer.street),
+    type("#r1-postal-code", "Postal code", buyer.postalCode),
+    type("#r1-city", "City", buyer.city),
+    type("#r1-email", "Billing email", buyer.email),
+    type("#r1-tax-identifier", buyer.country === "HR" ? "Croatian OIB" : "VAT or tax identifier", buyer.taxIdentifier),
+    type("#r1-registration-number", "Registration number", buyer.registrationNumber ?? ""),
+    { action: "check", dwellAfterMs: 2_000, label: "VAT registration", selector: "#r1-vat-registration", value: buyer.identifierIsVatRegistration },
+    { action: "check", dwellAfterMs: 2_000, label: "Confirm reviewed details", selector: "#r1-confirm", value: true },
+  ];
+}
+
+export function buildBillingExplainerSections() {
+  return [
+    {
+      dwellMs: 15_000,
+      id: "billing-context",
+      text: "Billing rules explainer — these are backend decisions after a charging session, not extra form fields on this page.",
+    },
+    {
+      dwellMs: 16_000,
+      id: "below-one-kwh",
+      text: "Example A: below 1 kWh means no charge, no invoice, and no email. The backend suppresses the customer billing flow.",
+    },
+    {
+      dwellMs: 16_000,
+      id: "normal-billing",
+      text: "Example B: at or above 1 kWh uses the normal billing path. The customer sees the ordinary payment and invoice journey.",
+    },
+    {
+      dwellMs: 18_000,
+      id: "provider-minimum-guard",
+      text: "Defensive fallback: if a remaining positive amount is below the payment provider minimum, the Stripe minimum-charge guard prevents an invalid capture attempt.",
+    },
+    {
+      dwellMs: 15_000,
+      id: "ui-versus-backend",
+      text: "Visible UI versus backend: the Company invoice choice and buyer review are visible here; energy thresholds and provider limits are enforced behind the scenes.",
+    },
+    {
+      dwellMs: 12_000,
+      id: "billing-recap",
+      text: "Recap: under 1 kWh is suppressed, 1 kWh or more is billed normally, and the provider-minimum guard is only a final defensive fallback.",
+    },
+  ];
+}
+
+export async function moveCursorTo(page, locator, { click = false } = {}) {
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("Cannot move the demo cursor to an element without a visible bounding box.");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 24 });
+  if (click) await page.mouse.click(x, y, { delay: 180 });
+}
+
+export async function performBuyerEntry(page, buyer, { onStep = async () => {} } = {}) {
+  const steps = buildBuyerEntrySteps(buyer);
+  for (const step of steps) {
+    const locator = page.locator(step.selector);
+    await onStep(step);
+    if (step.action === "select") {
+      await moveCursorTo(page, locator, { click: true });
+      await locator.selectOption(step.value);
+    } else if (step.action === "type") {
+      await moveCursorTo(page, locator, { click: true });
+      await locator.fill("");
+      if (step.value) await locator.pressSequentially(step.value, { delay: step.typingDelayMs });
+    } else if (step.action === "check") {
+      const checked = await locator.isChecked();
+      if (Boolean(step.value) !== checked) await moveCursorTo(page, locator, { click: true });
+    }
+    await page.waitForTimeout(step.dwellAfterMs);
+  }
+  return steps;
+}
+
+export function buildInteractionTimeline() {
+  return [
+    { id: "public-start", minimumDwellMs: 5_000 },
+    { id: "company-invoice-choice", minimumDwellMs: 5_000 },
+    { id: "checkout-handoff", minimumDwellMs: 8_000 },
+    { id: "czech-entry", minimumDwellMs: 5_000 },
+    { id: "czech-review", minimumDwellMs: 8_000 },
+    { id: "czech-save", minimumDwellMs: 8_000 },
+    { id: "croatian-invalid-oib", minimumDwellMs: 8_000 },
+    { id: "croatian-valid-oib", minimumDwellMs: 8_000 },
+    { id: "issued-locked", minimumDwellMs: 10_000 },
+  ];
+}
+
+export function verifyRecordingDurations({ billingExplainerSeconds, uiWalkthroughSeconds }) {
+  const ui = invoiceDemoRecordingContract.uiWalkthrough;
+  if (uiWalkthroughSeconds < ui.minimumDurationSeconds || uiWalkthroughSeconds > ui.maximumDurationSeconds) {
+    throw new Error(`UI walkthrough duration must be between ${ui.minimumDurationSeconds} and ${ui.maximumDurationSeconds} seconds.`);
+  }
+  const billing = invoiceDemoRecordingContract.billingExplainer;
+  if (billingExplainerSeconds < billing.minimumDurationSeconds || billingExplainerSeconds > billing.maximumDurationSeconds) {
+    throw new Error(`Billing explainer duration must be between ${billing.minimumDurationSeconds} and ${billing.maximumDurationSeconds} seconds.`);
+  }
+  return {
+    billingExplainerDurationAccepted: true,
+    billingExplainerSeconds,
+    uiWalkthroughDurationAccepted: true,
+    uiWalkthroughSeconds,
+  };
+}
+
 function realPathIncludingMissingSegments(inputPath) {
   let existingAncestor = path.resolve(inputPath);
   const missingSegments = [];
@@ -294,9 +433,24 @@ async function createRuntime(artifactDir) {
   return runtime;
 }
 
+export function buildDotnetRunArgs(projectPath) {
+  return ["run", "--no-build", "--project", projectPath];
+}
+
+export function buildLocalApplications(repoRoot, { run = spawnSync } = {}) {
+  const result = run("dotnet", ["build", "OCPP.Core.sln"], {
+    cwd: repoRoot,
+    env: { ...sanitizeParentEnvironment(), DOTNET_ROLL_FORWARD: "Major" },
+    encoding: "utf8",
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`Local invoice demo build failed with exit code ${result.status}.`);
+}
+
 function spawnApplication(repoRoot, artifactDir, projectPath, environment, logName) {
   const log = fs.createWriteStream(path.join(artifactDir, logName), { flags: "w" });
-  const child = spawn("dotnet", ["run", "--project", projectPath], {
+  const child = spawn("dotnet", buildDotnetRunArgs(projectPath), {
     cwd: repoRoot,
     detached: process.platform !== "win32",
     env: { ...sanitizeParentEnvironment(), ...environment },
@@ -357,9 +511,30 @@ export function verifyLockedBuyerControls(controlStates) {
   };
 }
 
-export function verifyArtifactFiles(artifactDir, browserArtifacts) {
-  if (browserArtifacts.video !== "walkthrough.webm") {
-    throw new Error("Expected walkthrough.webm from the invoice demo recording.");
+export function readMediaDurationSeconds(filePath, { run = spawnSync } = {}) {
+  const result = run("ffprobe", [
+    "-v", "error",
+    "-show_entries", "format=duration",
+    "-of", "default=noprint_wrappers=1:nokey=1",
+    filePath,
+  ], { encoding: "utf8", stdio: "pipe" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`ffprobe failed for ${path.basename(filePath)}: ${String(result.stderr).trim() || `exit ${result.status}`}`);
+  }
+  const duration = Number.parseFloat(String(result.stdout).trim());
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error(`ffprobe returned an invalid duration for ${path.basename(filePath)}.`);
+  }
+  return duration;
+}
+
+export function verifyArtifactFiles(artifactDir, browserArtifacts, { readDuration = readMediaDurationSeconds } = {}) {
+  if (browserArtifacts.videos?.uiWalkthrough !== invoiceDemoRecordingContract.uiWalkthrough.filename) {
+    throw new Error(`Expected ${invoiceDemoRecordingContract.uiWalkthrough.filename} from the invoice demo recording.`);
+  }
+  if (browserArtifacts.videos?.billingExplainer !== invoiceDemoRecordingContract.billingExplainer.filename) {
+    throw new Error(`Expected ${invoiceDemoRecordingContract.billingExplainer.filename} from the invoice demo recording.`);
   }
   if (browserArtifacts.screenshots.length !== expectedScreenshotNames.length ||
       expectedScreenshotNames.some((name, index) => browserArtifacts.screenshots[index] !== name)) {
@@ -370,13 +545,58 @@ export function verifyArtifactFiles(artifactDir, browserArtifacts) {
       throw new Error(`Screenshot ${screenshot} must be nonempty.`);
     }
   }
-  if (fs.statSync(path.join(artifactDir, browserArtifacts.video)).size <= 0) {
-    throw new Error(`Video ${browserArtifacts.video} must be nonempty.`);
+  for (const video of Object.values(browserArtifacts.videos)) {
+    if (fs.statSync(path.join(artifactDir, video)).size <= 0) {
+      throw new Error(`Video ${video} must be nonempty.`);
+    }
   }
+  const durationVerification = verifyRecordingDurations({
+    billingExplainerSeconds: readDuration(path.join(artifactDir, browserArtifacts.videos.billingExplainer)),
+    uiWalkthroughSeconds: readDuration(path.join(artifactDir, browserArtifacts.videos.uiWalkthrough)),
+  });
   return {
+    ...durationVerification,
     screenshotsNonEmpty: true,
     verifiedScreenshotCount: expectedScreenshotNames.length,
-    videoNonEmpty: true,
+    videosNonEmpty: true,
+  };
+}
+
+export function buildArtifactManifest({
+  artifactFiles,
+  browserArtifacts,
+  createdAtUtc = new Date().toISOString(),
+  persistedBuyerSnapshots,
+  runtime,
+}) {
+  return {
+    createdAtUtc,
+    privacy: "local-only; mock Stripe; invoices and customer email disabled",
+    runtime: {
+      managementBaseUrl: runtime.managementBaseUrl,
+      serverBaseUrl: runtime.serverBaseUrl,
+    },
+    artifacts: {
+      logs: ["server.log", "management.log"],
+      screenshots: browserArtifacts.screenshots,
+      videos: browserArtifacts.videos,
+      viewingOrder: [
+        browserArtifacts.videos.uiWalkthrough,
+        browserArtifacts.videos.billingExplainer,
+      ],
+    },
+    supersededArtifacts: [{
+      filename: "walkthrough.webm",
+      reason: "Rejected rapid montage; not suitable as the primary human walkthrough.",
+    }],
+    verification: {
+      ...persistedBuyerSnapshots,
+      ...browserArtifacts.lockedBuyerControls,
+      ...artifactFiles,
+    },
+    fixtures: Object.fromEntries(
+      Object.entries(invoiceDemoFixtures).map(([name, fixture]) => [name, fixture.reservationId]),
+    ),
   };
 }
 
@@ -440,12 +660,12 @@ WHERE ReservationId IN (${reservationIds});`);
   };
 }
 
-async function addCaption(page, text) {
-  await page.evaluate((caption) => {
-    let element = document.getElementById("invoice-demo-caption");
+async function ensurePresentationOverlays(page) {
+  await page.evaluate((ids) => {
+    let element = document.getElementById(ids.caption);
     if (!element) {
       element = document.createElement("div");
-      element.id = "invoice-demo-caption";
+      element.id = ids.caption;
       Object.assign(element.style, {
         position: "fixed",
         left: "50%",
@@ -463,9 +683,70 @@ async function addCaption(page, text) {
       });
       document.body.appendChild(element);
     }
-    element.textContent = caption;
-  }, text);
-  await page.waitForTimeout(700);
+    let cursor = document.getElementById(ids.cursor);
+    if (!cursor) {
+      cursor = document.createElement("div");
+      cursor.id = ids.cursor;
+      Object.assign(cursor.style, {
+        position: "fixed",
+        left: "24px",
+        top: "24px",
+        width: "20px",
+        height: "20px",
+        border: "3px solid white",
+        borderRadius: "50%",
+        background: "#2563eb",
+        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.55)",
+        pointerEvents: "none",
+        transform: "translate(-50%, -50%)",
+        transition: "left 80ms linear, top 80ms linear",
+        zIndex: "2147483647",
+      });
+      document.body.appendChild(cursor);
+      document.addEventListener("mousemove", (event) => {
+        cursor.style.left = `${event.clientX}px`;
+        cursor.style.top = `${event.clientY}px`;
+      });
+    }
+  }, invoiceDemoOverlayIds);
+}
+
+async function addCaption(page, text, dwellMs = 4_000) {
+  await ensurePresentationOverlays(page);
+  await page.evaluate(({ captionId, caption }) => {
+    document.getElementById(captionId).textContent = caption;
+  }, { captionId: invoiceDemoOverlayIds.caption, caption: text });
+  await page.waitForTimeout(dwellMs);
+}
+
+async function showExplainerSection(page, section) {
+  await ensurePresentationOverlays(page);
+  await page.evaluate(({ explainerId, text }) => {
+    let element = document.getElementById(explainerId);
+    if (!element) {
+      element = document.createElement("div");
+      element.id = explainerId;
+      Object.assign(element.style, {
+        position: "fixed",
+        left: "50%",
+        top: "50%",
+        transform: "translate(-50%, -50%)",
+        zIndex: "2147483646",
+        width: "min(860px, 82vw)",
+        padding: "34px 42px",
+        border: "2px solid rgba(255, 255, 255, 0.9)",
+        borderRadius: "18px",
+        background: "rgba(15, 23, 42, 0.95)",
+        color: "white",
+        font: "700 30px/1.4 system-ui, sans-serif",
+        boxShadow: "0 16px 50px rgba(0, 0, 0, 0.55)",
+        textAlign: "left",
+      });
+      document.body.appendChild(element);
+    }
+    element.textContent = text;
+  }, { explainerId: invoiceDemoOverlayIds.explainer, text: section.text });
+  await page.waitForTimeout(section.dwellMs);
 }
 
 async function waitForExactText(page, selector, expectedText) {
@@ -475,30 +756,28 @@ async function waitForExactText(page, selector, expectedText) {
   );
 }
 
-async function recordBrowserWalkthrough(runtime, signal) {
-  if (signal?.aborted) throw signal.reason;
-  const { chromium } = await import("playwright");
-  const chromeExecutablePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  const browser = await chromium.launch(buildChromiumLaunchOptions({
-    bundledExists: fs.existsSync(chromium.executablePath()),
-    chromeExists: fs.existsSync(chromeExecutablePath),
-    headless: process.env.INVOICE_DEMO_HEADLESS !== "0",
-  }));
-  if (signal?.aborted) {
-    await browser.close();
-    throw signal.reason;
-  }
+async function createRecordedPage(browser, runtime) {
   const context = await browser.newContext({
     baseURL: runtime.managementBaseUrl,
     locale: "en-US",
     recordVideo: { dir: runtime.tempRoot, size: { width: 1440, height: 900 } },
     viewport: { width: 1440, height: 900 },
   });
-  const closeOnAbort = () => {
-    void context.close().catch(() => {}).finally(() => browser.close().catch(() => {}));
-  };
-  signal?.addEventListener("abort", closeOnAbort, { once: true });
   const page = await context.newPage();
+  return { context, page };
+}
+
+async function publishRecordedPage(context, page, runtime, filename) {
+  const video = page.video();
+  await context.close();
+  const videoPath = await video.path();
+  const targetPath = path.join(runtime.artifactDir, filename);
+  publishCompletedVideo(videoPath, targetPath);
+  return path.basename(targetPath);
+}
+
+async function recordUiWalkthrough(browser, runtime) {
+  const { context, page } = await createRecordedPage(browser, runtime);
   const screenshots = [];
   let screenshotNumber = 0;
   const capture = async (slug) => {
@@ -508,46 +787,59 @@ async function recordBrowserWalkthrough(runtime, signal) {
     screenshots.push(filename);
   };
   const statusUrl = (fixture) => `/Payments/Status?reservationId=${fixture.reservationId}&origin=public&lang=en`;
-  const fillBuyer = async (buyer) => {
-    await page.locator("#r1-country").selectOption(buyer.country);
-    await page.locator("#r1-company").fill(buyer.companyName);
-    await page.locator("#r1-street").fill(buyer.street);
-    await page.locator("#r1-postal-code").fill(buyer.postalCode);
-    await page.locator("#r1-city").fill(buyer.city);
-    await page.locator("#r1-email").fill(buyer.email);
-    await page.locator("#r1-tax-identifier").fill(buyer.taxIdentifier);
-    if (buyer.registrationNumber) await page.locator("#r1-registration-number").fill(buyer.registrationNumber);
-    if (buyer.identifierIsVatRegistration) await page.locator("#r1-vat-registration").check();
-    await page.locator("#r1-confirm").check();
-  };
 
   try {
     await page.goto(`/Public/Start?cp=${encodeURIComponent(invoiceDemoFixtures.foreignEditable.chargePointId)}&conn=1`);
-    await page.locator("#wantsR1").check();
-    await addCaption(page, "Choose Company invoice before starting the charging session.");
+    await addCaption(page, "We begin on the real local public charging page. The blue pointer shows every interaction at normal speed.", 8_000);
+    await addCaption(page, "Before charging starts, the customer chooses Company invoice.", 5_000);
+    await moveCursorTo(page, page.locator("#wantsR1"), { click: true });
+    await addCaption(page, "Company invoice is now selected. The charging and checkout flow continues normally.", 8_000);
     await capture("company-invoice-choice");
+    await addCaption(page, "After checkout, the customer follows the secure session-status link. That page is where buyer details are reviewed and confirmed.", 15_000);
 
     const foreign = invoiceDemoFixtures.foreignEditable;
     await page.goto(statusUrl(foreign));
-    await fillBuyer(foreign.buyer);
-    await addCaption(page, "Review Czech company details exactly as they will appear on the invoice.");
+    await addCaption(page, "Czech company example: we enter every field individually on the actual secure status page.", 8_000);
+    await performBuyerEntry(page, foreign.buyer, {
+      onStep: async ({ label, value }) => addCaption(
+        page,
+        label === "Confirm reviewed details" ? "Confirm that the visible buyer summary is correct." : `Enter ${label}: ${value || "not applicable"}.`,
+        1_500,
+      ),
+    });
+    await addCaption(page, "Pause and review: the live summary shows the exact Czech buyer snapshot that will be saved.", 12_000);
     await capture("czech-company-review");
-    await page.locator("#r1-submit").click();
+    await addCaption(page, "Save the confirmed Czech company details.", 3_000);
+    await moveCursorTo(page, page.locator("#r1-submit"), { click: true });
     await waitForExactText(page, "#r1-result", invoiceDemoMessages.saved);
-    await addCaption(page, "The reviewed Czech company details are saved to the reservation.");
+    await addCaption(page, "Success: the reviewed Czech details are persisted to this reservation.", 10_000);
     await capture("czech-company-saved");
 
     const croatian = invoiceDemoFixtures.croatianEditable;
     await page.goto(statusUrl(croatian));
-    await fillBuyer({ ...croatian.buyer, taxIdentifier: croatian.buyer.invalidOib });
-    await page.locator("#r1-submit").click();
+    await addCaption(page, "Croatian branch: we enter the company data with an intentionally invalid OIB first.", 7_000);
+    await performBuyerEntry(page, { ...croatian.buyer, taxIdentifier: croatian.buyer.invalidOib }, {
+      onStep: async ({ label, value }) => addCaption(
+        page,
+        label === "Confirm reviewed details" ? "Confirm the entered Croatian buyer details." : `Enter ${label}: ${value || "not applicable"}.`,
+        1_200,
+      ),
+    });
+    await addCaption(page, "Submit the invalid 11-digit OIB to demonstrate checksum validation.", 3_000);
+    await moveCursorTo(page, page.locator("#r1-submit"), { click: true });
     await waitForExactText(page, "#r1-result", invoiceDemoMessages.invalidOib);
-    await addCaption(page, "An invalid Croatian OIB is rejected before invoice details are saved.");
+    await addCaption(page, "Rejected: an invalid Croatian OIB cannot be saved.", 12_000);
     await capture("croatian-invalid-oib");
-    await page.locator("#r1-tax-identifier").fill(croatian.buyer.taxIdentifier);
-    await page.locator("#r1-submit").click();
+    const oib = page.locator("#r1-tax-identifier");
+    await addCaption(page, "Correct the OIB with a checksum-valid synthetic example.", 4_000);
+    await moveCursorTo(page, oib, { click: true });
+    await oib.fill("");
+    await oib.pressSequentially(croatian.buyer.taxIdentifier, { delay: 100 });
+    await page.waitForTimeout(4_000);
+    await addCaption(page, "Submit the corrected Croatian details.", 3_000);
+    await moveCursorTo(page, page.locator("#r1-submit"), { click: true });
     await waitForExactText(page, "#r1-result", invoiceDemoMessages.saved);
-    await addCaption(page, "A checksum-valid Croatian OIB passes validation and can be saved.");
+    await addCaption(page, "Accepted: the checksum-valid OIB and Croatian buyer snapshot are saved.", 10_000);
     await capture("croatian-valid-oib");
 
     await page.goto(statusUrl(invoiceDemoFixtures.foreignLocked));
@@ -559,18 +851,74 @@ async function recordBrowserWalkthrough(runtime, signal) {
       disabled: control.disabled,
       id: control.id,
     }))));
-    await addCaption(page, "After invoice issuance, buyer fields are locked against later changes.");
+    await addCaption(page, "Post-issuance state: all buyer controls are disabled, preventing later edits.", 9_000);
+    for (const [selector, label] of [
+      ["#r1-company", "company name"],
+      ["#r1-tax-identifier", "tax identifier"],
+      ["#r1-submit", "save button"],
+    ]) {
+      await addCaption(page, `Try the locked ${label}: the control remains disabled.`, 3_000);
+      await moveCursorTo(page, page.locator(selector), { click: true });
+      await page.waitForTimeout(3_000);
+    }
+    await addCaption(page, "The locked message remains visible. Corrections require the supported operator process rather than editing an issued invoice.", 12_000);
     await capture("issued-invoice-locked");
 
-    const video = page.video();
-    await context.close();
-    const videoPath = await video.path();
-    const walkthroughPath = path.join(runtime.artifactDir, "walkthrough.webm");
-    publishCompletedVideo(videoPath, walkthroughPath);
-    return { lockedBuyerControls, screenshots, video: path.basename(walkthroughPath) };
+    const video = await publishRecordedPage(
+      context,
+      page,
+      runtime,
+      invoiceDemoRecordingContract.uiWalkthrough.filename,
+    );
+    return { lockedBuyerControls, screenshots, video };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function recordBillingExplainer(browser, runtime) {
+  const { context, page } = await createRecordedPage(browser, runtime);
+  try {
+    await page.goto(`/Public/Start?cp=${encodeURIComponent(invoiceDemoFixtures.foreignEditable.chargePointId)}&conn=1`);
+    await addCaption(page, "Separate billing-rules explainer — the local portal stays visible while we distinguish UI steps from backend decisions.", 8_000);
+    for (const section of buildBillingExplainerSections()) {
+      await showExplainerSection(page, section);
+    }
+    return await publishRecordedPage(
+      context,
+      page,
+      runtime,
+      invoiceDemoRecordingContract.billingExplainer.filename,
+    );
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function recordBrowserWalkthrough(runtime, signal) {
+  if (signal?.aborted) throw signal.reason;
+  const { chromium } = await import("playwright");
+  const chromeExecutablePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  const browser = await chromium.launch(buildChromiumLaunchOptions({
+    bundledExists: fs.existsSync(chromium.executablePath()),
+    chromeExists: fs.existsSync(chromeExecutablePath),
+    headless: process.env.INVOICE_DEMO_HEADLESS !== "0",
+  }));
+  const closeOnAbort = () => void browser.close().catch(() => {});
+  signal?.addEventListener("abort", closeOnAbort, { once: true });
+  try {
+    const uiWalkthrough = await recordUiWalkthrough(browser, runtime);
+    const billingExplainer = await recordBillingExplainer(browser, runtime);
+    return {
+      lockedBuyerControls: uiWalkthrough.lockedBuyerControls,
+      screenshots: uiWalkthrough.screenshots,
+      videos: {
+        billingExplainer,
+        uiWalkthrough: uiWalkthrough.video,
+      },
+    };
   } finally {
     signal?.removeEventListener("abort", closeOnAbort);
-    await context.close().catch(() => {});
     await browser.close().catch(() => {});
   }
 }
@@ -587,6 +935,7 @@ export async function runInvoiceDemo({
   const { signal } = signalHandlers;
 
   try {
+    buildLocalApplications(repoRoot);
     const server = spawnApplication(
       repoRoot,
       privateArtifactDir,
@@ -612,27 +961,12 @@ export async function runInvoiceDemo({
     const browserArtifacts = await abortable(recordBrowserWalkthrough(runtime, signal), signal);
     const persistedBuyerSnapshots = await abortable(verifyPersistedBuyerSnapshots(runtime.databasePath), signal);
     const artifactFiles = verifyArtifactFiles(privateArtifactDir, browserArtifacts);
-    const manifest = {
-      createdAtUtc: new Date().toISOString(),
-      privacy: "local-only; mock Stripe; invoices and customer email disabled",
-      runtime: {
-        managementBaseUrl: runtime.managementBaseUrl,
-        serverBaseUrl: runtime.serverBaseUrl,
-      },
-      artifacts: {
-        screenshots: browserArtifacts.screenshots,
-        video: browserArtifacts.video,
-        logs: ["server.log", "management.log"],
-      },
-      verification: {
-        ...persistedBuyerSnapshots,
-        ...browserArtifacts.lockedBuyerControls,
-        ...artifactFiles,
-      },
-      fixtures: Object.fromEntries(
-        Object.entries(invoiceDemoFixtures).map(([name, fixture]) => [name, fixture.reservationId]),
-      ),
-    };
+    const manifest = buildArtifactManifest({
+      artifactFiles,
+      browserArtifacts,
+      persistedBuyerSnapshots,
+      runtime,
+    });
     fs.writeFileSync(path.join(privateArtifactDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     return manifest;
   } finally {

@@ -202,7 +202,7 @@ test("verifyLockedBuyerControls requires every buyer control to be disabled", ()
   );
 });
 
-test("verifyArtifactFiles requires every expected PNG and WebM to be nonempty", (t) => {
+test("verifyArtifactFiles requires every expected PNG and both accepted WebM recordings", (t) => {
   assert.equal(typeof invoiceDemoRunner.verifyArtifactFiles, "function");
   const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-artifacts-test-"));
   t.after(() => fs.rmSync(artifactDir, { recursive: true, force: true }));
@@ -214,23 +214,37 @@ test("verifyArtifactFiles requires every expected PNG and WebM to be nonempty", 
     "05-croatian-valid-oib.png",
     "06-issued-invoice-locked.png",
   ];
-  for (const filename of [...screenshots, "walkthrough.webm"]) {
+  for (const filename of [...screenshots, "ui-walkthrough.webm", "billing-rules-explainer.webm"]) {
     fs.writeFileSync(path.join(artifactDir, filename), "content");
   }
 
   assert.deepEqual(invoiceDemoRunner.verifyArtifactFiles(artifactDir, {
     screenshots,
-    video: "walkthrough.webm",
+    videos: {
+      billingExplainer: "billing-rules-explainer.webm",
+      uiWalkthrough: "ui-walkthrough.webm",
+    },
+  }, {
+    readDuration: (filename) => filename.endsWith("ui-walkthrough.webm") ? 210 : 75,
   }), {
+    billingExplainerDurationAccepted: true,
+    billingExplainerSeconds: 75,
     screenshotsNonEmpty: true,
+    uiWalkthroughDurationAccepted: true,
+    uiWalkthroughSeconds: 210,
     verifiedScreenshotCount: 6,
-    videoNonEmpty: true,
+    videosNonEmpty: true,
   });
   fs.writeFileSync(path.join(artifactDir, "02-czech-company-review.png"), "");
   assert.throws(
     () => invoiceDemoRunner.verifyArtifactFiles(artifactDir, {
       screenshots,
-      video: "walkthrough.webm",
+      videos: {
+        billingExplainer: "billing-rules-explainer.webm",
+        uiWalkthrough: "ui-walkthrough.webm",
+      },
+    }, {
+      readDuration: () => 210,
     }),
     /02-czech-company-review\.png.*nonempty/i,
   );
@@ -428,4 +442,253 @@ test("invoice walkthrough requires exact English result messages", () => {
     locked: "Buyer details cannot be changed after invoice submission. Contact support for a correction.",
     saved: "R1 details saved successfully.",
   });
+});
+
+test("recording contract requires separate human-paced videos", () => {
+  assert.deepEqual(invoiceDemoRunner.invoiceDemoRecordingContract, {
+    billingExplainer: {
+      filename: "billing-rules-explainer.webm",
+      maximumDurationSeconds: 180,
+      minimumDurationSeconds: 60,
+    },
+    uiWalkthrough: {
+      filename: "ui-walkthrough.webm",
+      maximumDurationSeconds: 360,
+      minimumDurationSeconds: 180,
+    },
+  });
+});
+
+test("interaction timeline covers the required human-visible UI states", () => {
+  const timeline = invoiceDemoRunner.buildInteractionTimeline();
+  assert.deepEqual(timeline.map(({ id }) => id), [
+    "public-start",
+    "company-invoice-choice",
+    "checkout-handoff",
+    "czech-entry",
+    "czech-review",
+    "czech-save",
+    "croatian-invalid-oib",
+    "croatian-valid-oib",
+    "issued-locked",
+  ]);
+  assert.ok(timeline.every(({ minimumDwellMs }) => minimumDwellMs >= 3_000));
+});
+
+test("verifyRecordingDurations enforces both acceptance windows", () => {
+  assert.deepEqual(invoiceDemoRunner.verifyRecordingDurations({
+    billingExplainerSeconds: 75,
+    uiWalkthroughSeconds: 210,
+  }), {
+    billingExplainerDurationAccepted: true,
+    billingExplainerSeconds: 75,
+    uiWalkthroughDurationAccepted: true,
+    uiWalkthroughSeconds: 210,
+  });
+  assert.throws(
+    () => invoiceDemoRunner.verifyRecordingDurations({
+      billingExplainerSeconds: 75,
+      uiWalkthroughSeconds: 179.9,
+    }),
+    /UI walkthrough.*180.*360/i,
+  );
+  assert.throws(
+    () => invoiceDemoRunner.verifyRecordingDurations({
+      billingExplainerSeconds: 180.1,
+      uiWalkthroughSeconds: 210,
+    }),
+    /billing explainer.*60.*180/i,
+  );
+});
+
+test("buyer entry plan types every visible field in operator order", () => {
+  const steps = invoiceDemoRunner.buildBuyerEntrySteps({
+    city: "Praha",
+    companyName: "Example Praha s.r.o.",
+    country: "CZ",
+    email: "invoice-prague@example.test",
+    identifierIsVatRegistration: true,
+    postalCode: "110 00",
+    registrationNumber: "00000001",
+    street: "Testovaci 10",
+    taxIdentifier: "CZ00000001",
+  });
+  assert.deepEqual(steps.map(({ selector }) => selector), [
+    "#r1-country",
+    "#r1-company",
+    "#r1-street",
+    "#r1-postal-code",
+    "#r1-city",
+    "#r1-email",
+    "#r1-tax-identifier",
+    "#r1-registration-number",
+    "#r1-vat-registration",
+    "#r1-confirm",
+  ]);
+  assert.ok(steps.every(({ dwellAfterMs }) => dwellAfterMs >= 1_500));
+  assert.ok(steps.filter(({ action }) => action === "type").every(({ typingDelayMs }) => typingDelayMs >= 70));
+});
+
+test("billing explainer covers all three backend rules at readable pace", () => {
+  const sections = invoiceDemoRunner.buildBillingExplainerSections();
+  assert.deepEqual(sections.map(({ id }) => id), [
+    "billing-context",
+    "below-one-kwh",
+    "normal-billing",
+    "provider-minimum-guard",
+    "ui-versus-backend",
+    "billing-recap",
+  ]);
+  assert.match(sections.find(({ id }) => id === "below-one-kwh").text, /below 1 kWh.*no charge.*no invoice.*no email/i);
+  assert.match(sections.find(({ id }) => id === "normal-billing").text, /at or above 1 kWh.*normal billing/i);
+  assert.match(sections.find(({ id }) => id === "provider-minimum-guard").text, /defensive fallback.*positive amount.*provider minimum/i);
+  const plannedSeconds = sections.reduce((sum, { dwellMs }) => sum + dwellMs, 0) / 1_000;
+  assert.ok(plannedSeconds >= 60 && plannedSeconds <= 180);
+});
+
+test("presentation overlays reserve stable visible cursor and caption elements", () => {
+  assert.deepEqual(invoiceDemoRunner.invoiceDemoOverlayIds, {
+    caption: "invoice-demo-caption",
+    cursor: "invoice-demo-cursor",
+    explainer: "invoice-demo-explainer",
+  });
+});
+
+test("moveCursorTo visibly moves and clicks at the locator centre", async () => {
+  const calls = [];
+  const page = {
+    mouse: {
+      click: async (...args) => calls.push(["click", ...args]),
+      move: async (...args) => calls.push(["move", ...args]),
+    },
+  };
+  const locator = {
+    boundingBox: async () => ({ height: 40, width: 100, x: 20, y: 30 }),
+    scrollIntoViewIfNeeded: async () => calls.push(["scroll"]),
+  };
+
+  await invoiceDemoRunner.moveCursorTo(page, locator, { click: true });
+
+  assert.deepEqual(calls, [
+    ["scroll"],
+    ["move", 70, 50, { steps: 24 }],
+    ["click", 70, 50, { delay: 180 }],
+  ]);
+});
+
+test("performBuyerEntry uses paced real interactions for each field", async () => {
+  const calls = [];
+  const states = new Map();
+  const page = {
+    locator(selector) {
+      return {
+        boundingBox: async () => ({ height: 20, width: 80, x: 10, y: 10 }),
+        fill: async (value) => calls.push([selector, "fill", value]),
+        isChecked: async () => states.get(selector) ?? false,
+        pressSequentially: async (value, options) => calls.push([selector, "type", value, options]),
+        scrollIntoViewIfNeeded: async () => {},
+        selectOption: async (value) => calls.push([selector, "select", value]),
+      };
+    },
+    mouse: {
+      click: async () => {},
+      move: async () => {},
+    },
+    waitForTimeout: async (milliseconds) => calls.push(["wait", milliseconds]),
+  };
+  const buyer = {
+    city: "Praha",
+    companyName: "Example Praha s.r.o.",
+    country: "CZ",
+    email: "invoice-prague@example.test",
+    identifierIsVatRegistration: true,
+    postalCode: "110 00",
+    registrationNumber: "00000001",
+    street: "Testovaci 10",
+    taxIdentifier: "CZ00000001",
+  };
+
+  const completed = await invoiceDemoRunner.performBuyerEntry(page, buyer, {
+    onStep: async ({ label }) => calls.push(["caption", label]),
+  });
+
+  assert.equal(completed.length, 10);
+  assert.deepEqual(calls.find((call) => call[0] === "#r1-country" && call[1] === "select"), ["#r1-country", "select", "CZ"]);
+  assert.deepEqual(calls.find((call) => call[0] === "#r1-company" && call[1] === "type"), ["#r1-company", "type", "Example Praha s.r.o.", { delay: 80 }]);
+  assert.ok(calls.filter((call) => call[0] === "wait").every(([, milliseconds]) => milliseconds >= 1_500));
+});
+
+test("readMediaDurationSeconds parses a finite ffprobe duration", () => {
+  assert.equal(invoiceDemoRunner.readMediaDurationSeconds("/tmp/demo.webm", {
+    run: (command, args) => {
+      assert.equal(command, "ffprobe");
+      assert.ok(args.includes("/tmp/demo.webm"));
+      return { status: 0, stdout: "210.125000\n", stderr: "" };
+    },
+  }), 210.125);
+  assert.throws(
+    () => invoiceDemoRunner.readMediaDurationSeconds("/tmp/demo.webm", {
+      run: () => ({ status: 1, stdout: "", stderr: "invalid data" }),
+    }),
+    /ffprobe.*invalid data/i,
+  );
+});
+
+test("artifact manifest provides replacement viewing order and marks the legacy clip superseded", () => {
+  const manifest = invoiceDemoRunner.buildArtifactManifest({
+    artifactFiles: {
+      billingExplainerDurationAccepted: true,
+      billingExplainerSeconds: 75,
+      screenshotsNonEmpty: true,
+      uiWalkthroughDurationAccepted: true,
+      uiWalkthroughSeconds: 210,
+      verifiedScreenshotCount: 6,
+      videosNonEmpty: true,
+    },
+    browserArtifacts: {
+      lockedBuyerControls: { lockedBuyerControlCount: 11, lockedBuyerControlsDisabled: true },
+      screenshots: ["01-company-invoice-choice.png"],
+      videos: {
+        billingExplainer: "billing-rules-explainer.webm",
+        uiWalkthrough: "ui-walkthrough.webm",
+      },
+    },
+    createdAtUtc: "2026-07-15T20:30:00.000Z",
+    persistedBuyerSnapshots: { croatianBuyerSnapshotPersisted: true, czechBuyerSnapshotPersisted: true },
+    runtime: {
+      managementBaseUrl: "http://127.0.0.1:28082",
+      serverBaseUrl: "http://127.0.0.1:28081",
+    },
+  });
+
+  assert.deepEqual(manifest.artifacts.viewingOrder, [
+    "ui-walkthrough.webm",
+    "billing-rules-explainer.webm",
+  ]);
+  assert.deepEqual(manifest.supersededArtifacts, [{
+    filename: "walkthrough.webm",
+    reason: "Rejected rapid montage; not suitable as the primary human walkthrough.",
+  }]);
+  assert.equal(manifest.verification.uiWalkthroughSeconds, 210);
+  assert.equal(manifest.verification.billingExplainerSeconds, 75);
+});
+
+test("demo stack builds once before both no-build application launches", () => {
+  const calls = [];
+  invoiceDemoRunner.buildLocalApplications("/work/ocpp-core", {
+    run: (...args) => {
+      calls.push(args);
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0][0], "dotnet");
+  assert.deepEqual(calls[0][1], ["build", "OCPP.Core.sln"]);
+  assert.equal(calls[0][2].cwd, "/work/ocpp-core");
+  assert.deepEqual(invoiceDemoRunner.buildDotnetRunArgs("OCPP.Core.Server/OCPP.Core.Server.csproj"), [
+    "run",
+    "--no-build",
+    "--project",
+    "OCPP.Core.Server/OCPP.Core.Server.csproj",
+  ]);
 });
