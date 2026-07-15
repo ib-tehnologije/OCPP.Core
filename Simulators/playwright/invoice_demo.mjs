@@ -6,7 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { invoiceDemoFixtures, seedInvoiceDemoFixtures } from "../lib/invoice_demo_fixtures.mjs";
+import {
+  buildInvoiceDemoMockStripeSnapshot,
+  invoiceDemoFixtures,
+  seedInvoiceDemoFixtures,
+} from "../lib/invoice_demo_fixtures.mjs";
 import { seedTestStack } from "../lib/sqlite_helpers.mjs";
 import { waitForUrl } from "./common.mjs";
 
@@ -94,9 +98,9 @@ export function buildDemoEnvironment(runtime, application = "server") {
   return environment;
 }
 
-export function buildChromiumLaunchOptions({ bundledExists, chromeExists }) {
-  if (bundledExists) return { headless: true };
-  if (chromeExists) return { channel: "chrome", headless: true };
+export function buildChromiumLaunchOptions({ bundledExists, chromeExists, headless = true }) {
+  if (bundledExists) return { headless };
+  if (chromeExists) return { channel: "chrome", headless };
   throw new Error("Playwright Chromium is not installed and no system Chrome fallback is available.");
 }
 
@@ -237,6 +241,10 @@ async function createRuntime(artifactDir) {
   };
   fs.mkdirSync(runtime.emailSinkDir, { recursive: true });
   fs.mkdirSync(runtime.stripeDiagnosticsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(runtime.stripeDiagnosticsDir, "mock-stripe-store.json"),
+    `${JSON.stringify(buildInvoiceDemoMockStripeSnapshot(), null, 2)}\n`,
+  );
   return runtime;
 }
 
@@ -309,6 +317,7 @@ async function recordBrowserWalkthrough(runtime, signal) {
   const browser = await chromium.launch(buildChromiumLaunchOptions({
     bundledExists: fs.existsSync(chromium.executablePath()),
     chromeExists: fs.existsSync(chromeExecutablePath),
+    headless: process.env.INVOICE_DEMO_HEADLESS !== "0",
   }));
   if (signal?.aborted) {
     await browser.close();

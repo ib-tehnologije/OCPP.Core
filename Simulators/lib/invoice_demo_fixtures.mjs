@@ -62,6 +62,36 @@ export const invoiceDemoFixtures = Object.freeze({
   }),
 });
 
+export function buildInvoiceDemoMockStripeSnapshot(createdAt = new Date().toISOString()) {
+  const generatedAtUtc = new Date(createdAt).toISOString();
+  const fixtures = Object.values(invoiceDemoFixtures);
+  const metadataFor = (fixture) => ({
+    reservation_id: fixture.reservationId,
+    charge_point_id: fixture.chargePointId,
+    connector_id: String(fixture.connectorId),
+    charge_tag_id: `DEMO-TAG-${fixture.connectorId}`,
+  });
+
+  return {
+    generatedAtUtc,
+    sessions: fixtures.map((fixture) => ({
+      id: `cs_test_invoice_demo_${fixture.connectorId}`,
+      url: "http://127.0.0.1/local-invoice-demo",
+      paymentIntentId: `pi_test_invoice_demo_${fixture.connectorId}`,
+      status: "complete",
+      paymentStatus: "paid",
+      metadata: metadataFor(fixture),
+    })),
+    paymentIntents: fixtures.map((fixture) => ({
+      id: `pi_test_invoice_demo_${fixture.connectorId}`,
+      status: "requires_capture",
+      amount: 1000,
+      amountReceived: 650,
+      metadata: metadataFor(fixture),
+    })),
+  };
+}
+
 function reservationRow(fixture, transactionId, nowIso, includeBuyer) {
   const buyer = includeBuyer ? fixture.buyer : {};
 

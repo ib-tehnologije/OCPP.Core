@@ -23,11 +23,70 @@ namespace OCPP.Core.Server.Payments
             {
                 Directory.CreateDirectory(diagnosticsDirectory);
                 _snapshotFilePath = Path.Combine(diagnosticsDirectory, "mock-stripe-store.json");
+                RestoreSnapshot();
             }
         }
 
         public ConcurrentDictionary<string, Session> Sessions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public ConcurrentDictionary<string, PaymentIntent> PaymentIntents { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        private void RestoreSnapshot()
+        {
+            if (string.IsNullOrWhiteSpace(_snapshotFilePath) || !System.IO.File.Exists(_snapshotFilePath))
+            {
+                return;
+            }
+
+            try
+            {
+                var snapshot = JsonSerializer.Deserialize<MockStripeSnapshot>(
+                    System.IO.File.ReadAllText(_snapshotFilePath),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                foreach (var session in snapshot?.Sessions ?? new List<MockStripeSessionSnapshot>())
+                {
+                    if (string.IsNullOrWhiteSpace(session?.Id)) continue;
+                    Sessions[session.Id] = new Session
+                    {
+                        Id = session.Id,
+                        Url = session.Url,
+                        PaymentIntentId = session.PaymentIntentId,
+                        Status = session.Status,
+                        PaymentStatus = session.PaymentStatus,
+                        Metadata = session.Metadata == null
+                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, string>(session.Metadata, StringComparer.OrdinalIgnoreCase)
+                    };
+                }
+
+                foreach (var intent in snapshot?.PaymentIntents ?? new List<MockStripePaymentIntentSnapshot>())
+                {
+                    if (string.IsNullOrWhiteSpace(intent?.Id)) continue;
+                    PaymentIntents[intent.Id] = new PaymentIntent
+                    {
+                        Id = intent.Id,
+                        Status = intent.Status,
+                        Amount = intent.Amount,
+                        AmountReceived = intent.AmountReceived,
+                        Metadata = intent.Metadata == null
+                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, string>(intent.Metadata, StringComparer.OrdinalIgnoreCase)
+                    };
+                }
+            }
+            catch (JsonException)
+            {
+                // A diagnostics snapshot is optional local mock state; ignore malformed content.
+            }
+            catch (IOException)
+            {
+                // A diagnostics snapshot is optional local mock state; start with an empty store if unreadable.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // A diagnostics snapshot is optional local mock state; start with an empty store if unreadable.
+            }
+        }
 
         public void PersistSnapshot()
         {
@@ -80,6 +139,31 @@ namespace OCPP.Core.Server.Payments
 
                 System.IO.File.Move(tempFilePath, _snapshotFilePath, true);
             }
+        }
+
+        private sealed class MockStripeSnapshot
+        {
+            public List<MockStripeSessionSnapshot> Sessions { get; set; }
+            public List<MockStripePaymentIntentSnapshot> PaymentIntents { get; set; }
+        }
+
+        private sealed class MockStripeSessionSnapshot
+        {
+            public string Id { get; set; }
+            public string Url { get; set; }
+            public string PaymentIntentId { get; set; }
+            public string Status { get; set; }
+            public string PaymentStatus { get; set; }
+            public Dictionary<string, string> Metadata { get; set; }
+        }
+
+        private sealed class MockStripePaymentIntentSnapshot
+        {
+            public string Id { get; set; }
+            public string Status { get; set; }
+            public long Amount { get; set; }
+            public long AmountReceived { get; set; }
+            public Dictionary<string, string> Metadata { get; set; }
         }
     }
 

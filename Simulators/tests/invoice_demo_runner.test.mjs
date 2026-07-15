@@ -126,6 +126,16 @@ test("buildChromiumLaunchOptions falls back to an installed system Chrome", () =
   );
 });
 
+test("buildChromiumLaunchOptions supports an optional headed walkthrough", () => {
+  assert.deepEqual(buildChromiumLaunchOptions({ bundledExists: true, chromeExists: true, headless: false }), {
+    headless: false,
+  });
+  assert.deepEqual(buildChromiumLaunchOptions({ bundledExists: false, chromeExists: true, headless: false }), {
+    channel: "chrome",
+    headless: false,
+  });
+});
+
 test("SIGINT immediately rejects abortable work", async () => {
   const processTarget = new EventEmitter();
   const handlers = installSignalAbortHandlers(processTarget);

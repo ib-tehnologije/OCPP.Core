@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildInvoiceDemoMockStripeSnapshot,
   buildInvoiceDemoSql,
   invoiceDemoFixtures,
 } from "../lib/invoice_demo_fixtures.mjs";
@@ -62,6 +63,22 @@ test("locked fixture includes confirmed buyer data and an invoice marker", () =>
     invoiceKind: "R1",
     externalDocumentId: "LOCAL-DEMO-INVOICE-0001",
   });
+});
+
+test("builds mock Stripe snapshot entries that match every fixture reservation", () => {
+  const snapshot = buildInvoiceDemoMockStripeSnapshot("2026-07-15T10:00:00.000Z");
+  assert.equal(snapshot.generatedAtUtc, "2026-07-15T10:00:00.000Z");
+  assert.equal(snapshot.sessions.length, 3);
+  assert.equal(snapshot.paymentIntents.length, 3);
+
+  for (const [index, reservationId] of expectedReservationIds.entries()) {
+    const fixtureNumber = index + 1;
+    const session = snapshot.sessions.find(({ metadata }) => metadata.reservation_id === reservationId);
+    const paymentIntent = snapshot.paymentIntents.find(({ metadata }) => metadata.reservation_id === reservationId);
+    assert.equal(session?.id, `cs_test_invoice_demo_${fixtureNumber}`);
+    assert.equal(session?.paymentIntentId, `pi_test_invoice_demo_${fixtureNumber}`);
+    assert.equal(paymentIntent?.id, `pi_test_invoice_demo_${fixtureNumber}`);
+  }
 });
 
 test("builds bounded SQL for one charge point, three connectors, three reservations, and one invoice log", () => {
