@@ -142,6 +142,66 @@ test("SIGINT immediately rejects abortable work", async () => {
 test("stopProcessGroup terminates the full process group and confirms exit", async () => {
   const child = Object.assign(new EventEmitter(), { exitCode: null, pid: 4312, signalCode: null });
   const calls = [];
+  let groupExists = true;
+  const kill = (pid, signal) => {
+    calls.push([pid, signal]);
+    if (signal === "SIGTERM") {
+      setImmediate(() => {
+        groupExists = false;
+        child.signalCode = signal;
+        child.emit("exit", null, signal);
+      });
+      return;
+    }
+    if (signal === 0 && groupExists) return;
+    const error = new Error("no such process group");
+    error.code = "ESRCH";
+    throw error;
+  };
+
+  await stopProcessGroup(child, { kill, termTimeoutMs: 10, killTimeoutMs: 10, pollIntervalMs: 1 });
+
+  assert.deepEqual(calls.filter(([, signal]) => signal !== 0), [[-4312, "SIGTERM"]]);
+  assert.ok(calls.some(([, signal]) => signal === 0));
+  assert.equal(child.signalCode, "SIGTERM");
+});
+
+test("stopProcessGroup escalates to SIGKILL and waits for confirmed exit", async () => {
+  const child = Object.assign(new EventEmitter(), { exitCode: null, pid: 4313, signalCode: null });
+  const calls = [];
+  let groupExists = true;
+  const kill = (pid, signal) => {
+    calls.push([pid, signal]);
+    if (signal === "SIGKILL") {
+      setImmediate(() => {
+        groupExists = false;
+        child.signalCode = signal;
+        child.emit("exit", null, signal);
+      });
+      return;
+    }
+    if (signal === "SIGTERM") return;
+    if (signal === 0 && groupExists) return;
+    const error = new Error("no such process group");
+    error.code = "ESRCH";
+    throw error;
+  };
+
+  await stopProcessGroup(child, { kill, termTimeoutMs: 1, killTimeoutMs: 10, pollIntervalMs: 1 });
+
+  assert.deepEqual(calls.filter(([, signal]) => signal !== 0), [
+    [-4313, "SIGTERM"],
+    [-4313, "SIGKILL"],
+  ]);
+  assert.ok(calls.some(([, signal]) => signal === 0));
+  assert.equal(child.signalCode, "SIGKILL");
+});
+
+test("stopProcessGroup does not mistake launcher exit for process-group disappearance", async () => {
+  const child = Object.assign(new EventEmitter(), { exitCode: null, pid: 4314, signalCode: null });
+  const calls = [];
+  let groupExists = true;
+  let probesAfterKill = 0;
   const kill = (pid, signal) => {
     calls.push([pid, signal]);
     if (signal === "SIGTERM") {
@@ -149,32 +209,34 @@ test("stopProcessGroup terminates the full process group and confirms exit", asy
         child.signalCode = signal;
         child.emit("exit", null, signal);
       });
+      return;
     }
+    if (signal === "SIGKILL") return;
+    if (signal === 0 && groupExists) {
+      if (calls.some(([, sentSignal]) => sentSignal === "SIGKILL")) {
+        probesAfterKill += 1;
+        if (probesAfterKill >= 2) groupExists = false;
+      }
+      if (groupExists) return;
+    }
+    const error = new Error("no such process group");
+    error.code = "ESRCH";
+    throw error;
   };
 
-  await stopProcessGroup(child, { kill, termTimeoutMs: 10, killTimeoutMs: 10 });
+  await stopProcessGroup(child, {
+    kill,
+    killTimeoutMs: 20,
+    pollIntervalMs: 1,
+    termTimeoutMs: 2,
+  });
 
-  assert.deepEqual(calls, [[-4312, "SIGTERM"]]);
-  assert.equal(child.signalCode, "SIGTERM");
-});
-
-test("stopProcessGroup escalates to SIGKILL and waits for confirmed exit", async () => {
-  const child = Object.assign(new EventEmitter(), { exitCode: null, pid: 4313, signalCode: null });
-  const calls = [];
-  const kill = (pid, signal) => {
-    calls.push([pid, signal]);
-    if (signal === "SIGKILL") {
-      setImmediate(() => {
-        child.signalCode = signal;
-        child.emit("exit", null, signal);
-      });
-    }
-  };
-
-  await stopProcessGroup(child, { kill, termTimeoutMs: 1, killTimeoutMs: 10 });
-
-  assert.deepEqual(calls, [[-4313, "SIGTERM"], [-4313, "SIGKILL"]]);
-  assert.equal(child.signalCode, "SIGKILL");
+  assert.deepEqual(calls.filter(([, signal]) => signal !== 0), [
+    [-4314, "SIGTERM"],
+    [-4314, "SIGKILL"],
+  ]);
+  assert.ok(calls.filter(([, signal]) => signal === 0).length >= 3);
+  assert.equal(groupExists, false);
 });
 
 test("publishCompletedVideo falls back to copy and remove for EXDEV", () => {

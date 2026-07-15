@@ -137,32 +137,32 @@ export function abortable(promise, signal) {
   });
 }
 
-function hasChildExited(child) {
-  return child.exitCode !== null || child.signalCode !== null;
+function processGroupExists(groupPid, kill) {
+  try {
+    kill(groupPid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
 }
 
-function waitForConfirmedExit(child, timeoutMs) {
-  if (hasChildExited(child)) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let timer;
-    const onExit = () => {
-      clearTimeout(timer);
-      resolve(true);
-    };
-    child.once("exit", onExit);
-    timer = setTimeout(() => {
-      child.removeListener("exit", onExit);
-      resolve(false);
-    }, timeoutMs);
-  });
+async function waitForProcessGroupToDisappear(groupPid, kill, timeoutMs, pollIntervalMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(groupPid, kill)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  return true;
 }
 
 export async function stopProcessGroup(child, {
   kill = process.kill,
   termTimeoutMs = 3_000,
   killTimeoutMs = 3_000,
+  pollIntervalMs = 50,
 } = {}) {
-  if (!child || hasChildExited(child) || !child.pid) return;
+  if (!child || !child.pid) return;
   const groupPid = process.platform === "win32" ? child.pid : -child.pid;
   try {
     kill(groupPid, "SIGTERM");
@@ -170,7 +170,7 @@ export async function stopProcessGroup(child, {
     if (error?.code === "ESRCH") return;
     throw error;
   }
-  if (await waitForConfirmedExit(child, termTimeoutMs)) return;
+  if (await waitForProcessGroupToDisappear(groupPid, kill, termTimeoutMs, pollIntervalMs)) return;
 
   try {
     kill(groupPid, "SIGKILL");
@@ -178,7 +178,7 @@ export async function stopProcessGroup(child, {
     if (error?.code === "ESRCH") return;
     throw error;
   }
-  if (!await waitForConfirmedExit(child, killTimeoutMs)) {
+  if (!await waitForProcessGroupToDisappear(groupPid, kill, killTimeoutMs, pollIntervalMs)) {
     throw new Error(`Process group ${groupPid} did not exit after SIGKILL.`);
   }
 }
