@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+import * as invoiceDemoRunner from "../playwright/invoice_demo.mjs";
 
 import {
   abortable,
@@ -33,6 +36,10 @@ test("buildDemoEnvironment isolates the demo from live services", () => {
   assert.equal(environment.ConnectionStrings__SQLite, "Filename=/tmp/invoice-demo.sqlite;foreign keys=True");
   assert.equal(environment.ConnectionStrings__SqlServer, "");
   assert.equal(environment.DOTNET_ROLL_FORWARD, "Major");
+  assert.equal(environment.ASPNETCORE_ENVIRONMENT, "InvoiceDemo");
+  assert.equal(environment.DOTNET_ENVIRONMENT, "InvoiceDemo");
+  assert.equal(environment.SENTRY_DSN, "");
+  assert.equal(environment.Sentry__Dsn, "");
   assert.equal(environment.Invoices__Enabled, "false");
   assert.equal(environment.Notifications__EnableCustomerEmails, "false");
   assert.equal(environment.Notifications__FromAddress, "");
@@ -95,6 +102,153 @@ test("assertPrivateArtifactDirectory accepts an external directory", () => {
   const external = path.join(os.tmpdir(), "ocpp-invoice-demo-artifacts");
 
   assert.equal(assertPrivateArtifactDirectory(repoRoot, external), path.resolve(external));
+});
+
+test("assertPrivateArtifactDirectory rejects paths inside any Git repository", (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-git-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const repoRoot = path.join(tempRoot, "source-repo");
+  const otherRepo = path.join(tempRoot, "other-repo");
+  fs.mkdirSync(repoRoot);
+  fs.mkdirSync(otherRepo);
+  execFileSync("git", ["init", "--quiet", repoRoot]);
+  execFileSync("git", ["init", "--quiet", otherRepo]);
+
+  assert.throws(
+    () => assertPrivateArtifactDirectory(repoRoot, path.join(otherRepo, "private", "run")),
+    /inside any Git repository or worktree/i,
+  );
+});
+
+test("sanitizeParentEnvironment removes all inherited Sentry settings", () => {
+  assert.equal(typeof invoiceDemoRunner.sanitizeParentEnvironment, "function");
+  assert.deepEqual(invoiceDemoRunner.sanitizeParentEnvironment({
+    PATH: "/usr/bin",
+    SENTRY_DSN: "https://secret.example/1",
+    Sentry__Dsn: "https://secret.example/2",
+    SENTRY__TRACES_SAMPLE_RATE: "1",
+  }), { PATH: "/usr/bin" });
+});
+
+test("verifyPersistedBuyerSnapshots requires exact Czech and Croatian database snapshots", async () => {
+  assert.equal(typeof invoiceDemoRunner.verifyPersistedBuyerSnapshots, "function");
+  const rows = [
+    {
+      ReservationId: "10000000-0000-4000-8000-000000000001",
+      InvoiceBuyerCountry: "CZ",
+      InvoiceBuyerCompanyName: "Example Praha s.r.o.",
+      InvoiceBuyerStreet: "Testovaci 10",
+      InvoiceBuyerPostalCode: "110 00",
+      InvoiceBuyerCity: "Praha",
+      InvoiceBuyerEmail: "invoice-prague@example.test",
+      InvoiceBuyerTaxIdentifier: "CZ00000001",
+      InvoiceBuyerRegistrationNumber: "00000001",
+      InvoiceBuyerIdentifierIsVatRegistration: 1,
+      InvoiceBuyerConfirmedAtUtc: "2026-07-15T10:00:00Z",
+    },
+    {
+      ReservationId: "10000000-0000-4000-8000-000000000002",
+      InvoiceBuyerCountry: "HR",
+      InvoiceBuyerCompanyName: "Primjer Zagreb d.o.o.",
+      InvoiceBuyerStreet: "Testna ulica 20",
+      InvoiceBuyerPostalCode: "10000",
+      InvoiceBuyerCity: "Zagreb",
+      InvoiceBuyerEmail: "invoice-zagreb@example.test",
+      InvoiceBuyerTaxIdentifier: "69435151530",
+      InvoiceBuyerRegistrationNumber: null,
+      InvoiceBuyerIdentifierIsVatRegistration: 0,
+      InvoiceBuyerConfirmedAtUtc: "2026-07-15T10:01:00Z",
+    },
+  ];
+
+  assert.deepEqual(
+    await invoiceDemoRunner.verifyPersistedBuyerSnapshots("/tmp/demo.sqlite", { query: async () => rows }),
+    { croatianBuyerSnapshotPersisted: true, czechBuyerSnapshotPersisted: true },
+  );
+  await assert.rejects(
+    invoiceDemoRunner.verifyPersistedBuyerSnapshots("/tmp/demo.sqlite", {
+      query: async () => rows.map((row) => row.ReservationId.endsWith("0001")
+        ? { ...row, InvoiceBuyerCity: "Brno" }
+        : row),
+    }),
+    /Czech.*InvoiceBuyerCity/i,
+  );
+  await assert.rejects(
+    invoiceDemoRunner.verifyPersistedBuyerSnapshots("/tmp/demo.sqlite", {
+      query: async () => rows.map((row) => row.ReservationId.endsWith("0002")
+        ? { ...row, InvoiceBuyerIdentifierIsVatRegistration: null }
+        : row),
+    }),
+    /Croatian.*InvoiceBuyerIdentifierIsVatRegistration.*boolean/i,
+  );
+});
+
+test("verifyLockedBuyerControls requires every buyer control to be disabled", () => {
+  assert.equal(typeof invoiceDemoRunner.verifyLockedBuyerControls, "function");
+  const expectedIds = [
+    "r1-country", "r1-company", "r1-street", "r1-postal-code", "r1-city", "r1-email",
+    "r1-tax-identifier", "r1-registration-number", "r1-vat-registration", "r1-confirm", "r1-submit",
+  ];
+  const controls = expectedIds.map((id) => ({ id, disabled: true }));
+
+  assert.deepEqual(invoiceDemoRunner.verifyLockedBuyerControls(controls), {
+    lockedBuyerControlCount: 11,
+    lockedBuyerControlsDisabled: true,
+  });
+  assert.throws(
+    () => invoiceDemoRunner.verifyLockedBuyerControls(controls.map((control) =>
+      control.id === "r1-email" ? { ...control, disabled: false } : control)),
+    /r1-email.*disabled/i,
+  );
+});
+
+test("verifyArtifactFiles requires every expected PNG and WebM to be nonempty", (t) => {
+  assert.equal(typeof invoiceDemoRunner.verifyArtifactFiles, "function");
+  const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-artifacts-test-"));
+  t.after(() => fs.rmSync(artifactDir, { recursive: true, force: true }));
+  const screenshots = [
+    "01-company-invoice-choice.png",
+    "02-czech-company-review.png",
+    "03-czech-company-saved.png",
+    "04-croatian-invalid-oib.png",
+    "05-croatian-valid-oib.png",
+    "06-issued-invoice-locked.png",
+  ];
+  for (const filename of [...screenshots, "walkthrough.webm"]) {
+    fs.writeFileSync(path.join(artifactDir, filename), "content");
+  }
+
+  assert.deepEqual(invoiceDemoRunner.verifyArtifactFiles(artifactDir, {
+    screenshots,
+    video: "walkthrough.webm",
+  }), {
+    screenshotsNonEmpty: true,
+    verifiedScreenshotCount: 6,
+    videoNonEmpty: true,
+  });
+  fs.writeFileSync(path.join(artifactDir, "02-czech-company-review.png"), "");
+  assert.throws(
+    () => invoiceDemoRunner.verifyArtifactFiles(artifactDir, {
+      screenshots,
+      video: "walkthrough.webm",
+    }),
+    /02-czech-company-review\.png.*nonempty/i,
+  );
+});
+
+test("cleanupRuntime deletes runtime files even when child shutdown fails", async () => {
+  assert.equal(typeof invoiceDemoRunner.cleanupRuntime, "function");
+  const removals = [];
+  const shutdownError = new Error("child shutdown failed");
+
+  await assert.rejects(
+    invoiceDemoRunner.cleanupRuntime([], "/tmp/invoice-demo-runtime", {
+      remove: (...args) => removals.push(args),
+      stop: async () => { throw shutdownError; },
+    }),
+    shutdownError,
+  );
+  assert.deepEqual(removals, [["/tmp/invoice-demo-runtime", { recursive: true, force: true }]]);
 });
 
 test("assertPrivateArtifactDirectory rejects an external symlink into the repository", (t) => {

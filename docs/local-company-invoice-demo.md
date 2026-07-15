@@ -20,7 +20,7 @@ The browser installation is per user and may download several hundred megabytes.
 
 ## Record the walkthrough
 
-Choose a private artifact directory outside the repository. Do not use a path below the checkout: the runner rejects repository paths, including external symlinks that resolve back into the repository.
+Choose a private artifact directory outside every Git repository or worktree. The runner rejects paths below any Git checkout, including missing child directories and external symlinks that resolve into a checkout.
 
 ```sh
 export INVOICE_DEMO_ARTIFACT_DIR=/absolute/private/path/invoice-demo
@@ -44,17 +44,18 @@ The private artifact directory contains:
 - `walkthrough.webm` — the 1440 by 900 browser recording.
 - `01-company-invoice-choice.png` through `06-issued-invoice-locked.png` — numbered, full-page screenshots of each checkpoint.
 - `server.log` and `management.log` — local application logs for diagnosis.
-- `manifest.json` — creation time, loopback runtime URLs, output filenames, synthetic fixture reservation IDs, and the privacy mode summary.
+- `manifest.json` — creation time, loopback runtime URLs, output filenames, synthetic fixture reservation IDs, privacy mode, and explicit successful checks for the persisted buyer snapshots, all locked controls, and nonempty PNG/WebM files.
 
 Existing files with these names may be replaced. Treat the directory as private even though the fixtures are synthetic because application logs are diagnostic artifacts and are not intended for Git.
 
 ## Safety controls
 
-The runner supplies an isolated environment to both applications and removes inherited invoice, Stripe, SMTP, email, and owner-report settings before launch. Its explicit controls are:
+The runner supplies an isolated `InvoiceDemo` environment to both applications, which prevents .NET's development-only project user secrets from loading. It removes inherited invoice, Stripe, Sentry, SMTP, email, and owner-report settings before launch. Its explicit controls are:
 
 - SQL Server is disabled with an empty `ConnectionStrings__SqlServer`; a new temporary SQLite file is used instead.
 - Invoice integration is disabled with `Invoices__Enabled=false`, and inherited `Invoices__ERacuni*` settings are removed.
 - Stripe uses the repository's mock services with `Stripe__UseMockServices=true`, a `mock_test_key`, synthetic `.example.test` email, local diagnostics, and a loopback return URL. Inherited Stripe settings are removed.
+- Sentry is disabled with empty `SENTRY_DSN` and `Sentry__Dsn` values after every inherited `SENTRY_DSN` and `Sentry__*` setting is removed.
 - Customer email is disabled with `Notifications__EnableCustomerEmails=false`; SMTP credentials and from, reply-to, and BCC addresses are cleared. Any notification sink is temporary.
 - Owner-report email and scheduling are disabled with `Email__EnableOwnerReportEmails=false` and `OwnerReportSchedule__Enabled=false`; their SMTP and recipient settings are cleared.
 - Both HTTP listeners and all manifest URLs use dynamically allocated `127.0.0.1` endpoints.

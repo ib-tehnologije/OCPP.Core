@@ -15,6 +15,11 @@ export async function runSqlite(dbPath, sql) {
   await execFileAsync("sqlite3", [dbPath, sql]);
 }
 
+export async function querySqliteJson(dbPath, sql) {
+  const { stdout } = await execFileAsync("sqlite3", ["-json", dbPath, sql]);
+  return stdout.trim() ? JSON.parse(stdout) : [];
+}
+
 export function buildWindowAroundNowUtc(spanMinutes = 5) {
   const now = new Date();
   const start = new Date(now.getTime() - spanMinutes * 60 * 1000);

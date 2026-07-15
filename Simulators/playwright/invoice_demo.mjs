@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs";
 import net from "node:net";
@@ -11,12 +11,33 @@ import {
   invoiceDemoFixtures,
   seedInvoiceDemoFixtures,
 } from "../lib/invoice_demo_fixtures.mjs";
-import { seedTestStack } from "../lib/sqlite_helpers.mjs";
+import { querySqliteJson, seedTestStack } from "../lib/sqlite_helpers.mjs";
 import { waitForUrl } from "./common.mjs";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = path.resolve(packageDir, "..", "..");
-const sensitiveInheritedSettingPattern = /^(?:Invoices__ERacuni|Stripe__|Notifications__(?:Smtp|FromAddress|ReplyToAddress|BccAddress)|Email__|OwnerReportSchedule__)/i;
+const sensitiveInheritedSettingPattern = /^(?:SENTRY_DSN|Sentry__|Invoices__ERacuni|Stripe__|Notifications__(?:Smtp|FromAddress|ReplyToAddress|BccAddress)|Email__|OwnerReportSchedule__)/i;
+const lockedBuyerControlIds = Object.freeze([
+  "r1-country",
+  "r1-company",
+  "r1-street",
+  "r1-postal-code",
+  "r1-city",
+  "r1-email",
+  "r1-tax-identifier",
+  "r1-registration-number",
+  "r1-vat-registration",
+  "r1-confirm",
+  "r1-submit",
+]);
+const expectedScreenshotNames = Object.freeze([
+  "01-company-invoice-choice.png",
+  "02-czech-company-review.png",
+  "03-czech-company-saved.png",
+  "04-croatian-invalid-oib.png",
+  "05-croatian-valid-oib.png",
+  "06-issued-invoice-locked.png",
+]);
 
 export const invoiceDemoMessages = Object.freeze({
   invalidOib: "Please enter a valid OIB (11 digits).",
@@ -38,6 +59,25 @@ function realPathIncludingMissingSegments(inputPath) {
   return path.join(canonicalAncestor, ...missingSegments);
 }
 
+function existingAncestor(inputPath) {
+  let ancestor = path.resolve(inputPath);
+  while (!fs.existsSync(ancestor)) {
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
+  return fs.realpathSync(ancestor);
+}
+
+export function isInsideGitRepository(inputPath, { run = spawnSync } = {}) {
+  const result = run("git", ["-C", existingAncestor(inputPath), "rev-parse", "--git-dir"], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (result.error) throw result.error;
+  return result.status === 0;
+}
+
 export function assertPrivateArtifactDirectory(repoRoot, artifactDir) {
   if (!artifactDir || !String(artifactDir).trim()) {
     throw new Error("INVOICE_DEMO_ARTIFACT_DIR must name a private directory outside the repository.");
@@ -50,6 +90,9 @@ export function assertPrivateArtifactDirectory(repoRoot, artifactDir) {
   if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
     throw new Error("Invoice demo artifacts must be written outside the repository.");
   }
+  if (isInsideGitRepository(canonicalArtifactDir)) {
+    throw new Error("Invoice demo artifacts cannot be written inside any Git repository or worktree.");
+  }
 
   return resolvedArtifactDir;
 }
@@ -57,12 +100,15 @@ export function assertPrivateArtifactDirectory(repoRoot, artifactDir) {
 export function buildDemoEnvironment(runtime, application = "server") {
   const targetUrl = application === "management" ? runtime.managementBaseUrl : runtime.serverBaseUrl;
   const environment = {
-    ASPNETCORE_ENVIRONMENT: "Development",
+    ASPNETCORE_ENVIRONMENT: "InvoiceDemo",
+    DOTNET_ENVIRONMENT: "InvoiceDemo",
     AutoMigrateDB: "true",
     ApiKey: runtime.apiKey,
     ConnectionStrings__SQLite: `Filename=${runtime.databasePath};foreign keys=True`,
     ConnectionStrings__SqlServer: "",
     DOTNET_ROLL_FORWARD: "Major",
+    SENTRY_DSN: "",
+    Sentry__Dsn: "",
     Invoices__Enabled: "false",
     Notifications__EnableCustomerEmails: "false",
     Notifications__FromAddress: "",
@@ -202,9 +248,9 @@ export function publishCompletedVideo(sourcePath, targetPath, {
   }
 }
 
-function sanitizedParentEnvironment() {
+export function sanitizeParentEnvironment(source = process.env) {
   return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !sensitiveInheritedSettingPattern.test(key)),
+    Object.entries(source).filter(([key]) => !sensitiveInheritedSettingPattern.test(key)),
   );
 }
 
@@ -253,7 +299,7 @@ function spawnApplication(repoRoot, artifactDir, projectPath, environment, logNa
   const child = spawn("dotnet", ["run", "--project", projectPath], {
     cwd: repoRoot,
     detached: process.platform !== "win32",
-    env: { ...sanitizedParentEnvironment(), ...environment },
+    env: { ...sanitizeParentEnvironment(), ...environment },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.pipe(log);
@@ -273,6 +319,125 @@ async function waitForApplication(url, child, name) {
 
 async function stopChildren(children) {
   await Promise.all(children.map((child) => stopProcessGroup(child)));
+}
+
+export async function cleanupRuntime(children, tempRoot, {
+  remove = fs.rmSync,
+  stop = stopChildren,
+} = {}) {
+  let stopError;
+  let removeError;
+  try {
+    await stop(children);
+  } catch (error) {
+    stopError = error;
+  }
+  try {
+    remove(tempRoot, { recursive: true, force: true });
+  } catch (error) {
+    removeError = error;
+  }
+  if (stopError && removeError) {
+    throw new AggregateError([stopError, removeError], "Child shutdown and runtime deletion both failed.");
+  }
+  if (stopError) throw stopError;
+  if (removeError) throw removeError;
+}
+
+export function verifyLockedBuyerControls(controlStates) {
+  const statesById = new Map(controlStates.map((state) => [state.id, state]));
+  for (const id of lockedBuyerControlIds) {
+    if (!statesById.get(id)?.disabled) {
+      throw new Error(`Locked buyer control #${id} must exist and be disabled.`);
+    }
+  }
+  return {
+    lockedBuyerControlCount: lockedBuyerControlIds.length,
+    lockedBuyerControlsDisabled: true,
+  };
+}
+
+export function verifyArtifactFiles(artifactDir, browserArtifacts) {
+  if (browserArtifacts.video !== "walkthrough.webm") {
+    throw new Error("Expected walkthrough.webm from the invoice demo recording.");
+  }
+  if (browserArtifacts.screenshots.length !== expectedScreenshotNames.length ||
+      expectedScreenshotNames.some((name, index) => browserArtifacts.screenshots[index] !== name)) {
+    throw new Error(`Expected invoice demo screenshots: ${expectedScreenshotNames.join(", ")}.`);
+  }
+  for (const screenshot of expectedScreenshotNames) {
+    if (fs.statSync(path.join(artifactDir, screenshot)).size <= 0) {
+      throw new Error(`Screenshot ${screenshot} must be nonempty.`);
+    }
+  }
+  if (fs.statSync(path.join(artifactDir, browserArtifacts.video)).size <= 0) {
+    throw new Error(`Video ${browserArtifacts.video} must be nonempty.`);
+  }
+  return {
+    screenshotsNonEmpty: true,
+    verifiedScreenshotCount: expectedScreenshotNames.length,
+    videoNonEmpty: true,
+  };
+}
+
+const persistedBuyerColumns = Object.freeze({
+  country: "InvoiceBuyerCountry",
+  companyName: "InvoiceBuyerCompanyName",
+  street: "InvoiceBuyerStreet",
+  postalCode: "InvoiceBuyerPostalCode",
+  city: "InvoiceBuyerCity",
+  email: "InvoiceBuyerEmail",
+  taxIdentifier: "InvoiceBuyerTaxIdentifier",
+  registrationNumber: "InvoiceBuyerRegistrationNumber",
+  identifierIsVatRegistration: "InvoiceBuyerIdentifierIsVatRegistration",
+});
+
+export async function verifyPersistedBuyerSnapshots(databasePath, { query = querySqliteJson } = {}) {
+  const fixtures = [
+    ["Czech", invoiceDemoFixtures.foreignEditable],
+    ["Croatian", invoiceDemoFixtures.croatianEditable],
+  ];
+  const reservationIds = fixtures.map(([, fixture]) => `'${fixture.reservationId}'`).join(", ");
+  const rows = await query(databasePath, `
+SELECT ReservationId,
+       InvoiceBuyerCountry,
+       InvoiceBuyerCompanyName,
+       InvoiceBuyerStreet,
+       InvoiceBuyerPostalCode,
+       InvoiceBuyerCity,
+       InvoiceBuyerEmail,
+       InvoiceBuyerTaxIdentifier,
+       InvoiceBuyerRegistrationNumber,
+       InvoiceBuyerIdentifierIsVatRegistration,
+       InvoiceBuyerConfirmedAtUtc
+FROM ChargePaymentReservation
+WHERE ReservationId IN (${reservationIds});`);
+  const rowsByReservation = new Map(rows.map((row) => [row.ReservationId, row]));
+
+  for (const [label, fixture] of fixtures) {
+    const row = rowsByReservation.get(fixture.reservationId);
+    if (!row) throw new Error(`${label} buyer snapshot is missing from SQLite.`);
+    for (const [fixtureField, column] of Object.entries(persistedBuyerColumns)) {
+      const expected = fixture.buyer[fixtureField] ?? null;
+      let actual = row[column] ?? null;
+      if (fixtureField === "identifierIsVatRegistration") {
+        if (![0, 1, false, true].includes(row[column])) {
+          throw new Error(`${label} buyer snapshot ${column} must be persisted as a boolean.`);
+        }
+        actual = Boolean(row[column]);
+      }
+      if (actual !== expected) {
+        throw new Error(`${label} buyer snapshot ${column} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}.`);
+      }
+    }
+    if (!row.InvoiceBuyerConfirmedAtUtc) {
+      throw new Error(`${label} buyer snapshot InvoiceBuyerConfirmedAtUtc must be persisted.`);
+    }
+  }
+  return {
+    croatianBuyerSnapshotPersisted: true,
+    czechBuyerSnapshotPersisted: true,
+  };
 }
 
 async function addCaption(page, text) {
@@ -388,6 +553,12 @@ async function recordBrowserWalkthrough(runtime, signal) {
     await page.goto(statusUrl(invoiceDemoFixtures.foreignLocked));
     await page.locator("#r1-submit:disabled").waitFor();
     await waitForExactText(page, "#r1-result", invoiceDemoMessages.locked);
+    const lockedBuyerControls = verifyLockedBuyerControls(await page.locator(
+      lockedBuyerControlIds.map((id) => `#${id}`).join(", "),
+    ).evaluateAll((controls) => controls.map((control) => ({
+      disabled: control.disabled,
+      id: control.id,
+    }))));
     await addCaption(page, "After invoice issuance, buyer fields are locked against later changes.");
     await capture("issued-invoice-locked");
 
@@ -396,7 +567,7 @@ async function recordBrowserWalkthrough(runtime, signal) {
     const videoPath = await video.path();
     const walkthroughPath = path.join(runtime.artifactDir, "walkthrough.webm");
     publishCompletedVideo(videoPath, walkthroughPath);
-    return { screenshots, video: path.basename(walkthroughPath) };
+    return { lockedBuyerControls, screenshots, video: path.basename(walkthroughPath) };
   } finally {
     signal?.removeEventListener("abort", closeOnAbort);
     await context.close().catch(() => {});
@@ -439,6 +610,8 @@ export async function runInvoiceDemo({
     await abortable(seedInvoiceDemoFixtures(runtime.databasePath), signal);
 
     const browserArtifacts = await abortable(recordBrowserWalkthrough(runtime, signal), signal);
+    const persistedBuyerSnapshots = await abortable(verifyPersistedBuyerSnapshots(runtime.databasePath), signal);
+    const artifactFiles = verifyArtifactFiles(privateArtifactDir, browserArtifacts);
     const manifest = {
       createdAtUtc: new Date().toISOString(),
       privacy: "local-only; mock Stripe; invoices and customer email disabled",
@@ -447,8 +620,14 @@ export async function runInvoiceDemo({
         serverBaseUrl: runtime.serverBaseUrl,
       },
       artifacts: {
-        ...browserArtifacts,
+        screenshots: browserArtifacts.screenshots,
+        video: browserArtifacts.video,
         logs: ["server.log", "management.log"],
+      },
+      verification: {
+        ...persistedBuyerSnapshots,
+        ...browserArtifacts.lockedBuyerControls,
+        ...artifactFiles,
       },
       fixtures: Object.fromEntries(
         Object.entries(invoiceDemoFixtures).map(([name, fixture]) => [name, fixture.reservationId]),
@@ -458,8 +637,7 @@ export async function runInvoiceDemo({
     return manifest;
   } finally {
     signalHandlers.dispose();
-    await stopChildren(children);
-    fs.rmSync(runtime.tempRoot, { recursive: true, force: true });
+    await cleanupRuntime(children, runtime.tempRoot);
   }
 }
 
