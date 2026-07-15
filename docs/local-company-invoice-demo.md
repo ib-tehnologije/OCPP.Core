@@ -1,6 +1,6 @@
 # Local Company Invoice Demo
 
-This walkthrough records the real local management and server applications while they save synthetic Czech and Croatian company invoice details. It also demonstrates Croatian OIB validation and the locked state after a synthetic invoice marker exists. The runner uses a disposable SQLite database and writes the recording outside the repository.
+This walkthrough records the real local management and server applications while they save synthetic Czech and Croatian company invoice details. It also demonstrates Croatian OIB validation and the locked state after a synthetic invoice marker exists. The runner uses a disposable SQLite database, visible cursor movement, human-paced field entry, and readable captions, then writes the recordings outside the repository.
 
 ## Prerequisites
 
@@ -8,6 +8,7 @@ This walkthrough records the real local management and server applications while
 - Node.js and npm. CI uses Node.js 20; use a currently supported release locally.
 - The `sqlite3` command-line tool.
 - Playwright dependencies and its managed Chromium/FFmpeg binaries.
+- `ffprobe` for mandatory recording-duration verification.
 
 Install the JavaScript dependencies and browser binaries from the repository root:
 
@@ -41,10 +42,11 @@ The command starts both applications on unused `127.0.0.1` ports, creates and se
 
 The private artifact directory contains:
 
-- `walkthrough.webm` — the 1440 by 900 browser recording.
+- `ui-walkthrough.webm` — the 1440 by 900, 3-6 minute real-time UI walkthrough. It shows the public Company invoice choice, secure status-page handoff, field-by-field Czech entry and review, save result, invalid and valid Croatian OIB paths, and visibly locked post-issuance controls.
+- `billing-rules-explainer.webm` — the separate 1-3 minute explainer for below-1-kWh suppression, normal billing at or above 1 kWh, and the defensive provider-minimum guard. It distinguishes visible UI behavior from backend decisions.
 - `01-company-invoice-choice.png` through `06-issued-invoice-locked.png` — numbered, full-page screenshots of each checkpoint.
 - `server.log` and `management.log` — local application logs for diagnosis.
-- `manifest.json` — creation time, loopback runtime URLs, output filenames, synthetic fixture reservation IDs, privacy mode, and explicit successful checks for the persisted buyer snapshots, all locked controls, and nonempty PNG/WebM files.
+- `manifest.json` — viewing order, creation time, loopback runtime URLs, output filenames, measured recording durations, synthetic fixture reservation IDs, privacy mode, and explicit successful checks for the persisted buyer snapshots, all locked controls, and nonempty PNG/WebM files. It identifies the legacy `walkthrough.webm` rapid montage as superseded.
 
 Existing files with these names may be replaced. Treat the directory as private even though the fixtures are synthetic because application logs are diagnostic artifacts and are not intended for Git.
 
@@ -70,4 +72,4 @@ node -e 'const fs=require("fs"); const p=process.env.INVOICE_DEMO_ARTIFACT_DIR+"
 git status --short
 ```
 
-Open the PNG files at natural resolution and play `walkthrough.webm` to verify captions and form values are readable. Confirm that the recording duration is greater than zero with a media inspector such as `ffprobe` when available. The artifact directory is outside the checkout, so no generated artifact should appear in `git status`.
+Open the PNG files at natural resolution, then play `ui-walkthrough.webm` followed by `billing-rules-explainer.webm` at 1x speed. Confirm that cursor movement, clicks, typed values, captions, result pauses, and locked controls are understandable without implementation context. The runner fails unless `ffprobe` measures the UI walkthrough between 180 and 360 seconds and the billing explainer between 60 and 180 seconds. The artifact directory is outside the checkout, so no generated artifact should appear in `git status`.
