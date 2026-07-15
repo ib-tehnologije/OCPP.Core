@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import {
+  abortable,
   assertPrivateArtifactDirectory,
   buildChromiumLaunchOptions,
   buildDemoEnvironment,
+  installSignalAbortHandlers,
+  invoiceDemoMessages,
+  publishCompletedVideo,
+  stopProcessGroup,
 } from "../playwright/invoice_demo.mjs";
 
 test("buildDemoEnvironment isolates the demo from live services", () => {
@@ -28,6 +35,20 @@ test("buildDemoEnvironment isolates the demo from live services", () => {
   assert.equal(environment.DOTNET_ROLL_FORWARD, "Major");
   assert.equal(environment.Invoices__Enabled, "false");
   assert.equal(environment.Notifications__EnableCustomerEmails, "false");
+  assert.equal(environment.Notifications__FromAddress, "");
+  assert.equal(environment.Notifications__ReplyToAddress, "");
+  assert.equal(environment.Notifications__BccAddress, "");
+  assert.equal(environment.Notifications__Smtp__Host, "");
+  assert.equal(environment.Notifications__Smtp__Username, "");
+  assert.equal(environment.Notifications__Smtp__Password, "");
+  assert.equal(environment.Email__EnableOwnerReportEmails, "false");
+  assert.equal(environment.Email__FromAddress, "");
+  assert.equal(environment.Email__ReplyToAddress, "");
+  assert.equal(environment.Email__Smtp__Host, "");
+  assert.equal(environment.Email__Smtp__Username, "");
+  assert.equal(environment.Email__Smtp__Password, "");
+  assert.equal(environment.OwnerReportSchedule__Enabled, "false");
+  assert.equal(environment.OwnerReportSchedule__SendTestTo, "");
   assert.equal(environment.Stripe__Enabled, "true");
   assert.equal(environment.Stripe__UseMockServices, "true");
   assert.equal(environment.Stripe__ReturnBaseUrl, runtime.managementBaseUrl);
@@ -76,6 +97,21 @@ test("assertPrivateArtifactDirectory accepts an external directory", () => {
   assert.equal(assertPrivateArtifactDirectory(repoRoot, external), path.resolve(external));
 });
 
+test("assertPrivateArtifactDirectory rejects an external symlink into the repository", (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-path-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const repoRoot = path.join(tempRoot, "repo");
+  const privateRepoDir = path.join(repoRoot, "private-artifacts");
+  const externalLink = path.join(tempRoot, "external-link");
+  fs.mkdirSync(privateRepoDir, { recursive: true });
+  fs.symlinkSync(privateRepoDir, externalLink, "dir");
+
+  assert.throws(
+    () => assertPrivateArtifactDirectory(repoRoot, path.join(externalLink, "new-run")),
+    /outside the repository/i,
+  );
+});
+
 test("buildChromiumLaunchOptions falls back to an installed system Chrome", () => {
   assert.deepEqual(buildChromiumLaunchOptions({ bundledExists: true, chromeExists: true }), {
     headless: true,
@@ -88,4 +124,82 @@ test("buildChromiumLaunchOptions falls back to an installed system Chrome", () =
     () => buildChromiumLaunchOptions({ bundledExists: false, chromeExists: false }),
     /playwright.*chromium/i,
   );
+});
+
+test("SIGINT immediately rejects abortable work", async () => {
+  const processTarget = new EventEmitter();
+  const handlers = installSignalAbortHandlers(processTarget);
+  const pending = new Promise(() => {});
+
+  const guarded = abortable(pending, handlers.signal);
+  processTarget.emit("SIGINT");
+
+  await assert.rejects(guarded, /interrupted by SIGINT/i);
+  assert.equal(handlers.signal.aborted, true);
+  handlers.dispose();
+});
+
+test("stopProcessGroup terminates the full process group and confirms exit", async () => {
+  const child = Object.assign(new EventEmitter(), { exitCode: null, pid: 4312, signalCode: null });
+  const calls = [];
+  const kill = (pid, signal) => {
+    calls.push([pid, signal]);
+    if (signal === "SIGTERM") {
+      setImmediate(() => {
+        child.signalCode = signal;
+        child.emit("exit", null, signal);
+      });
+    }
+  };
+
+  await stopProcessGroup(child, { kill, termTimeoutMs: 10, killTimeoutMs: 10 });
+
+  assert.deepEqual(calls, [[-4312, "SIGTERM"]]);
+  assert.equal(child.signalCode, "SIGTERM");
+});
+
+test("stopProcessGroup escalates to SIGKILL and waits for confirmed exit", async () => {
+  const child = Object.assign(new EventEmitter(), { exitCode: null, pid: 4313, signalCode: null });
+  const calls = [];
+  const kill = (pid, signal) => {
+    calls.push([pid, signal]);
+    if (signal === "SIGKILL") {
+      setImmediate(() => {
+        child.signalCode = signal;
+        child.emit("exit", null, signal);
+      });
+    }
+  };
+
+  await stopProcessGroup(child, { kill, termTimeoutMs: 1, killTimeoutMs: 10 });
+
+  assert.deepEqual(calls, [[-4313, "SIGTERM"], [-4313, "SIGKILL"]]);
+  assert.equal(child.signalCode, "SIGKILL");
+});
+
+test("publishCompletedVideo falls back to copy and remove for EXDEV", () => {
+  const calls = [];
+  publishCompletedVideo("/tmp/source.webm", "/Volumes/private/walkthrough.webm", {
+    copyFileSync: (...args) => calls.push(["copy", ...args]),
+    removeSync: (...args) => calls.push(["remove", ...args]),
+    renameSync: () => {
+      const error = new Error("cross-device link");
+      error.code = "EXDEV";
+      throw error;
+    },
+  });
+
+  assert.deepEqual(calls, [
+    ["remove", "/Volumes/private/walkthrough.webm", { force: true }],
+    ["copy", "/tmp/source.webm", "/Volumes/private/walkthrough.webm"],
+    ["remove", "/tmp/source.webm", { force: true }],
+  ]);
+});
+
+test("invoice walkthrough requires exact English result messages", () => {
+  assert.deepEqual(invoiceDemoMessages, {
+    invalidOib: "Please enter a valid OIB (11 digits).",
+    locked: "Buyer details cannot be changed after invoice submission. Contact support for a correction.",
+    saved: "R1 details saved successfully.",
+  });
 });
