@@ -113,6 +113,8 @@ npx --prefix Simulators/playwright playwright install chromium
 node Simulators/run_e2e_stack.mjs
 ```
 
+For a repeatable, synthetic walkthrough of Czech and Croatian company invoice review, validation, saving, and locking through the real local applications, see [Local company invoice demo](docs/local-company-invoice-demo.md). Its recording and logs must be written to a private directory outside the repository.
+
 Regression matrix after building the solution:
 
 ```sh

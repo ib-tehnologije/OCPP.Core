@@ -21,13 +21,112 @@ namespace OCPP.Core.Server.Payments
             string diagnosticsDirectory = configuration?.GetValue<string>("Stripe:MockDiagnosticsDirectory");
             if (!string.IsNullOrWhiteSpace(diagnosticsDirectory))
             {
-                Directory.CreateDirectory(diagnosticsDirectory);
-                _snapshotFilePath = Path.Combine(diagnosticsDirectory, "mock-stripe-store.json");
+                try
+                {
+                    Directory.CreateDirectory(diagnosticsDirectory);
+                    _snapshotFilePath = Path.Combine(diagnosticsDirectory, "mock-stripe-store.json");
+                    RestoreSnapshot();
+                }
+                catch (Exception exception) when (IsOptionalSnapshotFailure(exception))
+                {
+                    _snapshotFilePath = null;
+                }
             }
         }
 
-        public ConcurrentDictionary<string, Session> Sessions { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public ConcurrentDictionary<string, PaymentIntent> PaymentIntents { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public ConcurrentDictionary<string, Session> Sessions { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
+        public ConcurrentDictionary<string, PaymentIntent> PaymentIntents { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        private void RestoreSnapshot()
+        {
+            if (string.IsNullOrWhiteSpace(_snapshotFilePath) || !System.IO.File.Exists(_snapshotFilePath))
+            {
+                return;
+            }
+
+            try
+            {
+                var snapshot = JsonSerializer.Deserialize<MockStripeSnapshot>(
+                    System.IO.File.ReadAllText(_snapshotFilePath),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (snapshot?.Sessions == null || snapshot.PaymentIntents == null)
+                {
+                    throw new JsonException("Mock Stripe snapshot must contain session and payment intent arrays.");
+                }
+
+                var restoredSessions = new ConcurrentDictionary<string, Session>(StringComparer.OrdinalIgnoreCase);
+                var restoredPaymentIntents = new ConcurrentDictionary<string, PaymentIntent>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var session in snapshot.Sessions)
+                {
+                    if (session == null || string.IsNullOrWhiteSpace(session.Id))
+                    {
+                        throw new JsonException("Mock Stripe session entries must have an id.");
+                    }
+
+                    var restoredSession = new Session
+                    {
+                        Id = session.Id,
+                        Url = session.Url,
+                        PaymentIntentId = session.PaymentIntentId,
+                        Status = session.Status,
+                        PaymentStatus = session.PaymentStatus,
+                        Metadata = RestoreMetadata(session.Metadata)
+                    };
+                    if (!restoredSessions.TryAdd(session.Id, restoredSession))
+                    {
+                        throw new JsonException($"Duplicate mock Stripe session id '{session.Id}'.");
+                    }
+                }
+
+                foreach (var intent in snapshot.PaymentIntents)
+                {
+                    if (intent == null || string.IsNullOrWhiteSpace(intent.Id))
+                    {
+                        throw new JsonException("Mock Stripe payment intent entries must have an id.");
+                    }
+
+                    var restoredIntent = new PaymentIntent
+                    {
+                        Id = intent.Id,
+                        Status = intent.Status,
+                        Amount = intent.Amount,
+                        AmountReceived = intent.AmountReceived,
+                        Metadata = RestoreMetadata(intent.Metadata)
+                    };
+                    if (!restoredPaymentIntents.TryAdd(intent.Id, restoredIntent))
+                    {
+                        throw new JsonException($"Duplicate mock Stripe payment intent id '{intent.Id}'.");
+                    }
+                }
+
+                Sessions = restoredSessions;
+                PaymentIntents = restoredPaymentIntents;
+            }
+            catch (Exception exception) when (IsOptionalSnapshotFailure(exception))
+            {
+                // Diagnostics are optional local mock state. Publish nothing unless the full snapshot is valid.
+            }
+        }
+
+        private static Dictionary<string, string> RestoreMetadata(Dictionary<string, string> metadata)
+        {
+            if (metadata == null)
+            {
+                throw new JsonException("Mock Stripe metadata must be an object.");
+            }
+
+            var restored = new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
+            if (restored.Any(entry => string.IsNullOrWhiteSpace(entry.Key) || entry.Value == null))
+            {
+                throw new JsonException("Mock Stripe metadata keys and values must be non-empty strings.");
+            }
+
+            return restored;
+        }
+
+        private static bool IsOptionalSnapshotFailure(Exception exception) =>
+            exception is JsonException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException;
 
         public void PersistSnapshot()
         {
@@ -80,6 +179,31 @@ namespace OCPP.Core.Server.Payments
 
                 System.IO.File.Move(tempFilePath, _snapshotFilePath, true);
             }
+        }
+
+        private sealed class MockStripeSnapshot
+        {
+            public List<MockStripeSessionSnapshot> Sessions { get; set; }
+            public List<MockStripePaymentIntentSnapshot> PaymentIntents { get; set; }
+        }
+
+        private sealed class MockStripeSessionSnapshot
+        {
+            public string Id { get; set; }
+            public string Url { get; set; }
+            public string PaymentIntentId { get; set; }
+            public string Status { get; set; }
+            public string PaymentStatus { get; set; }
+            public Dictionary<string, string> Metadata { get; set; }
+        }
+
+        private sealed class MockStripePaymentIntentSnapshot
+        {
+            public string Id { get; set; }
+            public string Status { get; set; }
+            public long Amount { get; set; }
+            public long AmountReceived { get; set; }
+            public Dictionary<string, string> Metadata { get; set; }
         }
     }
 

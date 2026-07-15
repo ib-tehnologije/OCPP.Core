@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-function sqlQuote(value) {
+export function sqlQuote(value) {
   if (value === null || value === undefined) {
     return "NULL";
   }
@@ -11,8 +11,13 @@ function sqlQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-async function runSqlite(dbPath, sql) {
+export async function runSqlite(dbPath, sql) {
   await execFileAsync("sqlite3", [dbPath, sql]);
+}
+
+export async function querySqliteJson(dbPath, sql) {
+  const { stdout } = await execFileAsync("sqlite3", ["-json", dbPath, sql]);
+  return stdout.trim() ? JSON.parse(stdout) : [];
 }
 
 export function buildWindowAroundNowUtc(spanMinutes = 5) {
