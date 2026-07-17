@@ -22,21 +22,21 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("name=\"BuyerRegistrationNumber\"", view);
             Assert.Contains("name=\"BuyerIdentifierIsVatRegistration\"", view);
             Assert.Contains("name=\"BuyerDataConfirmed\"", view);
-            Assert.Contains("name=\"RememberInvoiceBuyer\"", view);
-            Assert.Contains("Other users of a shared device may see these details.", view);
-            Assert.Contains("invoice-buyer-storage.js", view);
-            Assert.Contains("invoiceBuyerStorage.load", view);
-            Assert.Contains("invoiceBuyerStorage.save", view);
-            Assert.Contains("invoiceBuyerStorage.clear", view);
-            Assert.Contains("if (!wantsR1.checked) {", view);
-            Assert.Contains("invoiceBuyerStorage.clear(localStorage);", view);
-            Assert.Contains("data-i18n=\"start.rememberInvoiceBuyer\"", view);
-            Assert.Contains("data-i18n=\"start.rememberInvoiceBuyerWarning\"", view);
+            Assert.DoesNotContain("RememberInvoiceBuyer", view);
+            Assert.DoesNotContain("rememberInvoiceBuyer", view);
+            Assert.DoesNotContain("invoiceBuyerStorage", view);
+            Assert.DoesNotContain("invoice-buyer-storage.js", view);
+            Assert.DoesNotContain("localStorage", view);
             Assert.Contains("i.required = enabled", view);
             Assert.DoesNotContain("country?.value !== 'HR'", view);
             Assert.Contains("const invalidateConfirmation", view);
             Assert.Contains("confirmation.checked = false", view);
             Assert.DoesNotContain("Buyer data is collected after checkout", view);
+
+            var model = ReadProjectFile("OCPP.Core.Management", "Models", "PublicStartViewModel.cs");
+            var controller = ReadProjectFile("OCPP.Core.Management", "Controllers", "PublicController.cs");
+            Assert.DoesNotContain("RememberInvoiceBuyer", model);
+            Assert.DoesNotContain("RememberInvoiceBuyer", controller);
         }
 
         [Fact]
@@ -47,6 +47,8 @@ namespace OCPP.Core.Server.Tests
             Assert.DoesNotContain("After checkout, review and confirm", script, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Buyer data is collected after checkout", script, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("submit company details now or later", script, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("start.rememberInvoiceBuyer", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("start.rememberInvoiceBuyerWarning", script, StringComparison.Ordinal);
         }
 
         private static string ReadView()

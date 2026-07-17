@@ -1,6 +1,6 @@
 # Local Company Invoice Demo
 
-This walkthrough records the real local management and server applications while they collect synthetic Czech and Croatian company invoice details before Stripe checkout. It also explains Croatian OIB validation, optional browser-only reuse, and the read-only invoice state after checkout. The runner uses a disposable SQLite database, visible cursor movement, human-paced field entry, and readable captions, then writes the recordings outside the repository.
+This walkthrough records the real local management and server applications while they collect synthetic Czech and Croatian company invoice details before Stripe checkout. It also explains Croatian OIB validation, confirms that reusable buyer data is not kept in browser storage, and shows the read-only invoice state after checkout. The runner uses a disposable SQLite database, visible cursor movement, human-paced field entry, and readable captions, then writes the recordings outside the repository.
 
 ## Prerequisites
 
@@ -42,7 +42,7 @@ The command starts both applications on unused `127.0.0.1` ports, creates and se
 
 The private artifact directory contains:
 
-- `ui-walkthrough.webm` — the 1440 by 900, 3-6 minute real-time UI walkthrough. It shows the public Company invoice choice, field-by-field Czech entry and review before checkout, optional browser-only reuse, invalid and valid Croatian OIB examples, and the read-only post-checkout invoice result.
+- `ui-walkthrough.webm` — the 1440 by 900, 3-6 minute real-time UI walkthrough. It shows the public Company invoice choice, field-by-field Czech entry and review before checkout, confirmed buyer data without retaining it after form submission, invalid and valid Croatian OIB examples, and the read-only post-checkout invoice result.
 - `billing-rules-explainer.webm` — the separate 1-3 minute explainer for below-1-kWh suppression, normal billing at or above 1 kWh, and the defensive provider-minimum guard. It distinguishes visible UI behavior from backend decisions.
 - `01-company-invoice-choice.png` through `06-issued-invoice-read-only.png` — numbered, full-page screenshots of each checkpoint.
 - `server.log` and `management.log` — local application logs for diagnosis.

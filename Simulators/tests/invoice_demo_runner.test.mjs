@@ -198,7 +198,7 @@ test("verifyArtifactFiles requires every expected PNG and both accepted WebM rec
   const screenshots = [
     "01-company-invoice-choice.png",
     "02-czech-company-review.png",
-    "03-czech-company-remembered.png",
+    "03-czech-company-confirmed.png",
     "04-croatian-invalid-oib.png",
     "05-croatian-valid-oib-ready.png",
     "06-issued-invoice-read-only.png",
@@ -454,7 +454,7 @@ test("interaction timeline covers the required human-visible UI states", () => {
     "company-invoice-choice",
     "czech-entry",
     "czech-review",
-    "czech-remember",
+    "czech-confirmed",
     "croatian-invalid-oib",
     "croatian-valid-oib-ready",
     "issued-read-only",

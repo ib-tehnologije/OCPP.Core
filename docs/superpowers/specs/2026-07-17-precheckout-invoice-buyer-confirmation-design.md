@@ -10,7 +10,6 @@ The public charging start page currently records only an intent to request a com
 - Persist the confirmed buyer snapshot on `ChargePaymentReservation` before checkout succeeds and before charging can complete.
 - Set company-invoice compatibility metadata from the start so completed reservations cannot be misclassified as retail because of buyer-entry timing.
 - Keep Stripe payment-only and keep the reservation snapshot as the invoice source of truth.
-- Allow customers to opt in to reusing buyer details on the same browser and device without creating an account.
 - Preserve legacy invoice-building fallback behavior for reservations created by older application versions.
 
 ## Non-goals
@@ -34,27 +33,15 @@ The public start page retains the `Company invoice` checkbox. Selecting it expan
 - OIB, VAT number, tax identifier, or company identifier;
 - optional legal registration number;
 - whether the supplied identifier is a VAT registration number;
-- explicit confirmation that the invoice details are correct;
-- optional `Remember company details on this device` consent.
+- explicit confirmation that the invoice details are correct.
 
 Country-specific behavior remains unchanged. Croatia requires a checksum-valid 11-digit OIB. Foreign buyers require the full legal name, address, billing email, and identifier dataset. Foreign identifiers remain trimmed, bounded, and unverified.
 
 Submitting the start form with company invoicing selected sends the complete confirmed buyer payload to the server. Validation failure returns to the same page, preserves the submitted values in the view model, and does not create a Stripe Checkout session. Successful validation creates the reservation with its confirmed snapshot and then redirects to Stripe.
 
+The public start page does not persist reusable buyer details in browser storage. Submitted values are preserved only through the ordinary server-rendered validation-error response.
+
 The secure status page no longer offers an editable company-buyer form for new sessions. It may show the confirmed company-invoice state, but it must not advertise that company details can be added later. The existing request endpoint remains available for compatibility with reservations or clients created by older application versions.
-
-## Device-local Reuse
-
-Device-local reuse is explicit opt-in. The browser stores buyer fields only when `Remember company details on this device` is selected. The stored record:
-
-- uses a versioned key, `ocpp.invoiceBuyer.v1`;
-- contains only the company-buyer fields listed above;
-- excludes reservation IDs, charge-point details, payment identifiers, Stripe identifiers, confirmation timestamps, and invoice results;
-- is read defensively and ignored when missing, malformed, or unavailable;
-- is cleared when the customer disables the remember option and submits the form;
-- never replaces server-side validation or confirmation.
-
-When a valid saved record exists, the start page pre-populates the buyer form and shows the remember option as selected. The page must explain that the data is stored only in the current browser and may be visible to other users of a shared device.
 
 ## Server and Data Flow
 
@@ -91,14 +78,13 @@ The post-checkout compatibility endpoint retains its existing immutability, conc
 
 Automated coverage must prove:
 
-- the start-page form exposes the complete country-aware buyer contract, confirmation, and remember controls;
+- the start-page form exposes the complete country-aware buyer contract and explicit confirmation without browser-persistence controls;
 - company-invoice start requests forward every buyer field;
 - invalid or unconfirmed company data fails before any Stripe create call;
 - valid Croatian and foreign buyer data is normalized and persisted on the reservation before checkout returns;
 - company-invoice Checkout Session and PaymentIntent metadata contain `invoice_type=R1` and the bounded compatibility mirror;
 - retail checkout remains unchanged;
 - completion builds an R1 invoice from the confirmed snapshot without depending on post-checkout timing;
-- localStorage read, write, malformed-data handling, and opt-out clearing follow the versioned contract;
 - the public status page no longer offers or advertises late buyer entry for new sessions;
 - legacy snapshot and Stripe-metadata fallback tests continue to pass.
 
@@ -106,4 +92,4 @@ Verification includes focused xUnit tests, the full server test suite, a Release
 
 ## Documentation
 
-Update the public feature and operations documentation to state that company buyer details are confirmed before Stripe Checkout, stored on the reservation, optionally remembered in the browser with consent, and mirrored only minimally to Stripe.
+Update the public feature and operations documentation to state that company buyer details are confirmed before Stripe Checkout, stored on the reservation rather than in reusable browser storage, and mirrored only minimally to Stripe.

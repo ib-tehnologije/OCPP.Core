@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Confirm and persist Croatian or foreign company invoice buyer data before Stripe Checkout, with explicit device-local reuse, so charging completion cannot race ahead of R1 classification.
+**Goal:** Confirm and persist Croatian or foreign company invoice buyer data before Stripe Checkout so charging completion cannot race ahead of R1 classification.
 
-**Architecture:** Extend the existing payment-session request with the established buyer contract and reuse `InvoiceBuyerDataValidator` inside `CreateCheckoutSession`. Apply the normalized snapshot to `ChargePaymentReservation` before Stripe options are created, mirror only bounded compatibility fields to Stripe, move the complete form to the public start page, and remove late-entry controls from the status page while preserving the legacy endpoint.
+**Architecture:** Extend the existing payment-session request with the established buyer contract and reuse `InvoiceBuyerDataValidator` inside `CreateCheckoutSession`. Apply the normalized snapshot to `ChargePaymentReservation` before Stripe options are created, mirror only bounded compatibility fields to Stripe, move the complete form to the public start page without browser persistence, and remove late-entry controls from the status page while preserving the legacy endpoint.
 
 **Tech Stack:** .NET 8, ASP.NET Core MVC/Razor, EF Core, Stripe SDK abstractions, vanilla browser JavaScript, Node.js `node:test`, xUnit.
 
@@ -13,8 +13,7 @@
 - Keep `ChargePaymentReservation` as the authoritative invoice-buyer source; Stripe remains payment-only.
 - Croatian buyers require a checksum-valid 11-digit OIB.
 - Foreign buyers require country, legal name, street, postal code, city, billing email, and a bounded identifier; registry and VIES lookup remain out of scope.
-- Persist no reservation, charger, invoice, or payment identifiers in browser storage.
-- Browser reuse is explicit opt-in under the versioned key `ocpp.invoiceBuyer.v1`.
+- Persist no reusable company-buyer data in browser storage; preserve submitted values only through the server-rendered validation response.
 - Keep the post-checkout request endpoint for legacy clients, including its immutability and submission guards.
 - Do not add a database migration or alter payment, capture, refund, charging, or e-racuni configuration behavior.
 - Keep all committed content public-safe and collaborator-neutral.
@@ -244,7 +243,7 @@ git commit -m "fix: confirm invoice buyer before Stripe checkout"
 
 - [ ] **Step 1: Write failing start-page contract tests**
 
-Create `PublicStartInvoiceViewTests.cs` to assert the view contains named inputs `BuyerCountry`, `BuyerCompanyName`, `BuyerStreet`, `BuyerPostalCode`, `BuyerCity`, `BuyerEmail`, `BuyerTaxIdentifier`, `BuyerRegistrationNumber`, `BuyerIdentifierIsVatRegistration`, `BuyerDataConfirmed`, and `RememberInvoiceBuyer`, plus the explicit shared-device warning. Assert the old copy saying details are collected after checkout is absent.
+Create `PublicStartInvoiceViewTests.cs` to assert the view contains named inputs `BuyerCountry`, `BuyerCompanyName`, `BuyerStreet`, `BuyerPostalCode`, `BuyerCity`, `BuyerEmail`, `BuyerTaxIdentifier`, `BuyerRegistrationNumber`, `BuyerIdentifierIsVatRegistration`, and `BuyerDataConfirmed`. Assert browser-persistence controls and the old copy saying details are collected after checkout are absent.
 
 Add a `PublicControllerTests` POST test using `TestHttpServer` that captures `/Payments/Create` and asserts the body contains the complete confirmed payload, including `"buyerCountry":"CZ"`, `"buyerTaxIdentifier":"CZ 123-ABC"`, and `"buyerDataConfirmed":true`.
 
@@ -258,11 +257,11 @@ Expected: failure because the view model, controller payload, and pre-checkout c
 
 - [ ] **Step 3: Extend and preserve the view model**
 
-Add the complete buyer fields plus `RememberInvoiceBuyer` to `PublicStartViewModel`. In `PublicController.Start(PublicStartViewModel request)`, copy submitted values to the rebuilt model instead of clearing them, and add all buyer fields plus `buyerDataConfirmed` to the anonymous `Payments/Create` request.
+Add the complete buyer fields to `PublicStartViewModel`. In `PublicController.Start(PublicStartViewModel request)`, copy submitted values to the rebuilt model instead of clearing them, and add all buyer fields plus `buyerDataConfirmed` to the anonymous `Payments/Create` request.
 
 - [ ] **Step 4: Render the country-aware form before checkout**
 
-Move the country selector and buyer fields from `Views/Payments/PublicStatus.cshtml` into the existing `r1Fields` block in `Start.cshtml`, using names matching the view model. Keep the Croatian/foreign labels, max lengths, review summary, confirmation checkbox, VAT-registration flag, and optional registration number. Add an opt-in `Remember company details on this device` checkbox and a warning that other users of a shared device may see saved details. Disable all buyer controls when company invoicing is not selected; keep server validation authoritative.
+Move the country selector and buyer fields from `Views/Payments/PublicStatus.cshtml` into the existing `r1Fields` block in `Start.cshtml`, using names matching the view model. Keep the Croatian/foreign labels, max lengths, review summary, confirmation checkbox, VAT-registration flag, and optional registration number. Do not add browser-persistence controls. Disable all buyer controls when company invoicing is not selected; keep server validation authoritative.
 
 - [ ] **Step 5: Run the focused tests and verify GREEN**
 
@@ -275,59 +274,52 @@ git add OCPP.Core.Management/Models/PublicStartViewModel.cs OCPP.Core.Management
 git commit -m "feat: collect invoice buyer before checkout"
 ```
 
-### Task 3: Add Opt-in Browser Reuse and Remove Late-entry UI
+### Task 3: Remove Late-entry UI and Keep the Start Form Browser-stateless
 
 **Files:**
-- Create: `OCPP.Core.Management/wwwroot/js/invoice-buyer-storage.js`
-- Create: `Simulators/tests/invoice-buyer-storage.test.mjs`
 - Modify: `OCPP.Core.Management/Views/Public/Start.cshtml`
 - Modify: `OCPP.Core.Management/Views/Payments/PublicStatus.cshtml`
+- Modify: `OCPP.Core.Server.Tests/PublicStartInvoiceViewTests.cs`
 - Modify: `OCPP.Core.Server.Tests/PublicStatusInvoiceViewTests.cs`
 
 **Interfaces:**
-- Consumes: named start-page buyer controls and browser `localStorage`.
-- Produces: `globalThis.invoiceBuyerStorage` with `load(storage)`, `save(storage, details)`, and `clear(storage)`; no editable post-checkout buyer form for new sessions.
+- Consumes: the named start-page buyer controls and server-rendered validation state.
+- Produces: no reusable buyer-data storage in the browser and no editable post-checkout buyer form for new sessions.
 
-- [ ] **Step 1: Write failing storage and status-view tests**
+- [ ] **Step 1: Write failing start and status-view source-contract tests**
 
-Create a Node test that imports the browser helper and supplies an in-memory storage adapter. Assert that a record containing `buyerCountry`, `buyerCompanyName`, and a forbidden `reservationId` stores only the two whitelisted buyer fields under `ocpp.invoiceBuyer.v1`; add cases for clear, malformed JSON, and unavailable storage. Update `PublicStatusInvoiceViewTests` to assert the status view no longer contains `id="r1-submit"`, `submitR1Details`, or copy promising details can be added later, while invoice result messaging remains.
+Update `PublicStartInvoiceViewTests` to assert the start view, model, and controller contain no remembered-buyer model property, storage helper, or browser-storage wiring. Update `PublicStatusInvoiceViewTests` to assert the status view no longer contains `id="r1-submit"`, `submitR1Details`, or copy promising details can be added later, while invoice result messaging remains.
 
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-node --test Simulators/tests/invoice-buyer-storage.test.mjs
-dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --filter FullyQualifiedName~PublicStatusInvoiceViewTests --no-restore
+dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --filter "FullyQualifiedName~PublicStartInvoiceViewTests|FullyQualifiedName~PublicStatusInvoiceViewTests" --no-restore
 ```
 
-Expected: the module is missing and the current status page still exposes late entry.
+Expected: the current start page still exposes persistence wiring and the status page still exposes late entry.
 
-- [ ] **Step 3: Implement the storage helper**
+- [ ] **Step 3: Keep the start form browser-stateless**
 
-Create an IIFE that assigns a frozen API to `globalThis.invoiceBuyerStorage`. Use the exact key `ocpp.invoiceBuyer.v1`, whitelist only buyer field names, trim string values, preserve the VAT boolean, catch all storage/JSON errors, and return `null` for invalid records. Do not include reservation or payment fields.
+Remove any remembered-buyer model property, consent UI, translation keys, dedicated storage helper, and storage test. Keep ordinary POST error preservation through `PublicStartViewModel` and do not remove the complete buyer form or confirmation control.
 
-- [ ] **Step 4: Wire opt-in reuse on the start page**
-
-Load the helper through the view's `Scripts` section. On page load, populate empty buyer controls from `invoiceBuyerStorage.load(localStorage)` and select `RememberInvoiceBuyer` when data exists. On form submission, save the current buyer fields only when both company invoicing and remember are selected; otherwise call `clear(localStorage)`. Storage failures must not block checkout.
-
-- [ ] **Step 5: Remove late-entry controls from the status page**
+- [ ] **Step 4: Remove late-entry controls from the status page**
 
 Delete the editable `r1-panel`, its element bindings, review builder, and `submitR1Details` fetch flow from `PublicStatus.cshtml`. Retain invoice outcome rendering and customer-safe provider messages. Do not remove `PaymentsController.RequestR1Invoice` or the server `Payments/RequestR1` endpoint because older clients still use them.
 
-- [ ] **Step 6: Run focused tests and verify GREEN**
+- [ ] **Step 5: Run focused tests and verify GREEN**
 
 ```bash
-node --test Simulators/tests/invoice-buyer-storage.test.mjs
-dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --filter FullyQualifiedName~PublicStatusInvoiceViewTests --no-restore
-node --check OCPP.Core.Management/wwwroot/js/invoice-buyer-storage.js
+dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --filter "FullyQualifiedName~PublicStartInvoiceViewTests|FullyQualifiedName~PublicStatusInvoiceViewTests" --no-restore
+node --check OCPP.Core.Management/wwwroot/js/public-portal.js
 ```
 
-Expected: Node storage tests, status source-contract tests, and JavaScript syntax checks pass.
+Expected: start/status source-contract tests and JavaScript syntax checks pass.
 
-- [ ] **Step 7: Commit the browser/status slice**
+- [ ] **Step 6: Commit the browser/status slice**
 
 ```bash
-git add OCPP.Core.Management/wwwroot/js/invoice-buyer-storage.js Simulators/tests/invoice-buyer-storage.test.mjs OCPP.Core.Management/Views/Public/Start.cshtml OCPP.Core.Management/Views/Payments/PublicStatus.cshtml OCPP.Core.Server.Tests/PublicStatusInvoiceViewTests.cs
-git commit -m "feat: remember invoice buyer details on device"
+git add OCPP.Core.Management/Views/Public/Start.cshtml OCPP.Core.Management/Views/Payments/PublicStatus.cshtml OCPP.Core.Server.Tests/PublicStartInvoiceViewTests.cs OCPP.Core.Server.Tests/PublicStatusInvoiceViewTests.cs
+git commit -m "fix: keep invoice buyer data out of browser storage"
 ```
 
 ### Task 4: End-to-end Regression, Documentation, and Full Verification
@@ -344,17 +336,16 @@ git commit -m "feat: remember invoice buyer details on device"
 
 - [ ] **Step 1: Update the invoice browser regression**
 
-Extend `startPublicSession` to fill country, legal name, address, email, identifier, VAT flag, and confirmation before clicking Start. Replace the separate status-page R1 submission test with a localStorage reuse test that starts one company-invoice form with remember enabled, revisits another start page, and verifies the form is pre-populated before checkout.
+Extend `startPublicSession` to fill country, legal name, address, email, identifier, VAT flag, and confirmation before clicking Start. Replace the separate status-page R1 submission test with a no-persistence regression that completes a company session, revisits the start page, and verifies the buyer form starts empty.
 
 - [ ] **Step 2: Update public documentation**
 
-In `docs/features.md`, describe pre-checkout confirmation, reservation ownership, minimal Stripe mirroring, and opt-in browser reuse. In `docs/operations.md`, state that new sessions never depend on a post-checkout buyer update and that the legacy endpoint remains only for compatibility.
+In `docs/features.md`, describe pre-checkout confirmation, reservation ownership, minimal Stripe mirroring, and the absence of reusable browser storage. In `docs/operations.md`, state that new sessions never depend on a post-checkout buyer update and that the legacy endpoint remains only for compatibility.
 
 - [ ] **Step 3: Run focused verification**
 
 ```bash
 dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --filter "FullyQualifiedName~InvoiceBuyerDataValidatorTests|FullyQualifiedName~StripePaymentCoordinatorTests|FullyQualifiedName~PublicStartInvoiceViewTests|FullyQualifiedName~PublicStatusInvoiceViewTests|FullyQualifiedName~PublicControllerTests" --no-restore
-node --test Simulators/tests/invoice-buyer-storage.test.mjs
 ```
 
 Expected: all selected tests pass.
@@ -365,12 +356,11 @@ Expected: all selected tests pass.
 dotnet build OCPP.Core.sln -c Release --no-restore
 dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj -c Release --no-build
 bash ./scripts/check-mssql-migration-metadata.sh
-node --check OCPP.Core.Management/wwwroot/js/invoice-buyer-storage.js
 node --check OCPP.Core.Management/wwwroot/js/public-portal.js
 git diff --check origin/main...HEAD
 ```
 
-Expected: Release build passes, all xUnit tests pass, migration metadata is valid, both JavaScript files parse, and the branch diff has no whitespace errors.
+Expected: Release build passes, all xUnit tests pass, migration metadata is valid, the public portal JavaScript parses, and the branch diff has no whitespace errors.
 
 - [ ] **Step 5: Run the invoice browser regression when the local stack is available**
 
@@ -378,7 +368,7 @@ Expected: Release build passes, all xUnit tests pass, migration metadata is vali
 OCPP_PLAYWRIGHT_ENABLE_INVOICES=1 npx --prefix Simulators/playwright playwright test tests/public-urgent-validation.spec.js --grep @invoice
 ```
 
-Expected: the pre-checkout R1 flow and device-local reuse test pass. If the required mock invoice stack is unavailable, record that exact limitation without weakening unit/source-contract verification.
+Expected: the pre-checkout R1 flow and no-persistence test pass. If the required mock invoice stack is unavailable, record that exact limitation without weakening unit/source-contract verification.
 
 - [ ] **Step 6: Commit documentation and regression updates**
 

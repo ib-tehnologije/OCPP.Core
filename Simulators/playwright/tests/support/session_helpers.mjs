@@ -96,9 +96,6 @@ export async function startPublicSession(page, target, options = {}) {
     if (options.buyerDataConfirmed !== false) {
       await page.locator("#buyerDataConfirmed").check();
     }
-    if (options.rememberInvoiceBuyer) {
-      await page.locator("#rememberInvoiceBuyer").check();
-    }
   }
   await page.getByRole("button", { name: /Start charging/i }).click();
   await page.locator("#mock-pay-now").click();

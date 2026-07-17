@@ -80,7 +80,6 @@ namespace OCPP.Core.Management.Controllers
             model.BuyerRegistrationNumber = request?.BuyerRegistrationNumber;
             model.BuyerIdentifierIsVatRegistration = request?.BuyerIdentifierIsVatRegistration ?? false;
             model.BuyerDataConfirmed = request?.BuyerDataConfirmed ?? false;
-            model.RememberInvoiceBuyer = request?.RememberInvoiceBuyer ?? false;
 
             if (string.IsNullOrWhiteSpace(model.ChargePointId))
             {

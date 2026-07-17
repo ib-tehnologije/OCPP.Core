@@ -388,12 +388,6 @@
                                 <input type="checkbox" id="buyerDataConfirmed" name="BuyerDataConfirmed" value="true" @(Model.BuyerDataConfirmed ? "checked" : null) required />
                                 <span data-i18n="status.r1.confirm">I confirm these invoice details are correct and may be issued exactly as entered.</span>
                             </label>
-
-                            <label class="field-label field-label--spaced">
-                                <input type="checkbox" id="rememberInvoiceBuyer" name="RememberInvoiceBuyer" value="true" @(Model.RememberInvoiceBuyer ? "checked" : null) />
-                                <span data-i18n="start.rememberInvoiceBuyer">Remember company details on this device</span>
-                            </label>
-                            <div class="field-help" data-i18n="start.rememberInvoiceBuyerWarning">Stored only in this browser. Other users of a shared device may see these details.</div>
                         </div>
 
                         <button type="submit" class="btn-primary">
@@ -605,60 +599,3 @@
             }
         </div>
     </div>
-
-@section Scripts {
-    <script src="~/js/invoice-buyer-storage.js" asp-append-version="true"></script>
-    <script>
-        (function () {
-            const invoiceBuyerStorage = globalThis.invoiceBuyerStorage;
-            const form = document.querySelector('form[method="post"][action*="Start"]');
-            const wantsR1 = document.getElementById('wantsR1');
-            const remember = document.getElementById('rememberInvoiceBuyer');
-            if (!invoiceBuyerStorage || !form || !wantsR1 || !remember) return;
-
-            const fields = {
-                buyerCountry: document.getElementById('buyerCountry'),
-                buyerCompanyName: document.getElementById('buyerCompanyName'),
-                buyerStreet: document.getElementById('buyerStreet'),
-                buyerPostalCode: document.getElementById('buyerPostalCode'),
-                buyerCity: document.getElementById('buyerCity'),
-                buyerEmail: document.getElementById('buyerEmail'),
-                buyerTaxIdentifier: document.getElementById('buyerTaxIdentifier'),
-                buyerRegistrationNumber: document.getElementById('buyerRegistrationNumber'),
-                buyerIdentifierIsVatRegistration: document.getElementById('buyerIdentifierIsVatRegistration')
-            };
-
-            const saved = invoiceBuyerStorage.load(localStorage);
-            if (saved && !wantsR1.checked) {
-                Object.entries(fields).forEach(([name, element]) => {
-                    if (!element || saved[name] === undefined) return;
-                    if (element.type === 'checkbox') element.checked = Boolean(saved[name]);
-                    else element.value = String(saved[name]);
-                });
-                remember.checked = true;
-            }
-
-            remember.addEventListener('change', () => {
-                if (!remember.checked) invoiceBuyerStorage.clear(localStorage);
-            });
-
-            form.addEventListener('submit', () => {
-                if (!wantsR1.checked) {
-                    invoiceBuyerStorage.clear(localStorage);
-                    return;
-                }
-                if (!remember.checked) {
-                    invoiceBuyerStorage.clear(localStorage);
-                    return;
-                }
-
-                const details = {};
-                Object.entries(fields).forEach(([name, element]) => {
-                    if (!element) return;
-                    details[name] = element.type === 'checkbox' ? element.checked : element.value;
-                });
-                invoiceBuyerStorage.save(localStorage, details);
-            });
-        })();
-    </script>
-}

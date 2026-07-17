@@ -20,7 +20,7 @@ const sensitiveInheritedSettingPattern = /^(?:SENTRY_DSN|Sentry__|Invoices__ERac
 const expectedScreenshotNames = Object.freeze([
   "01-company-invoice-choice.png",
   "02-czech-company-review.png",
-  "03-czech-company-remembered.png",
+  "03-czech-company-confirmed.png",
   "04-croatian-invalid-oib.png",
   "05-croatian-valid-oib-ready.png",
   "06-issued-invoice-read-only.png",
@@ -145,7 +145,7 @@ export function buildInteractionTimeline() {
     { id: "company-invoice-choice", minimumDwellMs: 5_000 },
     { id: "czech-entry", minimumDwellMs: 5_000 },
     { id: "czech-review", minimumDwellMs: 8_000 },
-    { id: "czech-remember", minimumDwellMs: 8_000 },
+    { id: "czech-confirmed", minimumDwellMs: 8_000 },
     { id: "croatian-invalid-oib", minimumDwellMs: 8_000 },
     { id: "croatian-valid-oib-ready", minimumDwellMs: 8_000 },
     { id: "issued-read-only", minimumDwellMs: 10_000 },
@@ -788,10 +788,8 @@ async function recordUiWalkthrough(browser, runtime) {
     });
     await addCaption(page, "Pause and review: the visible summary is the exact buyer snapshot that checkout will carry forward.", 12_000);
     await capture("czech-company-review");
-    await addCaption(page, "Optional convenience: remember these reusable company fields only in this browser.", 4_000);
-    await moveCursorTo(page, page.locator("#rememberInvoiceBuyer"), { click: true });
-    await addCaption(page, "The shared-device warning makes the browser-only privacy tradeoff explicit.", 10_000);
-    await capture("czech-company-remembered");
+    await addCaption(page, "The confirmed buyer snapshot is ready for checkout without storing reusable buyer data in the browser.", 10_000);
+    await capture("czech-company-confirmed");
 
     const croatian = invoiceDemoFixtures.croatianEditable;
     await page.goto(`/Public/Start?cp=${encodeURIComponent(croatian.chargePointId)}&conn=${croatian.connectorId}`);

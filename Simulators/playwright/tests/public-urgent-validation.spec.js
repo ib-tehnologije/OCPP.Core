@@ -176,21 +176,12 @@ test("@invoice public start blocks incomplete Croatian buyer and invalidates sta
   await page.locator('form[method="post"][action*="Start"] button[type="submit"]').click();
   await expect(page.locator("#buyerStreet")).toBeFocused();
   await expect(page).toHaveURL(/\/Public\/Start/);
-
-  await page.evaluate(() => localStorage.setItem("ocpp.invoiceBuyer.v1", JSON.stringify({ version: 1, buyerCompanyName: "Shared device data" })));
-  await page.locator("#wantsR1").uncheck();
-  await page.evaluate(() => {
-    const form = document.querySelector('form[method="post"][action*="Start"]');
-    form.addEventListener("submit", event => event.preventDefault(), { once: true });
-    form.requestSubmit();
-  });
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("ocpp.invoiceBuyer.v1"))).toBeNull();
 });
 
-test("@invoice public start remembers buyer details without late status editing", async ({ page }) => {
+test("@invoice public start does not persist buyer details and keeps late status editing disabled", async ({ page }) => {
   test.skip(!invoicesEnabled, "Invoice validation requires OCPP_PLAYWRIGHT_ENABLE_INVOICES=1");
 
-  const buyerCompanyName = "Remembered Buyer d.o.o.";
+  const buyerCompanyName = "Confirmed Buyer d.o.o.";
   const buyerOib = "12345678903";
 
   await withDriver(publicStatusInvoiceTarget, "live_meter_progress", async (driver) => {
@@ -201,21 +192,20 @@ test("@invoice public start remembers buyer details without late status editing"
       buyerStreet: "Vukovarska 2",
       buyerPostalCode: "10000",
       buyerCity: "Zagreb",
-      buyerEmail: "remembered@example.test",
+      buyerEmail: "confirmed@example.test",
       buyerOib,
-      rememberInvoiceBuyer: true,
     });
     expect(reservationId).toBeTruthy();
 
     await expect(page.locator("#r1-submit")).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("ocpp.invoiceBuyer.v1"))).toBeNull();
     await waitForStripeMetadata(reservationId, buyerCompanyName, buyerOib);
     await completeChargingSession(page, driver);
 
     await page.goto(`/Public/Start?cp=${encodeURIComponent(publicStatusInvoiceTarget.chargePointId)}&conn=${publicStatusInvoiceTarget.connectorId}`);
-    await expect(page.locator("#rememberInvoiceBuyer")).toBeChecked();
     await page.locator("#wantsR1").check();
-    await expect(page.locator("#buyerCompanyName")).toHaveValue(buyerCompanyName);
-    await expect(page.locator("#buyerTaxIdentifier")).toHaveValue(buyerOib);
-    await expect(page.locator("#buyerEmail")).toHaveValue("remembered@example.test");
+    await expect(page.locator("#buyerCompanyName")).toHaveValue("");
+    await expect(page.locator("#buyerTaxIdentifier")).toHaveValue("");
+    await expect(page.locator("#buyerEmail")).toHaveValue("");
   });
 });

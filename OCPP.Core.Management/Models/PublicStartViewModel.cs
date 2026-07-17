@@ -28,7 +28,6 @@ namespace OCPP.Core.Management.Models
         public string BuyerRegistrationNumber { get; set; }
         public bool BuyerIdentifierIsVatRegistration { get; set; }
         public bool BuyerDataConfirmed { get; set; }
-        public bool RememberInvoiceBuyer { get; set; }
         public double MaxSessionKwh { get; set; }
         public decimal PricePerKwh { get; set; }
         public decimal UserSessionFee { get; set; }

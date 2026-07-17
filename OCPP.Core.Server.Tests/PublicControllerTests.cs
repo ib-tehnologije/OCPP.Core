@@ -1245,8 +1245,7 @@ namespace OCPP.Core.Server.Tests
                     BuyerTaxIdentifier = "CZ 123-ABC",
                     BuyerRegistrationNumber = "C 12345",
                     BuyerIdentifierIsVatRegistration = true,
-                    BuyerDataConfirmed = true,
-                    RememberInvoiceBuyer = true
+                    BuyerDataConfirmed = true
                 });
 
                 var redirect = Assert.IsType<RedirectResult>(result);
