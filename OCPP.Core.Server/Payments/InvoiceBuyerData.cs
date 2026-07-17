@@ -28,6 +28,19 @@ namespace OCPP.Core.Server.Payments
         public InvoiceBuyerData Data { get; set; }
     }
 
+    public sealed class InvoiceBuyerValidationException : ArgumentException
+    {
+        public InvoiceBuyerValidationException(string status, string field, string message)
+            : base(message)
+        {
+            Status = status;
+            Field = field;
+        }
+
+        public string Status { get; }
+        public string Field { get; }
+    }
+
     public static class InvoiceBuyerDataValidator
     {
         private static readonly HashSet<string> CountryCodes = new HashSet<string>(
@@ -41,6 +54,13 @@ namespace OCPP.Core.Server.Payments
             StringComparer.OrdinalIgnoreCase);
 
         public static InvoiceBuyerDataValidationResult ValidateAndNormalize(PaymentR1InvoiceRequest request)
+        {
+            return ValidateAndNormalize(request, requireCompleteBuyerDetails: false);
+        }
+
+        private static InvoiceBuyerDataValidationResult ValidateAndNormalize(
+            PaymentR1InvoiceRequest request,
+            bool requireCompleteBuyerDetails)
         {
             if (request == null)
             {
@@ -65,13 +85,14 @@ namespace OCPP.Core.Server.Payments
                 return Invalid("InvalidCountry", "BuyerCountry", "Enter a valid two-letter country code.");
             }
 
+            var requireCompleteFields = requireCompleteBuyerDetails || country != "HR";
             var fields = new[]
             {
-                Field("BuyerCompanyName", request.BuyerCompanyName, 200, country != "HR"),
-                Field("BuyerStreet", request.BuyerStreet, 200, country != "HR"),
-                Field("BuyerPostalCode", request.BuyerPostalCode, 32, country != "HR"),
-                Field("BuyerCity", request.BuyerCity, 100, country != "HR"),
-                Field("BuyerEmail", request.BuyerEmail, 254, country != "HR"),
+                Field("BuyerCompanyName", request.BuyerCompanyName, 200, requireCompleteFields),
+                Field("BuyerStreet", request.BuyerStreet, 200, requireCompleteFields),
+                Field("BuyerPostalCode", request.BuyerPostalCode, 32, requireCompleteFields),
+                Field("BuyerCity", request.BuyerCity, 100, requireCompleteFields),
+                Field("BuyerEmail", request.BuyerEmail, 254, requireCompleteFields),
                 Field("BuyerTaxIdentifier", taxIdentifier, 64, true),
                 Field("BuyerRegistrationNumber", request.BuyerRegistrationNumber, 64, false)
             };
@@ -112,6 +133,24 @@ namespace OCPP.Core.Server.Payments
                     IdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration
                 }
             };
+        }
+
+        public static InvoiceBuyerDataValidationResult ValidateAndNormalize(PaymentSessionRequest request)
+        {
+            return ValidateAndNormalize(request == null ? null : new PaymentR1InvoiceRequest
+            {
+                BuyerCompanyName = request.BuyerCompanyName,
+                BuyerOib = request.BuyerOib,
+                BuyerCountry = request.BuyerCountry,
+                BuyerStreet = request.BuyerStreet,
+                BuyerPostalCode = request.BuyerPostalCode,
+                BuyerCity = request.BuyerCity,
+                BuyerEmail = request.BuyerEmail,
+                BuyerTaxIdentifier = request.BuyerTaxIdentifier,
+                BuyerRegistrationNumber = request.BuyerRegistrationNumber,
+                BuyerIdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration,
+                BuyerDataConfirmed = request.BuyerDataConfirmed
+            }, requireCompleteBuyerDetails: true);
         }
 
         private static (string Name, string Value, string Error) Field(string name, string value, int maxLength, bool required)

@@ -19,6 +19,15 @@ namespace OCPP.Core.Management.Models
         public bool RequestR1Invoice { get; set; }
         public string BuyerCompanyName { get; set; }
         public string BuyerOib { get; set; }
+        public string BuyerCountry { get; set; } = "HR";
+        public string BuyerStreet { get; set; }
+        public string BuyerPostalCode { get; set; }
+        public string BuyerCity { get; set; }
+        public string BuyerEmail { get; set; }
+        public string BuyerTaxIdentifier { get; set; }
+        public string BuyerRegistrationNumber { get; set; }
+        public bool BuyerIdentifierIsVatRegistration { get; set; }
+        public bool BuyerDataConfirmed { get; set; }
         public double MaxSessionKwh { get; set; }
         public decimal PricePerKwh { get; set; }
         public decimal UserSessionFee { get; set; }

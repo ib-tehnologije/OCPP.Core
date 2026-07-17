@@ -7,21 +7,14 @@ namespace OCPP.Core.Server.Tests
     public class PublicStatusInvoiceViewTests
     {
         [Fact]
-        public void PublicStatusView_RequiresCountryAwareReviewAndExplicitConfirmation()
+        public void PublicStatusView_DoesNotOfferLateInvoiceBuyerEntry()
         {
             var view = ReadView();
 
-            Assert.Contains("id=\"r1-country\"", view);
-            Assert.Contains("id=\"r1-street\"", view);
-            Assert.Contains("id=\"r1-postal-code\"", view);
-            Assert.Contains("id=\"r1-city\"", view);
-            Assert.Contains("id=\"r1-email\"", view);
-            Assert.Contains("id=\"r1-tax-identifier\"", view);
-            Assert.Contains("id=\"r1-registration-number\"", view);
-            Assert.Contains("id=\"r1-vat-registration\"", view);
-            Assert.Contains("id=\"r1-review\"", view);
-            Assert.Contains("id=\"r1-confirm\"", view);
-            Assert.Contains("buyerDataConfirmed: r1Confirm.checked", view);
+            Assert.DoesNotContain("id=\"r1-submit\"", view);
+            Assert.DoesNotContain("submitR1Details", view);
+            Assert.DoesNotContain("submit company details now or later", view, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("requestR1InvoiceUrl", view);
             Assert.Contains("id=\"done-invoice-message\"", view);
             Assert.Contains("invoice.customerMessage", view);
             Assert.Contains("invoice.customerBuyerDataLocked", view);

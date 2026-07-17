@@ -441,7 +441,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void CreateCheckoutSession_DoesNotTreatUnreviewedR1IntentAsConfirmedBuyerData()
+        public void CreateCheckoutSession_RejectsUnconfirmedR1BeforeCallingStripe()
         {
             using var context = CreateContext();
             context.ChargePoints.Add(new ChargePoint
@@ -457,20 +457,106 @@ namespace OCPP.Core.Server.Tests
             };
             var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
 
-            coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            var error = Assert.Throws<InvoiceBuyerValidationException>(() => coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
             {
                 ChargePointId = "CP-R1",
                 ConnectorId = 1,
                 ChargeTagId = "TAG-R1",
                 RequestR1Invoice = true,
-                BuyerCompanyName = "Unreviewed Company",
-                BuyerOib = "12345678903"
+                BuyerCountry = "HR",
+                BuyerTaxIdentifier = "12345678903",
+                BuyerDataConfirmed = false
+            }));
+
+            Assert.Equal("ConfirmationRequired", error.Status);
+            Assert.Equal("BuyerDataConfirmed", error.Field);
+            Assert.Null(sessionService.LastCreateOptions);
+            Assert.Empty(context.ChargePaymentReservations);
+        }
+
+        [Fact]
+        public void CreateCheckoutSession_RejectsIncompleteCroatianBuyerBeforeCallingStripe()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1-INCOMPLETE",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_r1", Url = "https://checkout/r1", PaymentIntentId = "pi_r1" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            var error = Assert.Throws<InvoiceBuyerValidationException>(() => coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1-INCOMPLETE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1-INCOMPLETE",
+                RequestR1Invoice = true,
+                BuyerCountry = "HR",
+                BuyerTaxIdentifier = "12345678903",
+                BuyerDataConfirmed = true
+            }));
+
+            Assert.Equal("InvalidBuyerData", error.Status);
+            Assert.Equal("BuyerCompanyName", error.Field);
+            Assert.Null(sessionService.LastCreateOptions);
+            Assert.Empty(context.ChargePaymentReservations);
+        }
+
+        [Fact]
+        public void CreateCheckoutSession_PersistsConfirmedForeignBuyerAndMarksStripeR1()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var confirmedAt = new DateTime(2026, 7, 17, 8, 45, 0, DateTimeKind.Utc);
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_r1", Url = "https://checkout/r1", PaymentIntentId = "pi_r1" }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                new FakePaymentIntentService(),
+                now: () => confirmedAt);
+
+            var result = coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1",
+                RequestR1Invoice = true,
+                BuyerCountry = "CZ",
+                BuyerCompanyName = "Example s.r.o.",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerRegistrationNumber = "C 12345",
+                BuyerIdentifierIsVatRegistration = true,
+                BuyerDataConfirmed = true
             });
 
-            Assert.Equal("true", sessionService.LastCreateOptions?.Metadata?["invoice_review_requested"]);
-            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("invoice_type"));
-            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("buyer_company"));
-            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("buyer_oib"));
+            Assert.Equal(confirmedAt, result.Reservation.InvoiceBuyerConfirmedAtUtc);
+            Assert.Equal("CZ", result.Reservation.InvoiceBuyerCountry);
+            Assert.Equal("Example s.r.o.", result.Reservation.InvoiceBuyerCompanyName);
+            Assert.Equal("Pražská 1", result.Reservation.InvoiceBuyerStreet);
+            Assert.Equal("CZ 123-ABC", result.Reservation.InvoiceBuyerTaxIdentifier);
+            Assert.Equal("R1", sessionService.LastCreateOptions?.Metadata?["invoice_type"]);
+            Assert.Equal("CZ", sessionService.LastCreateOptions?.Metadata?["buyer_country"]);
+            Assert.Equal("CZ 123-ABC", sessionService.LastCreateOptions?.PaymentIntentData?.Metadata?["buyer_tax_identifier"]);
+            Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("invoice_review_requested"));
         }
 
         [Fact]

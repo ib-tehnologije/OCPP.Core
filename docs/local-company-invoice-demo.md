@@ -1,6 +1,6 @@
 # Local Company Invoice Demo
 
-This walkthrough records the real local management and server applications while they save synthetic Czech and Croatian company invoice details. It also demonstrates Croatian OIB validation and the locked state after a synthetic invoice marker exists. The runner uses a disposable SQLite database, visible cursor movement, human-paced field entry, and readable captions, then writes the recordings outside the repository.
+This walkthrough records the real local management and server applications while they collect synthetic Czech and Croatian company invoice details before Stripe checkout. It also explains Croatian OIB validation, confirms that reusable buyer data is not kept in browser storage, and shows the read-only invoice state after checkout. The runner uses a disposable SQLite database, visible cursor movement, human-paced field entry, and readable captions, then writes the recordings outside the repository.
 
 ## Prerequisites
 
@@ -42,11 +42,11 @@ The command starts both applications on unused `127.0.0.1` ports, creates and se
 
 The private artifact directory contains:
 
-- `ui-walkthrough.webm` — the 1440 by 900, 3-6 minute real-time UI walkthrough. It shows the public Company invoice choice, secure status-page handoff, field-by-field Czech entry and review, save result, invalid and valid Croatian OIB paths, and visibly locked post-issuance controls.
+- `ui-walkthrough.webm` — the 1440 by 900, 3-6 minute real-time UI walkthrough. It shows the public Company invoice choice, field-by-field Czech entry and review before checkout, confirmed buyer data without retaining it after form submission, invalid and valid Croatian OIB examples, and the read-only post-checkout invoice result.
 - `billing-rules-explainer.webm` — the separate 1-3 minute explainer for below-1-kWh suppression, normal billing at or above 1 kWh, and the defensive provider-minimum guard. It distinguishes visible UI behavior from backend decisions.
-- `01-company-invoice-choice.png` through `06-issued-invoice-locked.png` — numbered, full-page screenshots of each checkpoint.
+- `01-company-invoice-choice.png` through `06-issued-invoice-read-only.png` — numbered, full-page screenshots of each checkpoint.
 - `server.log` and `management.log` — local application logs for diagnosis.
-- `manifest.json` — viewing order, creation time, loopback runtime URLs, output filenames, measured recording durations, synthetic fixture reservation IDs, privacy mode, and explicit successful checks for the persisted buyer snapshots, all locked controls, and nonempty PNG/WebM files. It identifies the legacy `walkthrough.webm` rapid montage as superseded.
+- `manifest.json` — viewing order, creation time, loopback runtime URLs, output filenames, measured recording durations, synthetic fixture reservation IDs, privacy mode, and explicit successful checks for persisted buyer snapshots, absence of post-checkout buyer controls, and nonempty PNG/WebM files. It identifies the legacy `walkthrough.webm` rapid montage as superseded.
 
 Existing files with these names may be replaced. Treat the directory as private even though the fixtures are synthetic because application logs are diagnostic artifacts and are not intended for Git.
 
@@ -72,4 +72,4 @@ node -e 'const fs=require("fs"); const p=process.env.INVOICE_DEMO_ARTIFACT_DIR+"
 git status --short
 ```
 
-Open the PNG files at natural resolution, then play `ui-walkthrough.webm` followed by `billing-rules-explainer.webm` at 1x speed. Confirm that cursor movement, clicks, typed values, captions, result pauses, and locked controls are understandable without implementation context. The runner fails unless `ffprobe` measures the UI walkthrough between 180 and 360 seconds and the billing explainer between 60 and 180 seconds. The artifact directory is outside the checkout, so no generated artifact should appear in `git status`.
+Open the PNG files at natural resolution, then play `ui-walkthrough.webm` followed by `billing-rules-explainer.webm` at 1x speed. Confirm that cursor movement, clicks, typed values, captions, pre-checkout confirmation, and read-only post-checkout result are understandable without implementation context. The runner fails unless `ffprobe` measures the UI walkthrough between 180 and 360 seconds and the billing explainer between 60 and 180 seconds. The artifact directory is outside the checkout, so no generated artifact should appear in `git status`.

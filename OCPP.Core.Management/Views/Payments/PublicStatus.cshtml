@@ -10,7 +10,6 @@
     var mapUrl = Url.Action("Index", "Public");
     var startUrlBase = Url.Action("Start", "Public");
     var startPathTemplate = Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" }) ?? string.Empty;
-    var requestR1InvoiceUrl = Url.Action("RequestR1Invoice", "Payments");
     var stopUrl = Url.Action("Stop", "Payments");
     ViewData["PublicPageTitle"] = "Charging status";
     ViewData["PublicPageDescription"] = "Track charger start, live charging, totals, and invoice details.";
@@ -278,96 +277,6 @@
                 </div>
             </div>
 
-            <div id="r1-panel" class="info-section info-section--flush-top">
-                <div class="divider"></div>
-                <div class="info-section-title info-section-title--top-pad" data-i18n="status.r1.title">R1 invoice (company)</div>
-                <div class="field-help field-help--spaced" data-i18n="status.r1.subtitle">
-                    Need an R1 invoice? You can submit company details now or later using this secure session link.
-                </div>
-                <div class="info-row">
-                    <div class="tile full">
-                        <label for="r1-country" class="field-label" data-i18n="status.r1.country">Company country</label>
-                        <select class="field-input" id="r1-country" autocomplete="country">
-                            <option value="HR">Croatia (HR)</option>
-                            <option value="AT">Austria (AT)</option>
-                            <option value="BE">Belgium (BE)</option>
-                            <option value="BG">Bulgaria (BG)</option>
-                            <option value="CY">Cyprus (CY)</option>
-                            <option value="CZ">Czechia (CZ)</option>
-                            <option value="DE">Germany (DE)</option>
-                            <option value="DK">Denmark (DK)</option>
-                            <option value="EE">Estonia (EE)</option>
-                            <option value="GR">Greece (GR)</option>
-                            <option value="ES">Spain (ES)</option>
-                            <option value="FI">Finland (FI)</option>
-                            <option value="FR">France (FR)</option>
-                            <option value="HU">Hungary (HU)</option>
-                            <option value="IE">Ireland (IE)</option>
-                            <option value="IT">Italy (IT)</option>
-                            <option value="LT">Lithuania (LT)</option>
-                            <option value="LU">Luxembourg (LU)</option>
-                            <option value="LV">Latvia (LV)</option>
-                            <option value="MT">Malta (MT)</option>
-                            <option value="NL">Netherlands (NL)</option>
-                            <option value="PL">Poland (PL)</option>
-                            <option value="PT">Portugal (PT)</option>
-                            <option value="RO">Romania (RO)</option>
-                            <option value="SE">Sweden (SE)</option>
-                            <option value="SI">Slovenia (SI)</option>
-                            <option value="SK">Slovakia (SK)</option>
-                        </select>
-
-                        <label for="r1-company" class="field-label field-label--spaced" data-i18n="status.r1.companyName">Legal company name</label>
-                        <input type="text"
-                               class="field-input"
-                               id="r1-company"
-                               data-i18n-placeholder="start.companyNamePlaceholder"
-                               placeholder="Company / organization name"
-                               autocomplete="organization"
-                               maxlength="200" />
-
-                        <label for="r1-street" class="field-label field-label--spaced" data-i18n="status.r1.street">Street address</label>
-                        <input type="text"
-                               class="field-input"
-                               id="r1-street"
-                               autocomplete="street-address"
-                               maxlength="200" />
-
-                        <label for="r1-postal-code" class="field-label field-label--spaced" data-i18n="status.r1.postalCode">Postal code</label>
-                        <input type="text" class="field-input" id="r1-postal-code" autocomplete="postal-code" maxlength="32" />
-
-                        <label for="r1-city" class="field-label field-label--spaced" data-i18n="status.r1.city">City</label>
-                        <input type="text" class="field-input" id="r1-city" autocomplete="address-level2" maxlength="100" />
-
-                        <label for="r1-email" class="field-label field-label--spaced" data-i18n="status.r1.email">Billing email</label>
-                        <input type="email" class="field-input" id="r1-email" autocomplete="email" maxlength="254" />
-
-                        <label for="r1-tax-identifier" class="field-label field-label--spaced" data-i18n="status.r1.taxIdentifier">OIB / VAT / tax identifier</label>
-                        <input type="text" class="field-input" id="r1-tax-identifier" autocomplete="off" maxlength="64" />
-                        <div class="field-help" data-i18n="status.r1.taxIdentifierHelp">Croatian OIB is checksum validated. Foreign identifiers are issued exactly as entered and are not registry-verified.</div>
-
-                        <label for="r1-registration-number" class="field-label field-label--spaced" data-i18n="status.r1.registrationNumber">Legal registration number (optional)</label>
-                        <input type="text" class="field-input" id="r1-registration-number" autocomplete="off" maxlength="64" />
-
-                        <label class="field-label field-label--spaced">
-                            <input type="checkbox" id="r1-vat-registration" />
-                            <span data-i18n="status.r1.vatRegistration">The tax identifier is a VAT registration number</span>
-                        </label>
-
-                        <div id="r1-review" class="field-help field-help--spaced" aria-live="polite"></div>
-                        <label class="field-label field-label--spaced">
-                            <input type="checkbox" id="r1-confirm" />
-                            <span data-i18n="status.r1.confirm">I confirm these invoice details are correct and may be issued exactly as entered.</span>
-                        </label>
-
-                        <div class="form-section form-section--inline">
-                            <button type="button" id="r1-submit" class="btn-secondary" data-i18n="status.action.saveR1">Save R1 details</button>
-                        </div>
-                        <div id="r1-result" class="field-help field-help--result"></div>
-                    </div>
-                </div>
-            </div>
-
         </div>
     </div>
 
@@ -376,7 +285,6 @@
         const cancelUrl = "@cancelUrl";
         const startUrlBase = "@startUrlBase";
         const startPathTemplate = "@startPathTemplate";
-        const requestR1InvoiceUrl = "@requestR1InvoiceUrl";
         const stopUrl = "@stopUrl";
         const reservationId = "@Model.ReservationId";
 
@@ -439,24 +347,6 @@
         const errorPaymentStatus = document.getElementById("error-payment-status");
         const errorLastStatus = document.getElementById("error-last-status");
         const tryAgain = document.getElementById("try-again");
-
-        const r1Panel = document.getElementById("r1-panel");
-        const r1Country = document.getElementById("r1-country");
-        const r1Company = document.getElementById("r1-company");
-        const r1Street = document.getElementById("r1-street");
-        const r1PostalCode = document.getElementById("r1-postal-code");
-        const r1City = document.getElementById("r1-city");
-        const r1Email = document.getElementById("r1-email");
-        const r1TaxIdentifier = document.getElementById("r1-tax-identifier");
-        const r1RegistrationNumber = document.getElementById("r1-registration-number");
-        const r1VatRegistration = document.getElementById("r1-vat-registration");
-        const r1Review = document.getElementById("r1-review");
-        const r1Confirm = document.getElementById("r1-confirm");
-        const r1Submit = document.getElementById("r1-submit");
-        const r1Result = document.getElementById("r1-result");
-        const r1Controls = [r1Country, r1Company, r1Street, r1PostalCode, r1City, r1Email,
-            r1TaxIdentifier, r1RegistrationNumber, r1VatRegistration, r1Confirm, r1Submit].filter(Boolean);
-        let r1BuyerDataLocked = false;
 
         const stopChargingLabel = stopChargingButton ? stopChargingButton.querySelector("[data-i18n]") : null;
 
@@ -583,13 +473,6 @@
                 return startPathTemplate.replace("__cp__", safeCp).replace("__conn__", safeConn);
             }
             return `${startUrlBase}?cp=${safeCp}&conn=${safeConn}`;
-        };
-
-        const setR1Result = (message, isError) => {
-            if (!r1Result) return;
-            r1Result.textContent = message || "";
-            r1Result.classList.toggle("field-help--error", !!isError);
-            r1Result.classList.toggle("field-help--success", !isError && !!message);
         };
 
         const resolveState = (data) => {
@@ -720,14 +603,10 @@
             doneInvoiceDocument.textContent = invoice.externalDocumentId || "-";
             doneInvoiceUpdated.textContent = fmtLocal(parseDate(invoice.completedAtUtc) || parseDate(invoice.createdAtUtc));
             if (doneInvoiceMessage) {
-                doneInvoiceMessage.textContent = invoice.customerMessage || "";
-                doneInvoiceMessage.hidden = !invoice.customerMessage;
-            }
-
-            r1BuyerDataLocked = invoice.customerBuyerDataLocked === true;
-            r1Controls.forEach(control => { control.disabled = r1BuyerDataLocked; });
-            if (r1BuyerDataLocked) {
-                setR1Result(t("status.r1.lockedAfterIssue"), true);
+                const customerMessage = invoice.customerMessage ||
+                    (invoice.customerBuyerDataLocked === true ? t("status.r1.lockedAfterIssue") : "");
+                doneInvoiceMessage.textContent = customerMessage;
+                doneInvoiceMessage.hidden = !customerMessage;
             }
 
             if (invoice.invoiceUrl) {
@@ -917,102 +796,12 @@
                 }
             }
 
-            if (r1Panel) {
-                r1Panel.hidden = state === "error";
-            }
-
             const cp = data?.chargePointId;
             const conn = data?.connectorId;
             if (cp && conn != null) {
                 tryAgain.href = buildStartUrl(cp, conn);
             }
         };
-
-        async function submitR1Details() {
-            if (!r1Submit || !r1Country || !r1TaxIdentifier || !r1Confirm) return;
-
-            const country = String(r1Country.value || "").trim().toUpperCase();
-            const taxIdentifier = String(r1TaxIdentifier.value || "").trim();
-            if (!r1Confirm.checked) {
-                setR1Result(t("status.r1.confirmRequired"), true);
-                return;
-            }
-
-            r1Submit.disabled = true;
-            setR1Result(t("status.action.savingR1"), false);
-
-            try {
-                const payload = {
-                    reservationId,
-                    buyerCompanyName: (r1Company?.value || "").trim(),
-                    buyerCountry: country,
-                    buyerStreet: (r1Street?.value || "").trim(),
-                    buyerPostalCode: (r1PostalCode?.value || "").trim(),
-                    buyerCity: (r1City?.value || "").trim(),
-                    buyerEmail: (r1Email?.value || "").trim(),
-                    buyerTaxIdentifier: taxIdentifier,
-                    buyerOib: country === "HR" ? taxIdentifier.replace(/\D/g, "") : null,
-                    buyerRegistrationNumber: (r1RegistrationNumber?.value || "").trim(),
-                    buyerIdentifierIsVatRegistration: Boolean(r1VatRegistration?.checked),
-                    buyerDataConfirmed: r1Confirm.checked
-                };
-
-                const res = await fetch(requestR1InvoiceUrl, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify(payload)
-                });
-
-                let data = null;
-                try {
-                    data = await res.json();
-                } catch (_) {
-                    // ignore parse issues and show fallback message below
-                }
-
-                if (!res.ok || !data?.success) {
-                    const locked = data?.status === "InvoiceAlreadyIssued" || data?.status === "BuyerDataLocked";
-                    setR1Result(
-                        locked ? t("status.r1.lockedAfterIssue") :
-                            (data?.status === "InvalidOib" ? t("status.r1.invalidOib") : t("status.r1.failed")),
-                        true);
-                    if (locked) {
-                        r1BuyerDataLocked = true;
-                        r1Controls.forEach(control => { control.disabled = true; });
-                    }
-                    return;
-                }
-
-                setR1Result(t("status.r1.saved"), false);
-            } catch (err) {
-                setR1Result(t("status.r1.failed"), true);
-            } finally {
-                r1Submit.disabled = r1BuyerDataLocked;
-            }
-        }
-
-        if (r1Submit) {
-            r1Submit.addEventListener("click", submitR1Details);
-        }
-
-        const updateR1Review = () => {
-            if (!r1Review) return;
-            const parts = [
-                (r1Company?.value || "").trim(),
-                (r1Street?.value || "").trim(),
-                [(r1PostalCode?.value || "").trim(), (r1City?.value || "").trim()].filter(Boolean).join(" "),
-                (r1Country?.value || "").trim(),
-                (r1TaxIdentifier?.value || "").trim(),
-                (r1Email?.value || "").trim()
-            ].filter(Boolean);
-            r1Review.textContent = parts.length ? parts.join(" · ") : t("status.r1.reviewEmpty");
-        };
-        [r1Country, r1Company, r1Street, r1PostalCode, r1City, r1Email, r1TaxIdentifier, r1RegistrationNumber]
-            .filter(Boolean)
-            .forEach(element => element.addEventListener("input", updateR1Review));
-        updateR1Review();
 
         async function submitStop() {
             if (!stopChargingButton || stopChargingButton.disabled) {

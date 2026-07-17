@@ -2167,6 +2167,17 @@ namespace OCPP.Core.Server
                 context.Response.StatusCode = (int)HttpStatusCode.Conflict;
                 await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\",\"reason\":\"ActiveReservation\"}");
             }
+            catch (InvoiceBuyerValidationException validation)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new
+                {
+                    status = validation.Status,
+                    field = validation.Field,
+                    message = validation.Message
+                }));
+            }
             catch (Exception exp)
             {
                 _logger.LogError(exp, "Payments/Create => Exception: {0}", exp.Message);

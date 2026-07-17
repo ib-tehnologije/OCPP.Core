@@ -1191,6 +1191,80 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task Start_PostForwardsConfirmedInvoiceBuyer()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-r1-post-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-R1-POST", "R1 post test");
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-R1-POST",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                string? postedBody = null;
+                using var server = TestHttpServer.Start(request =>
+                {
+                    if (request.Path == "/API/Status")
+                    {
+                        return TestHttpResponse.Json("[]");
+                    }
+
+                    Assert.Equal("POST", request.Method);
+                    Assert.Equal("/API/Payments/Create", request.Path);
+                    postedBody = request.Body;
+                    return TestHttpResponse.Json(
+                        "{\"status\":\"Redirect\",\"checkoutUrl\":\"https://checkout.example/r1\",\"reservationId\":\"44444444-4444-4444-4444-444444444444\"}");
+                });
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API"
+                });
+
+                var result = await controller.Start(new PublicStartViewModel
+                {
+                    ChargePointId = "CP-R1-POST",
+                    ConnectorId = 1,
+                    RequestR1Invoice = true,
+                    BuyerCountry = "CZ",
+                    BuyerCompanyName = "Example s.r.o.",
+                    BuyerStreet = "Pražská 1",
+                    BuyerPostalCode = "110 00",
+                    BuyerCity = "Praha",
+                    BuyerEmail = "billing@example.cz",
+                    BuyerTaxIdentifier = "CZ 123-ABC",
+                    BuyerRegistrationNumber = "C 12345",
+                    BuyerIdentifierIsVatRegistration = true,
+                    BuyerDataConfirmed = true
+                });
+
+                var redirect = Assert.IsType<RedirectResult>(result);
+                Assert.Equal("https://checkout.example/r1", redirect.Url);
+                Assert.NotNull(postedBody);
+                Assert.Contains("\"buyerCountry\":\"CZ\"", postedBody, StringComparison.Ordinal);
+                Assert.Contains("\"buyerCompanyName\":\"Example s.r.o.\"", postedBody, StringComparison.Ordinal);
+                Assert.Contains("\"buyerStreet\":\"Pražská 1\"", postedBody, StringComparison.Ordinal);
+                Assert.Contains("\"buyerTaxIdentifier\":\"CZ 123-ABC\"", postedBody, StringComparison.Ordinal);
+                Assert.Contains("\"buyerIdentifierIsVatRegistration\":true", postedBody, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("\"buyerDataConfirmed\":true", postedBody, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("rememberInvoiceBuyer", postedBody, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         private static PublicController CreateController(OCPPCoreContext dbContext, IDictionary<string, string?>? configValues = null)
         {
             IConfiguration config = new ConfigurationBuilder()
@@ -1276,7 +1350,7 @@ namespace OCPP.Core.Server.Tests
                 _listener = new HttpListener();
                 _listener.Prefixes.Add(BaseUri.ToString());
                 _listener.Start();
-                _serverTask = Task.Run(ServeSingleRequestAsync);
+                _serverTask = Task.Run(ServeRequestsAsync);
             }
 
             public Uri BaseUri { get; }
@@ -1306,30 +1380,36 @@ namespace OCPP.Core.Server.Tests
                 _cts.Dispose();
             }
 
-            private async Task ServeSingleRequestAsync()
+            private async Task ServeRequestsAsync()
             {
                 try
                 {
-                    HttpListenerContext context = await _listener.GetContextAsync();
-                    var headers = context.Request.Headers.AllKeys
-                        .Where(key => !string.IsNullOrWhiteSpace(key))
-                        .ToDictionary(
-                            key => key!,
-                            key => context.Request.Headers[key!] ?? string.Empty,
-                            StringComparer.OrdinalIgnoreCase);
+                    while (!_cts.IsCancellationRequested)
+                    {
+                        HttpListenerContext context = await _listener.GetContextAsync();
+                        var headers = context.Request.Headers.AllKeys
+                            .Where(key => !string.IsNullOrWhiteSpace(key))
+                            .ToDictionary(
+                                key => key!,
+                                key => context.Request.Headers[key!] ?? string.Empty,
+                                StringComparer.OrdinalIgnoreCase);
+                        using var requestReader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
+                        string requestBody = await requestReader.ReadToEndAsync();
 
-                    var response = _responseFactory(new TestHttpRequest(
-                        context.Request.HttpMethod,
-                        context.Request.RawUrl ?? "/",
-                        headers));
+                        var response = _responseFactory(new TestHttpRequest(
+                            context.Request.HttpMethod,
+                            context.Request.RawUrl ?? "/",
+                            headers,
+                            requestBody));
 
-                    byte[] bodyBytes = Encoding.UTF8.GetBytes(response.Body);
-                    context.Response.StatusCode = response.StatusCode;
-                    context.Response.ContentType = $"{response.ContentType}; charset=utf-8";
-                    context.Response.ContentLength64 = bodyBytes.LongLength;
-                    await context.Response.OutputStream.WriteAsync(bodyBytes, 0, bodyBytes.Length, _cts.Token);
-                    await context.Response.OutputStream.FlushAsync(_cts.Token);
-                    context.Response.Close();
+                        byte[] bodyBytes = Encoding.UTF8.GetBytes(response.Body);
+                        context.Response.StatusCode = response.StatusCode;
+                        context.Response.ContentType = $"{response.ContentType}; charset=utf-8";
+                        context.Response.ContentLength64 = bodyBytes.LongLength;
+                        await context.Response.OutputStream.WriteAsync(bodyBytes, 0, bodyBytes.Length, _cts.Token);
+                        await context.Response.OutputStream.FlushAsync(_cts.Token);
+                        context.Response.Close();
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -1354,7 +1434,8 @@ namespace OCPP.Core.Server.Tests
         private readonly record struct TestHttpRequest(
             string Method,
             string Path,
-            IReadOnlyDictionary<string, string> Headers);
+            IReadOnlyDictionary<string, string> Headers,
+            string Body);
 
         private readonly record struct TestHttpResponse(int StatusCode, string ContentType, string Body)
         {

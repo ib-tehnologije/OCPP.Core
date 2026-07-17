@@ -2114,6 +2114,77 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task HandlePaymentCreateAsync_ReturnsBoundedBuyerValidationError()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-create-r1-validation-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-R1-VALIDATION",
+                        Name = "R1 validation test",
+                        MaxSessionKwh = 1,
+                        PricePerKwh = 1m
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(new BuyerValidationPaymentCoordinator());
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-R1-VALIDATION"] = new ChargePointStatus
+                    {
+                        Id = "CP-R1-VALIDATION",
+                        Protocol = "ocpp1.6",
+                        WebSocket = new FakeOpenWebSocket(() => Task.CompletedTask),
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Available,
+                                OcppStatus = "Available"
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "POST";
+                    httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(
+                        "{\"chargePointId\":\"CP-R1-VALIDATION\",\"connectorId\":1,\"chargeTagId\":\"TAG-R1\",\"requestR1Invoice\":true}"));
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await InvokeHandlePaymentCreateAsync(middleware, httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var payload = JObject.Parse(await reader.ReadToEndAsync());
+
+                    Assert.Equal(StatusCodes.Status400BadRequest, httpContext.Response.StatusCode);
+                    Assert.Equal("ConfirmationRequired", payload["status"]?.Value<string>());
+                    Assert.Equal("BuyerDataConfirmed", payload["field"]?.Value<string>());
+                    Assert.Equal("Confirm that invoice data is correct before saving.", payload["message"]?.Value<string>());
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task HandlePaymentStopAsync_UsesCaseInsensitiveChargePointLookup()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-stop-case-{Guid.NewGuid():N}.sqlite");
@@ -2892,6 +2963,27 @@ namespace OCPP.Core.Server.Tests
             public bool IsEnabled => false;
 
             public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
+            public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) => throw new NotSupportedException();
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) => throw new NotSupportedException();
+            public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
+            public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
+            public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
+            public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
+            public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
+            public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
+        }
+
+        private sealed class BuyerValidationPaymentCoordinator : IPaymentCoordinator
+        {
+            public bool IsEnabled => true;
+
+            public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) =>
+                throw new InvoiceBuyerValidationException(
+                    "ConfirmationRequired",
+                    "BuyerDataConfirmed",
+                    "Confirm that invoice data is correct before saving.");
+
             public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) => throw new NotSupportedException();
             public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) => throw new NotSupportedException();
             public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
