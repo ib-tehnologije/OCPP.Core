@@ -1186,10 +1186,6 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme d.o.o.",
-                BuyerStreet = "Ilica 1",
-                BuyerPostalCode = "10000",
-                BuyerCity = "Zagreb",
-                BuyerEmail = "billing@example.com",
                 BuyerOib = "12345678903",
                 BuyerCountry = "HR",
                 BuyerDataConfirmed = true
@@ -1238,10 +1234,6 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme",
-                BuyerStreet = "Ilica 1",
-                BuyerPostalCode = "10000",
-                BuyerCity = "Zagreb",
-                BuyerEmail = "billing@example.com",
                 BuyerOib = "12345678901",
                 BuyerCountry = "HR",
                 BuyerDataConfirmed = true

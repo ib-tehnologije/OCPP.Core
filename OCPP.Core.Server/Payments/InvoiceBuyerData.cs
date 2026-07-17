@@ -55,6 +55,13 @@ namespace OCPP.Core.Server.Payments
 
         public static InvoiceBuyerDataValidationResult ValidateAndNormalize(PaymentR1InvoiceRequest request)
         {
+            return ValidateAndNormalize(request, requireCompleteBuyerDetails: false);
+        }
+
+        private static InvoiceBuyerDataValidationResult ValidateAndNormalize(
+            PaymentR1InvoiceRequest request,
+            bool requireCompleteBuyerDetails)
+        {
             if (request == null)
             {
                 return Invalid("Invalid", null, "Invoice buyer data is required.");
@@ -78,13 +85,14 @@ namespace OCPP.Core.Server.Payments
                 return Invalid("InvalidCountry", "BuyerCountry", "Enter a valid two-letter country code.");
             }
 
+            var requireCompleteFields = requireCompleteBuyerDetails || country != "HR";
             var fields = new[]
             {
-                Field("BuyerCompanyName", request.BuyerCompanyName, 200, true),
-                Field("BuyerStreet", request.BuyerStreet, 200, true),
-                Field("BuyerPostalCode", request.BuyerPostalCode, 32, true),
-                Field("BuyerCity", request.BuyerCity, 100, true),
-                Field("BuyerEmail", request.BuyerEmail, 254, true),
+                Field("BuyerCompanyName", request.BuyerCompanyName, 200, requireCompleteFields),
+                Field("BuyerStreet", request.BuyerStreet, 200, requireCompleteFields),
+                Field("BuyerPostalCode", request.BuyerPostalCode, 32, requireCompleteFields),
+                Field("BuyerCity", request.BuyerCity, 100, requireCompleteFields),
+                Field("BuyerEmail", request.BuyerEmail, 254, requireCompleteFields),
                 Field("BuyerTaxIdentifier", taxIdentifier, 64, true),
                 Field("BuyerRegistrationNumber", request.BuyerRegistrationNumber, 64, false)
             };
@@ -142,7 +150,7 @@ namespace OCPP.Core.Server.Payments
                 BuyerRegistrationNumber = request.BuyerRegistrationNumber,
                 BuyerIdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration,
                 BuyerDataConfirmed = request.BuyerDataConfirmed
-            });
+            }, requireCompleteBuyerDetails: true);
         }
 
         private static (string Name, string Value, string Error) Field(string name, string value, int maxLength, bool required)

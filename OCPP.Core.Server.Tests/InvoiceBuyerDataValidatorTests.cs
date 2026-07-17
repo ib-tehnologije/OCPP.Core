@@ -31,7 +31,7 @@ namespace OCPP.Core.Server.Tests
         [Fact]
         public void ValidateAndNormalize_RequiresCompleteCroatianBuyer()
         {
-            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(new PaymentR1InvoiceRequest
+            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(new PaymentSessionRequest
             {
                 BuyerCountry = "HR",
                 BuyerTaxIdentifier = "12345678903",
@@ -41,6 +41,22 @@ namespace OCPP.Core.Server.Tests
             Assert.False(result.Success);
             Assert.Equal("InvalidBuyerData", result.Status);
             Assert.Equal("BuyerCompanyName", result.Field);
+        }
+
+        [Fact]
+        public void ValidateAndNormalize_PaymentR1InvoiceRequest_PreservesLegacyCroatianOibOnlyContract()
+        {
+            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(new PaymentR1InvoiceRequest
+            {
+                BuyerCountry = "HR",
+                BuyerOib = "12345678903",
+                BuyerDataConfirmed = true
+            });
+
+            Assert.True(result.Success);
+            Assert.Equal("HR", result.Data.Country);
+            Assert.Equal("12345678903", result.Data.TaxIdentifier);
+            Assert.Null(result.Data.CompanyName);
         }
 
         [Fact]
