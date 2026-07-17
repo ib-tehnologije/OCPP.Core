@@ -80,11 +80,11 @@ namespace OCPP.Core.Server.Payments
 
             var fields = new[]
             {
-                Field("BuyerCompanyName", request.BuyerCompanyName, 200, country != "HR"),
-                Field("BuyerStreet", request.BuyerStreet, 200, country != "HR"),
-                Field("BuyerPostalCode", request.BuyerPostalCode, 32, country != "HR"),
-                Field("BuyerCity", request.BuyerCity, 100, country != "HR"),
-                Field("BuyerEmail", request.BuyerEmail, 254, country != "HR"),
+                Field("BuyerCompanyName", request.BuyerCompanyName, 200, true),
+                Field("BuyerStreet", request.BuyerStreet, 200, true),
+                Field("BuyerPostalCode", request.BuyerPostalCode, 32, true),
+                Field("BuyerCity", request.BuyerCity, 100, true),
+                Field("BuyerEmail", request.BuyerEmail, 254, true),
                 Field("BuyerTaxIdentifier", taxIdentifier, 64, true),
                 Field("BuyerRegistrationNumber", request.BuyerRegistrationNumber, 64, false)
             };

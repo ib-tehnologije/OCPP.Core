@@ -418,6 +418,9 @@
                     const city = document.getElementById('buyerCity');
                     const email = document.getElementById('buyerEmail');
                     const taxIdentifier = document.getElementById('buyerTaxIdentifier');
+                    const registrationNumber = document.getElementById('buyerRegistrationNumber');
+                    const identifierIsVatRegistration = document.getElementById('buyerIdentifierIsVatRegistration');
+                    const confirmation = document.getElementById('buyerDataConfirmed');
                     const review = document.getElementById('buyerReview');
                     if (country?.dataset?.selectedCountry) {
                         country.value = country.dataset.selectedCountry.toUpperCase();
@@ -438,16 +441,24 @@
                         fields.hidden = !enabled;
                         const inputs = fields.querySelectorAll('input, select, textarea');
                         inputs.forEach(i => i.disabled = !enabled);
-                        const foreign = enabled && country?.value !== 'HR';
-                        [company, street, postalCode, city, email].filter(Boolean).forEach(i => i.required = foreign);
+                        [company, street, postalCode, city, email].filter(Boolean).forEach(i => i.required = enabled);
                         if (taxIdentifier) taxIdentifier.required = enabled;
                         updateReview();
+                    };
+                    const invalidateConfirmation = () => {
+                        if (confirmation) confirmation.checked = false;
                     };
                     wantsR1.addEventListener('change', sync);
                     country?.addEventListener('change', sync);
                     [company, street, postalCode, city, email, taxIdentifier]
                         .filter(Boolean)
                         .forEach(input => input.addEventListener('input', updateReview));
+                    [country, company, street, postalCode, city, email, taxIdentifier, registrationNumber, identifierIsVatRegistration]
+                        .filter(Boolean)
+                        .forEach(input => {
+                            input.addEventListener('input', invalidateConfirmation);
+                            input.addEventListener('change', invalidateConfirmation);
+                        });
                     sync();
                 })();
 
@@ -632,7 +643,10 @@
             });
 
             form.addEventListener('submit', () => {
-                if (!wantsR1.checked) return;
+                if (!wantsR1.checked) {
+                    invoiceBuyerStorage.clear(localStorage);
+                    return;
+                }
                 if (!remember.checked) {
                     invoiceBuyerStorage.clear(localStorage);
                     return;

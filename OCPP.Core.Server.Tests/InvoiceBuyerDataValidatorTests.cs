@@ -29,6 +29,21 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void ValidateAndNormalize_RequiresCompleteCroatianBuyer()
+        {
+            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(new PaymentR1InvoiceRequest
+            {
+                BuyerCountry = "HR",
+                BuyerTaxIdentifier = "12345678903",
+                BuyerDataConfirmed = true
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal("InvalidBuyerData", result.Status);
+            Assert.Equal("BuyerCompanyName", result.Field);
+        }
+
+        [Fact]
         public void ValidateAndNormalize_AcceptsUnverifiedForeignIdentifierWithoutVies()
         {
             var result = InvoiceBuyerDataValidator.ValidateAndNormalize(new PaymentR1InvoiceRequest

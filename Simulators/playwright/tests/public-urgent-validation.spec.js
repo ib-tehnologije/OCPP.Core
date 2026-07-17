@@ -160,6 +160,33 @@ test("@invoice public start R1 details flow into Stripe metadata and invoice sub
   });
 });
 
+test("@invoice public start blocks incomplete Croatian buyer and invalidates stale confirmation", async ({ page }) => {
+  test.skip(!invoicesEnabled, "Invoice validation requires OCPP_PLAYWRIGHT_ENABLE_INVOICES=1");
+
+  await page.goto(`/Public/Start?cp=${encodeURIComponent(publicStartInvoiceTarget.chargePointId)}&conn=${publicStartInvoiceTarget.connectorId}`);
+  await page.locator("#wantsR1").check();
+  await page.locator("#buyerTaxIdentifier").fill("12345678903");
+  await page.locator("#buyerDataConfirmed").check();
+
+  await expect(page.locator("#buyerCompanyName")).toHaveAttribute("required", "");
+  await page.locator("#buyerCompanyName").fill("Acme d.o.o.");
+  await expect(page.locator("#buyerDataConfirmed")).not.toBeChecked();
+
+  await page.locator("#buyerDataConfirmed").check();
+  await page.locator('form[method="post"][action*="Start"] button[type="submit"]').click();
+  await expect(page.locator("#buyerStreet")).toBeFocused();
+  await expect(page).toHaveURL(/\/Public\/Start/);
+
+  await page.evaluate(() => localStorage.setItem("ocpp.invoiceBuyer.v1", JSON.stringify({ version: 1, buyerCompanyName: "Shared device data" })));
+  await page.locator("#wantsR1").uncheck();
+  await page.evaluate(() => {
+    const form = document.querySelector('form[method="post"][action*="Start"]');
+    form.addEventListener("submit", event => event.preventDefault(), { once: true });
+    form.requestSubmit();
+  });
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("ocpp.invoiceBuyer.v1"))).toBeNull();
+});
+
 test("@invoice public start remembers buyer details without late status editing", async ({ page }) => {
   test.skip(!invoicesEnabled, "Invoice validation requires OCPP_PLAYWRIGHT_ENABLE_INVOICES=1");
 

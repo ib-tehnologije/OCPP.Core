@@ -475,6 +475,40 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CreateCheckoutSession_RejectsIncompleteCroatianBuyerBeforeCallingStripe()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1-INCOMPLETE",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_r1", Url = "https://checkout/r1", PaymentIntentId = "pi_r1" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            var error = Assert.Throws<InvoiceBuyerValidationException>(() => coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1-INCOMPLETE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1-INCOMPLETE",
+                RequestR1Invoice = true,
+                BuyerCountry = "HR",
+                BuyerTaxIdentifier = "12345678903",
+                BuyerDataConfirmed = true
+            }));
+
+            Assert.Equal("InvalidBuyerData", error.Status);
+            Assert.Equal("BuyerCompanyName", error.Field);
+            Assert.Null(sessionService.LastCreateOptions);
+            Assert.Empty(context.ChargePaymentReservations);
+        }
+
+        [Fact]
         public void CreateCheckoutSession_PersistsConfirmedForeignBuyerAndMarksStripeR1()
         {
             using var context = CreateContext();
@@ -1152,6 +1186,10 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme d.o.o.",
+                BuyerStreet = "Ilica 1",
+                BuyerPostalCode = "10000",
+                BuyerCity = "Zagreb",
+                BuyerEmail = "billing@example.com",
                 BuyerOib = "12345678903",
                 BuyerCountry = "HR",
                 BuyerDataConfirmed = true
@@ -1200,6 +1238,10 @@ namespace OCPP.Core.Server.Tests
             {
                 ReservationId = reservationId,
                 BuyerCompanyName = "Acme",
+                BuyerStreet = "Ilica 1",
+                BuyerPostalCode = "10000",
+                BuyerCity = "Zagreb",
+                BuyerEmail = "billing@example.com",
                 BuyerOib = "12345678901",
                 BuyerCountry = "HR",
                 BuyerDataConfirmed = true

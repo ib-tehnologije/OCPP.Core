@@ -28,8 +28,14 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("invoiceBuyerStorage.load", view);
             Assert.Contains("invoiceBuyerStorage.save", view);
             Assert.Contains("invoiceBuyerStorage.clear", view);
+            Assert.Contains("if (!wantsR1.checked) {", view);
+            Assert.Contains("invoiceBuyerStorage.clear(localStorage);", view);
             Assert.Contains("data-i18n=\"start.rememberInvoiceBuyer\"", view);
             Assert.Contains("data-i18n=\"start.rememberInvoiceBuyerWarning\"", view);
+            Assert.Contains("i.required = enabled", view);
+            Assert.DoesNotContain("country?.value !== 'HR'", view);
+            Assert.Contains("const invalidateConfirmation", view);
+            Assert.Contains("confirmation.checked = false", view);
             Assert.DoesNotContain("Buyer data is collected after checkout", view);
         }
 
