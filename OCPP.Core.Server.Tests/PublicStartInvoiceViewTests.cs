@@ -23,6 +23,10 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("name=\"BuyerDataConfirmed\"", view);
             Assert.Contains("name=\"RememberInvoiceBuyer\"", view);
             Assert.Contains("Other users of a shared device may see these details.", view);
+            Assert.Contains("invoice-buyer-storage.js", view);
+            Assert.Contains("invoiceBuyerStorage.load", view);
+            Assert.Contains("invoiceBuyerStorage.save", view);
+            Assert.Contains("invoiceBuyerStorage.clear", view);
             Assert.DoesNotContain("Buyer data is collected after checkout", view);
         }
 
