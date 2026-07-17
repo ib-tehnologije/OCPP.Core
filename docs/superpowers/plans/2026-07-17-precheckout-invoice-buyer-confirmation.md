@@ -296,7 +296,7 @@ Update `PublicStartInvoiceViewTests` to assert the start view, model, and contro
 dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --filter "FullyQualifiedName~PublicStartInvoiceViewTests|FullyQualifiedName~PublicStatusInvoiceViewTests" --no-restore
 ```
 
-Expected: the current start page still exposes persistence wiring and the status page still exposes late entry.
+Expected: the start-page no-persistence assertions pass while the current status page still exposes late entry.
 
 - [ ] **Step 3: Keep the start form browser-stateless**
 
