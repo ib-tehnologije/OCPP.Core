@@ -101,6 +101,17 @@ namespace OCPP.Core.Server.Payments
             if (string.IsNullOrWhiteSpace(request.ChargePointId)) throw new ArgumentException("ChargePointId is required.", nameof(request));
             if (string.IsNullOrWhiteSpace(request.ChargeTagId)) throw new ArgumentException("ChargeTagId is required.", nameof(request));
 
+            InvoiceBuyerData invoiceBuyer = null;
+            if (request.RequestR1Invoice)
+            {
+                var validation = InvoiceBuyerDataValidator.ValidateAndNormalize(request);
+                if (!validation.Success)
+                {
+                    throw new InvoiceBuyerValidationException(validation.Status, validation.Field, validation.Error);
+                }
+                invoiceBuyer = validation.Data;
+            }
+
             var chargePoint = dbContext.ChargePoints.Find(request.ChargePointId);
             if (chargePoint == null)
             {
@@ -164,6 +175,11 @@ namespace OCPP.Core.Server.Payments
                 UpdatedAtUtc = now
             };
 
+            if (invoiceBuyer != null)
+            {
+                ApplyConfirmedBuyer(reservation, invoiceBuyer, now);
+            }
+
             _logger.LogInformation(
                 "Stripe/CreateCheckout => reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} tag={ChargeTagId} maxTotalCents={MaxTotalCents} currency={Currency} maxEnergyKwh={MaxEnergyKwh} pricePerKwh={PricePerKwh} sessionFee={SessionFee} usageFeePerMin={UsageFeePerMinute} maxUsageMinutes={MaxUsageMinutes}",
                 reservation.ReservationId,
@@ -200,11 +216,18 @@ namespace OCPP.Core.Server.Payments
                 ["charge_tag_id"] = reservation.ChargeTagId
             };
 
-            if (request.RequestR1Invoice)
+            if (invoiceBuyer != null)
             {
-                // The checkout checkbox records intent only. Buyer data becomes invoice-authoritative
-                // after the dedicated review and confirmation step on the secure status page.
-                metadata["invoice_review_requested"] = "true";
+                metadata["invoice_type"] = "R1";
+                SetOrRemoveMetadata(
+                    metadata,
+                    "buyer_oib",
+                    string.Equals(invoiceBuyer.Country, "HR", StringComparison.OrdinalIgnoreCase)
+                        ? TrimMetadataValue(invoiceBuyer.TaxIdentifier, 32)
+                        : null);
+                SetOrRemoveMetadata(metadata, "buyer_country", invoiceBuyer.Country);
+                SetOrRemoveMetadata(metadata, "buyer_tax_identifier", TrimMetadataValue(invoiceBuyer.TaxIdentifier, 64));
+                SetOrRemoveMetadata(metadata, "buyer_company", TrimMetadataValue(invoiceBuyer.CompanyName, 200));
             }
 
             var sessionOptions = new SessionCreateOptions
@@ -212,8 +235,7 @@ namespace OCPP.Core.Server.Payments
                 Mode = "payment",
                 SuccessUrl = successUrl,
                 CancelUrl = cancelUrl,
-                // Keep billing collection at Stripe's least-intrusive mode.
-                // We only need the checkout email for receipts; R1/company data can be added later.
+                // Stripe remains payment-only. The reservation owns confirmed company-invoice data.
                 BillingAddressCollection = "auto",
                 PaymentIntentData = new SessionPaymentIntentDataOptions
                 {

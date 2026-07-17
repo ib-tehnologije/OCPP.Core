@@ -28,6 +28,19 @@ namespace OCPP.Core.Server.Payments
         public InvoiceBuyerData Data { get; set; }
     }
 
+    public sealed class InvoiceBuyerValidationException : ArgumentException
+    {
+        public InvoiceBuyerValidationException(string status, string field, string message)
+            : base(message)
+        {
+            Status = status;
+            Field = field;
+        }
+
+        public string Status { get; }
+        public string Field { get; }
+    }
+
     public static class InvoiceBuyerDataValidator
     {
         private static readonly HashSet<string> CountryCodes = new HashSet<string>(
@@ -112,6 +125,24 @@ namespace OCPP.Core.Server.Payments
                     IdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration
                 }
             };
+        }
+
+        public static InvoiceBuyerDataValidationResult ValidateAndNormalize(PaymentSessionRequest request)
+        {
+            return ValidateAndNormalize(request == null ? null : new PaymentR1InvoiceRequest
+            {
+                BuyerCompanyName = request.BuyerCompanyName,
+                BuyerOib = request.BuyerOib,
+                BuyerCountry = request.BuyerCountry,
+                BuyerStreet = request.BuyerStreet,
+                BuyerPostalCode = request.BuyerPostalCode,
+                BuyerCity = request.BuyerCity,
+                BuyerEmail = request.BuyerEmail,
+                BuyerTaxIdentifier = request.BuyerTaxIdentifier,
+                BuyerRegistrationNumber = request.BuyerRegistrationNumber,
+                BuyerIdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration,
+                BuyerDataConfirmed = request.BuyerDataConfirmed
+            });
         }
 
         private static (string Name, string Value, string Error) Field(string name, string value, int maxLength, bool required)

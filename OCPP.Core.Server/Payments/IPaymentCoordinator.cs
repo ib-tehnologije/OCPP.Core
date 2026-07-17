@@ -32,10 +32,19 @@ namespace OCPP.Core.Server.Payments
         public string Origin { get; set; }
         public string ReturnBaseUrl { get; set; }
 
-        // Optional buyer info (used for R1/business invoicing in some jurisdictions, e.g. Croatia).
+        // Optional confirmed buyer info for company invoicing.
         public bool RequestR1Invoice { get; set; }
         public string BuyerCompanyName { get; set; }
         public string BuyerOib { get; set; }
+        public string BuyerCountry { get; set; }
+        public string BuyerStreet { get; set; }
+        public string BuyerPostalCode { get; set; }
+        public string BuyerCity { get; set; }
+        public string BuyerEmail { get; set; }
+        public string BuyerTaxIdentifier { get; set; }
+        public string BuyerRegistrationNumber { get; set; }
+        public bool BuyerIdentifierIsVatRegistration { get; set; }
+        public bool BuyerDataConfirmed { get; set; }
     }
 
     public class PaymentSessionResult

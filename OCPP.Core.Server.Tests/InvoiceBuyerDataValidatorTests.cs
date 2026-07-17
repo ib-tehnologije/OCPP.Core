@@ -51,6 +51,32 @@ namespace OCPP.Core.Server.Tests
             Assert.False(result.Data.IdentifierIsVatRegistration);
         }
 
+        [Fact]
+        public void ValidateAndNormalize_PaymentSessionRequest_UsesForeignBuyerContract()
+        {
+            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(new PaymentSessionRequest
+            {
+                RequestR1Invoice = true,
+                BuyerCountry = "cz",
+                BuyerCompanyName = " Example s.r.o. ",
+                BuyerStreet = " Pražská 1 ",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerRegistrationNumber = "C 12345",
+                BuyerIdentifierIsVatRegistration = true,
+                BuyerDataConfirmed = true
+            });
+
+            Assert.True(result.Success);
+            Assert.Equal("CZ", result.Data.Country);
+            Assert.Equal("Example s.r.o.", result.Data.CompanyName);
+            Assert.Equal("Pražská 1", result.Data.Street);
+            Assert.Equal("CZ 123-ABC", result.Data.TaxIdentifier);
+            Assert.True(result.Data.IdentifierIsVatRegistration);
+        }
+
         [Theory]
         [InlineData("Company\nName", "BuyerCompanyName")]
         [InlineData("Street\rName", "BuyerStreet")]
