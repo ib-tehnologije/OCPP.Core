@@ -320,12 +320,80 @@
                             <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
                             <div class="r1-label">
                                 <strong data-i18n="start.companyInvoice">Company invoice</strong>
-                                <span class="r1-hint" data-i18n="start.r1Hint">After checkout, review and confirm your company details on the secure session status page.</span>
+                                <span class="r1-hint" data-i18n="start.r1Hint">Enter and confirm the invoice buyer before continuing to secure payment.</span>
                             </div>
                         </label>
 
                         <div id="r1Fields" class="r1-fields" @(Model.RequestR1Invoice ? null : "hidden")>
-                            <div class="field-help" data-i18n="start.r1MetadataHint">Buyer data is collected after checkout, reviewed before confirmation, and stored with the charging reservation rather than as payment data.</div>
+                            <label for="buyerCountry" class="field-label" data-i18n="status.r1.country">Company country</label>
+                            <select class="field-input" id="buyerCountry" name="BuyerCountry" data-selected-country="@(Model.BuyerCountry ?? "HR")" autocomplete="country">
+                                <option value="HR">Croatia (HR)</option>
+                                <option value="AT">Austria (AT)</option>
+                                <option value="BE">Belgium (BE)</option>
+                                <option value="BG">Bulgaria (BG)</option>
+                                <option value="CY">Cyprus (CY)</option>
+                                <option value="CZ">Czechia (CZ)</option>
+                                <option value="DE">Germany (DE)</option>
+                                <option value="DK">Denmark (DK)</option>
+                                <option value="EE">Estonia (EE)</option>
+                                <option value="GR">Greece (GR)</option>
+                                <option value="ES">Spain (ES)</option>
+                                <option value="FI">Finland (FI)</option>
+                                <option value="FR">France (FR)</option>
+                                <option value="HU">Hungary (HU)</option>
+                                <option value="IE">Ireland (IE)</option>
+                                <option value="IT">Italy (IT)</option>
+                                <option value="LT">Lithuania (LT)</option>
+                                <option value="LU">Luxembourg (LU)</option>
+                                <option value="LV">Latvia (LV)</option>
+                                <option value="MT">Malta (MT)</option>
+                                <option value="NL">Netherlands (NL)</option>
+                                <option value="PL">Poland (PL)</option>
+                                <option value="PT">Portugal (PT)</option>
+                                <option value="RO">Romania (RO)</option>
+                                <option value="SE">Sweden (SE)</option>
+                                <option value="SI">Slovenia (SI)</option>
+                                <option value="SK">Slovakia (SK)</option>
+                            </select>
+
+                            <label for="buyerCompanyName" class="field-label field-label--spaced" data-i18n="status.r1.companyName">Legal company name</label>
+                            <input type="text" class="field-input" id="buyerCompanyName" name="BuyerCompanyName" value="@Model.BuyerCompanyName" autocomplete="organization" maxlength="200" />
+
+                            <label for="buyerStreet" class="field-label field-label--spaced" data-i18n="status.r1.street">Street address</label>
+                            <input type="text" class="field-input" id="buyerStreet" name="BuyerStreet" value="@Model.BuyerStreet" autocomplete="street-address" maxlength="200" />
+
+                            <label for="buyerPostalCode" class="field-label field-label--spaced" data-i18n="status.r1.postalCode">Postal code</label>
+                            <input type="text" class="field-input" id="buyerPostalCode" name="BuyerPostalCode" value="@Model.BuyerPostalCode" autocomplete="postal-code" maxlength="32" />
+
+                            <label for="buyerCity" class="field-label field-label--spaced" data-i18n="status.r1.city">City</label>
+                            <input type="text" class="field-input" id="buyerCity" name="BuyerCity" value="@Model.BuyerCity" autocomplete="address-level2" maxlength="100" />
+
+                            <label for="buyerEmail" class="field-label field-label--spaced" data-i18n="status.r1.email">Billing email</label>
+                            <input type="email" class="field-input" id="buyerEmail" name="BuyerEmail" value="@Model.BuyerEmail" autocomplete="email" maxlength="254" />
+
+                            <label for="buyerTaxIdentifier" class="field-label field-label--spaced" data-i18n="status.r1.taxIdentifier">OIB / VAT / tax identifier</label>
+                            <input type="text" class="field-input" id="buyerTaxIdentifier" name="BuyerTaxIdentifier" value="@Model.BuyerTaxIdentifier" autocomplete="off" maxlength="64" required />
+                            <div class="field-help" data-i18n="status.r1.taxIdentifierHelp">Croatian OIB is checksum validated. Foreign identifiers are issued exactly as entered and are not registry-verified.</div>
+
+                            <label for="buyerRegistrationNumber" class="field-label field-label--spaced" data-i18n="status.r1.registrationNumber">Legal registration number (optional)</label>
+                            <input type="text" class="field-input" id="buyerRegistrationNumber" name="BuyerRegistrationNumber" value="@Model.BuyerRegistrationNumber" autocomplete="off" maxlength="64" />
+
+                            <label class="field-label field-label--spaced">
+                                <input type="checkbox" id="buyerIdentifierIsVatRegistration" name="BuyerIdentifierIsVatRegistration" value="true" @(Model.BuyerIdentifierIsVatRegistration ? "checked" : null) />
+                                <span data-i18n="status.r1.vatRegistration">The tax identifier is a VAT registration number</span>
+                            </label>
+
+                            <div id="buyerReview" class="field-help field-help--spaced" aria-live="polite"></div>
+                            <label class="field-label field-label--spaced">
+                                <input type="checkbox" id="buyerDataConfirmed" name="BuyerDataConfirmed" value="true" @(Model.BuyerDataConfirmed ? "checked" : null) required />
+                                <span data-i18n="status.r1.confirm">I confirm these invoice details are correct and may be issued exactly as entered.</span>
+                            </label>
+
+                            <label class="field-label field-label--spaced">
+                                <input type="checkbox" id="rememberInvoiceBuyer" name="RememberInvoiceBuyer" value="true" @(Model.RememberInvoiceBuyer ? "checked" : null) />
+                                <span>Remember company details on this device</span>
+                            </label>
+                            <div class="field-help">Stored only in this browser. Other users of a shared device may see these details.</div>
                         </div>
 
                         <button type="submit" class="btn-primary">
@@ -343,13 +411,43 @@
                     const wantsR1 = document.getElementById('wantsR1');
                     const fields = document.getElementById('r1Fields');
                     if (!wantsR1 || !fields) return;
+                    const country = document.getElementById('buyerCountry');
+                    const company = document.getElementById('buyerCompanyName');
+                    const street = document.getElementById('buyerStreet');
+                    const postalCode = document.getElementById('buyerPostalCode');
+                    const city = document.getElementById('buyerCity');
+                    const email = document.getElementById('buyerEmail');
+                    const taxIdentifier = document.getElementById('buyerTaxIdentifier');
+                    const review = document.getElementById('buyerReview');
+                    if (country?.dataset?.selectedCountry) {
+                        country.value = country.dataset.selectedCountry.toUpperCase();
+                    }
+                    const updateReview = () => {
+                        if (!review) return;
+                        review.textContent = [
+                            company?.value,
+                            street?.value,
+                            [postalCode?.value, city?.value].filter(Boolean).join(' '),
+                            country?.value,
+                            taxIdentifier?.value,
+                            email?.value
+                        ].map(value => String(value || '').trim()).filter(Boolean).join(' · ');
+                    };
                     const sync = () => {
                         const enabled = wantsR1.checked;
                         fields.hidden = !enabled;
                         const inputs = fields.querySelectorAll('input, select, textarea');
                         inputs.forEach(i => i.disabled = !enabled);
+                        const foreign = enabled && country?.value !== 'HR';
+                        [company, street, postalCode, city, email].filter(Boolean).forEach(i => i.required = foreign);
+                        if (taxIdentifier) taxIdentifier.required = enabled;
+                        updateReview();
                     };
                     wantsR1.addEventListener('change', sync);
+                    country?.addEventListener('change', sync);
+                    [company, street, postalCode, city, email, taxIdentifier]
+                        .filter(Boolean)
+                        .forEach(input => input.addEventListener('input', updateReview));
                     sync();
                 })();
 
