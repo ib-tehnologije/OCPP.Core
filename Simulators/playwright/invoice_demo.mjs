@@ -19,12 +19,23 @@ const defaultRepoRoot = path.resolve(packageDir, "..", "..");
 const sensitiveInheritedSettingPattern = /^(?:SENTRY_DSN|Sentry__|Invoices__ERacuni|Stripe__|Notifications__(?:Smtp|FromAddress|ReplyToAddress|BccAddress)|Email__|OwnerReportSchedule__)/i;
 const expectedScreenshotNames = Object.freeze([
   "01-company-invoice-choice.png",
-  "02-czech-company-review.png",
-  "03-czech-company-confirmed.png",
-  "04-croatian-invalid-oib.png",
+  "02-foreign-unconfirmed-blocked.png",
+  "03-mock-stripe-handoff.png",
+  "04-croatian-invalid-oib-rejected.png",
   "05-croatian-valid-oib-ready.png",
-  "06-issued-invoice-read-only.png",
+  "06-new-browser-session-empty.png",
+  "07-issued-invoice-read-only.png",
 ]);
+
+const buyerFormFields = Object.freeze({
+  buyerCity: "#buyerCity",
+  buyerCompanyName: "#buyerCompanyName",
+  buyerEmail: "#buyerEmail",
+  buyerPostalCode: "#buyerPostalCode",
+  buyerRegistrationNumber: "#buyerRegistrationNumber",
+  buyerStreet: "#buyerStreet",
+  buyerTaxIdentifier: "#buyerTaxIdentifier",
+});
 
 export const invoiceDemoMessages = Object.freeze({
   checkoutReady: "Invoice buyer details are confirmed before Stripe checkout.",
@@ -492,6 +503,94 @@ export function verifyNoPostCheckoutBuyerControls(controlCount) {
   };
 }
 
+export function readMockStripeSnapshotCounts(stripeDiagnosticsDir) {
+  const snapshotPath = path.join(stripeDiagnosticsDir, "mock-stripe-store.json");
+  const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+  if (!Array.isArray(snapshot.sessions) || !Array.isArray(snapshot.paymentIntents)) {
+    throw new Error("Mock Stripe snapshot must contain session and payment intent arrays.");
+  }
+  return {
+    paymentIntentCount: snapshot.paymentIntents.length,
+    sessionCount: snapshot.sessions.length,
+  };
+}
+
+export function verifyNoMockStripeCreateCall({ after, before, reason }) {
+  const created = after - before;
+  if (created !== 0) {
+    throw new Error(`${reason} created ${created} mock Stripe session${Math.abs(created) === 1 ? "" : "s"}; expected the attempt to stop before Stripe.`);
+  }
+  return {
+    blockedBeforeMockStripe: true,
+    mockStripeSessionCount: after,
+  };
+}
+
+export async function inspectBuyerBrowserState(page, { buyerValues = [] } = {}) {
+  const storage = await page.evaluate(() => ({
+    localStorageEntries: Object.entries(window.localStorage),
+    sessionStorageEntries: Object.entries(window.sessionStorage),
+  }));
+  const normalizedBuyerValues = buyerValues
+    .filter((value) => typeof value === "string" && value.trim())
+    .map((value) => value.trim().toLocaleLowerCase("en-US"));
+  const storageEntries = [
+    ...storage.localStorageEntries,
+    ...storage.sessionStorageEntries,
+  ];
+  const retainedStorageEntry = storageEntries.find(([key, value]) => {
+    const normalizedKey = String(key).toLocaleLowerCase("en-US");
+    const normalizedValue = String(value).toLocaleLowerCase("en-US");
+    return /invoice.?buyer|buyer.?(?:company|data|email|tax)/i.test(normalizedKey) ||
+      normalizedBuyerValues.some((buyerValue) => normalizedValue.includes(buyerValue));
+  });
+  if (retainedStorageEntry) {
+    throw new Error(`Buyer data remained in browser storage key ${retainedStorageEntry[0]}.`);
+  }
+
+  for (const [fieldName, selector] of Object.entries(buyerFormFields)) {
+    const value = await page.locator(selector).inputValue();
+    if (String(value ?? "").trim()) {
+      throw new Error(`Fresh browser session repopulated ${fieldName}.`);
+    }
+  }
+
+  return {
+    buyerBrowserStorageAbsent: true,
+    freshStartBuyerFieldsEmpty: true,
+    localStorageKeys: storage.localStorageEntries.map(([key]) => key),
+    sessionStorageKeys: storage.sessionStorageEntries.map(([key]) => key),
+  };
+}
+
+export function concatenateRecordedVideos(sourcePaths, targetPath, {
+  concatListPath = `${targetPath}.concat.txt`,
+  remove = fs.rmSync,
+  run = spawnSync,
+  write = fs.writeFileSync,
+} = {}) {
+  if (!Array.isArray(sourcePaths) || sourcePaths.length < 2) {
+    throw new Error("At least two recorded video segments are required for concatenation.");
+  }
+  const concatList = sourcePaths
+    .map((sourcePath) => `file '${String(sourcePath).replaceAll("'", "'\\''")}'`)
+    .join("\n") + "\n";
+  write(concatListPath, concatList);
+  try {
+    const result = run("ffmpeg", [
+      "-y", "-f", "concat", "-safe", "0", "-i", concatListPath,
+      "-c", "copy", targetPath,
+    ], { encoding: "utf8", stdio: "pipe" });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`ffmpeg failed to concatenate the UI walkthrough: ${String(result.stderr).trim() || `exit ${result.status}`}`);
+    }
+  } finally {
+    remove(concatListPath, { force: true });
+  }
+  return targetPath;
+}
+
 export function readMediaDurationSeconds(filePath, { run = spawnSync } = {}) {
   const result = run("ffprobe", [
     "-v", "error",
@@ -573,6 +672,7 @@ export function buildArtifactManifest({
     verification: {
       ...persistedBuyerSnapshots,
       ...browserArtifacts.postCheckoutBuyerEntry,
+      ...browserArtifacts.evidence,
       ...artifactFiles,
     },
     fixtures: Object.fromEntries(

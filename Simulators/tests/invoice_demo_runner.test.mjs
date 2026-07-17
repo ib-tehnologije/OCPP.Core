@@ -191,17 +191,115 @@ test("verifyNoPostCheckoutBuyerControls rejects late buyer entry", () => {
   assert.throws(() => invoiceDemoRunner.verifyNoPostCheckoutBuyerControls(1), /no post-checkout buyer controls.*1/i);
 });
 
+test("readMockStripeSnapshotCounts and verifyNoMockStripeCreateCall prove blocked submissions stop before Stripe", (t) => {
+  const diagnosticsDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-stripe-test-"));
+  t.after(() => fs.rmSync(diagnosticsDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(diagnosticsDir, "mock-stripe-store.json"), JSON.stringify({
+    sessions: [{ id: "session-1" }, { id: "session-2" }, { id: "session-3" }],
+    paymentIntents: [{ id: "intent-1" }, { id: "intent-2" }, { id: "intent-3" }],
+  }));
+
+  assert.deepEqual(invoiceDemoRunner.readMockStripeSnapshotCounts(diagnosticsDir), {
+    paymentIntentCount: 3,
+    sessionCount: 3,
+  });
+  assert.deepEqual(invoiceDemoRunner.verifyNoMockStripeCreateCall({
+    after: 3,
+    before: 3,
+    reason: "unconfirmed buyer data",
+  }), {
+    blockedBeforeMockStripe: true,
+    mockStripeSessionCount: 3,
+  });
+  assert.throws(
+    () => invoiceDemoRunner.verifyNoMockStripeCreateCall({
+      after: 4,
+      before: 3,
+      reason: "invalid Croatian OIB",
+    }),
+    /invalid Croatian OIB.*created 1 mock Stripe session/i,
+  );
+});
+
+test("inspectBuyerBrowserState requires buyer-free storage and empty fresh-start fields", async () => {
+  const values = new Map([
+    ["#buyerCompanyName", ""],
+    ["#buyerStreet", ""],
+    ["#buyerPostalCode", ""],
+    ["#buyerCity", ""],
+    ["#buyerEmail", ""],
+    ["#buyerTaxIdentifier", ""],
+    ["#buyerRegistrationNumber", ""],
+  ]);
+  const page = {
+    evaluate: async () => ({
+      localStorageEntries: [["publicPortalLang", "en"]],
+      sessionStorageEntries: [],
+    }),
+    locator: (selector) => ({ inputValue: async () => values.get(selector) }),
+  };
+
+  assert.deepEqual(await invoiceDemoRunner.inspectBuyerBrowserState(page, {
+    buyerValues: ["Example Praha s.r.o.", "CZ00000001", "invoice-prague@example.test"],
+  }), {
+    buyerBrowserStorageAbsent: true,
+    freshStartBuyerFieldsEmpty: true,
+    localStorageKeys: ["publicPortalLang"],
+    sessionStorageKeys: [],
+  });
+
+  values.set("#buyerEmail", "invoice-prague@example.test");
+  await assert.rejects(
+    () => invoiceDemoRunner.inspectBuyerBrowserState(page, {
+      buyerValues: ["Example Praha s.r.o.", "CZ00000001", "invoice-prague@example.test"],
+    }),
+    /fresh browser session.*buyerEmail/i,
+  );
+});
+
+test("concatenateRecordedVideos uses ffmpeg concat copy and removes its list", () => {
+  const calls = [];
+  const listPath = "/tmp/invoice-demo-concat.txt";
+  invoiceDemoRunner.concatenateRecordedVideos(
+    ["/tmp/ui-part-1.webm", "/tmp/ui-part-2.webm"],
+    "/tmp/ui-walkthrough.webm",
+    {
+      concatListPath: listPath,
+      remove: (...args) => calls.push(["remove", ...args]),
+      run: (...args) => {
+        calls.push(["run", ...args]);
+        return { status: 0, stderr: "" };
+      },
+      write: (...args) => calls.push(["write", ...args]),
+    },
+  );
+
+  assert.deepEqual(calls[0], [
+    "write",
+    listPath,
+    "file '/tmp/ui-part-1.webm'\nfile '/tmp/ui-part-2.webm'\n",
+  ]);
+  assert.deepEqual(calls[1], [
+    "run",
+    "ffmpeg",
+    ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", "/tmp/ui-walkthrough.webm"],
+    { encoding: "utf8", stdio: "pipe" },
+  ]);
+  assert.deepEqual(calls[2], ["remove", listPath, { force: true }]);
+});
+
 test("verifyArtifactFiles requires every expected PNG and both accepted WebM recordings", (t) => {
   assert.equal(typeof invoiceDemoRunner.verifyArtifactFiles, "function");
   const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-artifacts-test-"));
   t.after(() => fs.rmSync(artifactDir, { recursive: true, force: true }));
   const screenshots = [
     "01-company-invoice-choice.png",
-    "02-czech-company-review.png",
-    "03-czech-company-confirmed.png",
-    "04-croatian-invalid-oib.png",
+    "02-foreign-unconfirmed-blocked.png",
+    "03-mock-stripe-handoff.png",
+    "04-croatian-invalid-oib-rejected.png",
     "05-croatian-valid-oib-ready.png",
-    "06-issued-invoice-read-only.png",
+    "06-new-browser-session-empty.png",
+    "07-issued-invoice-read-only.png",
   ];
   for (const filename of [...screenshots, "ui-walkthrough.webm", "billing-rules-explainer.webm"]) {
     fs.writeFileSync(path.join(artifactDir, filename), "content");
@@ -221,10 +319,10 @@ test("verifyArtifactFiles requires every expected PNG and both accepted WebM rec
     screenshotsNonEmpty: true,
     uiWalkthroughDurationAccepted: true,
     uiWalkthroughSeconds: 210,
-    verifiedScreenshotCount: 6,
+    verifiedScreenshotCount: 7,
     videosNonEmpty: true,
   });
-  fs.writeFileSync(path.join(artifactDir, "02-czech-company-review.png"), "");
+  fs.writeFileSync(path.join(artifactDir, "02-foreign-unconfirmed-blocked.png"), "");
   assert.throws(
     () => invoiceDemoRunner.verifyArtifactFiles(artifactDir, {
       screenshots,
@@ -235,7 +333,7 @@ test("verifyArtifactFiles requires every expected PNG and both accepted WebM rec
     }, {
       readDuration: () => 210,
     }),
-    /02-czech-company-review\.png.*nonempty/i,
+    /02-foreign-unconfirmed-blocked\.png.*nonempty/i,
   );
 });
 
@@ -633,6 +731,13 @@ test("artifact manifest provides replacement viewing order and marks the legacy 
       videosNonEmpty: true,
     },
     browserArtifacts: {
+      evidence: {
+        buyerBrowserStorageAbsent: true,
+        freshStartBuyerFieldsEmpty: true,
+        invalidOibAttemptBlockedBeforeMockStripe: true,
+        mockStripeHandoffShown: true,
+        unconfirmedAttemptBlockedBeforeMockStripe: true,
+      },
       postCheckoutBuyerEntry: { postCheckoutBuyerControlsAbsent: true },
       screenshots: ["01-company-invoice-choice.png"],
       videos: {
@@ -658,6 +763,11 @@ test("artifact manifest provides replacement viewing order and marks the legacy 
   }]);
   assert.equal(manifest.verification.uiWalkthroughSeconds, 210);
   assert.equal(manifest.verification.billingExplainerSeconds, 75);
+  assert.equal(manifest.verification.unconfirmedAttemptBlockedBeforeMockStripe, true);
+  assert.equal(manifest.verification.invalidOibAttemptBlockedBeforeMockStripe, true);
+  assert.equal(manifest.verification.mockStripeHandoffShown, true);
+  assert.equal(manifest.verification.buyerBrowserStorageAbsent, true);
+  assert.equal(manifest.verification.freshStartBuyerFieldsEmpty, true);
 });
 
 test("demo stack builds once before both no-build application launches", () => {
