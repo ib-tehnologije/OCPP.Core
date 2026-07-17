@@ -73,7 +73,9 @@ The checked `appsettings.json` files include development/sample values. Override
 
 ## Database Operations
 
-Confirmed company invoice buyer data is stored as nullable bounded columns on `ChargePaymentReservation`. Migration `AddInvoiceBuyerSnapshot` is non-destructive for existing reservations. Existing legacy R1 reservations can still build from Stripe metadata, while newly confirmed requests use the durable reservation snapshot as the invoice source of truth.
+Confirmed company invoice buyer data is stored as nullable bounded columns on `ChargePaymentReservation`. Migration `AddInvoiceBuyerSnapshot` is non-destructive for existing reservations. New public sessions must confirm the complete buyer snapshot before Stripe Checkout is created. Existing legacy R1 reservations can still build from Stripe metadata, while newly confirmed requests use the durable reservation snapshot as the invoice source of truth. The legacy buyer-data endpoint remains available for compatibility, but the public status page no longer offers post-checkout buyer entry.
+
+The optional "remember company details" setting stores only reusable buyer fields in the customer's browser under the versioned `ocpp.invoiceBuyer.v1` key. It is not server-side profile storage and includes no reservation, checkout, or payment identifiers. Unchecking the option clears the browser copy; shared-device users should leave it disabled.
 
 Foreign tax identifiers are not registry-verified by the application. Provider validation failures must remain sanitized in customer responses and logs; do not expose e-racuni credentials or raw authenticated request envelopes while diagnosing invoice submission.
 

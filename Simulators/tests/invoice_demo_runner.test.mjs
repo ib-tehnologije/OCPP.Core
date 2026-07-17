@@ -183,23 +183,12 @@ test("verifyPersistedBuyerSnapshots requires exact Czech and Croatian database s
   );
 });
 
-test("verifyLockedBuyerControls requires every buyer control to be disabled", () => {
-  assert.equal(typeof invoiceDemoRunner.verifyLockedBuyerControls, "function");
-  const expectedIds = [
-    "r1-country", "r1-company", "r1-street", "r1-postal-code", "r1-city", "r1-email",
-    "r1-tax-identifier", "r1-registration-number", "r1-vat-registration", "r1-confirm", "r1-submit",
-  ];
-  const controls = expectedIds.map((id) => ({ id, disabled: true }));
-
-  assert.deepEqual(invoiceDemoRunner.verifyLockedBuyerControls(controls), {
-    lockedBuyerControlCount: 11,
-    lockedBuyerControlsDisabled: true,
+test("verifyNoPostCheckoutBuyerControls rejects late buyer entry", () => {
+  assert.equal(typeof invoiceDemoRunner.verifyNoPostCheckoutBuyerControls, "function");
+  assert.deepEqual(invoiceDemoRunner.verifyNoPostCheckoutBuyerControls(0), {
+    postCheckoutBuyerControlsAbsent: true,
   });
-  assert.throws(
-    () => invoiceDemoRunner.verifyLockedBuyerControls(controls.map((control) =>
-      control.id === "r1-email" ? { ...control, disabled: false } : control)),
-    /r1-email.*disabled/i,
-  );
+  assert.throws(() => invoiceDemoRunner.verifyNoPostCheckoutBuyerControls(1), /no post-checkout buyer controls.*1/i);
 });
 
 test("verifyArtifactFiles requires every expected PNG and both accepted WebM recordings", (t) => {
@@ -209,10 +198,10 @@ test("verifyArtifactFiles requires every expected PNG and both accepted WebM rec
   const screenshots = [
     "01-company-invoice-choice.png",
     "02-czech-company-review.png",
-    "03-czech-company-saved.png",
+    "03-czech-company-remembered.png",
     "04-croatian-invalid-oib.png",
-    "05-croatian-valid-oib.png",
-    "06-issued-invoice-locked.png",
+    "05-croatian-valid-oib-ready.png",
+    "06-issued-invoice-read-only.png",
   ];
   for (const filename of [...screenshots, "ui-walkthrough.webm", "billing-rules-explainer.webm"]) {
     fs.writeFileSync(path.join(artifactDir, filename), "content");
@@ -436,11 +425,10 @@ test("publishCompletedVideo falls back to copy and remove for EXDEV", () => {
   ]);
 });
 
-test("invoice walkthrough requires exact English result messages", () => {
+test("invoice walkthrough states the pre-checkout and read-only boundaries", () => {
   assert.deepEqual(invoiceDemoMessages, {
-    invalidOib: "Please enter a valid OIB (11 digits).",
-    locked: "Buyer details cannot be changed after invoice submission. Contact support for a correction.",
-    saved: "R1 details saved successfully.",
+    checkoutReady: "Invoice buyer details are confirmed before Stripe checkout.",
+    postCheckoutReadOnly: "The status page shows invoice results without late buyer editing.",
   });
 });
 
@@ -464,13 +452,12 @@ test("interaction timeline covers the required human-visible UI states", () => {
   assert.deepEqual(timeline.map(({ id }) => id), [
     "public-start",
     "company-invoice-choice",
-    "checkout-handoff",
     "czech-entry",
     "czech-review",
-    "czech-save",
+    "czech-remember",
     "croatian-invalid-oib",
-    "croatian-valid-oib",
-    "issued-locked",
+    "croatian-valid-oib-ready",
+    "issued-read-only",
   ]);
   assert.ok(timeline.every(({ minimumDwellMs }) => minimumDwellMs >= 3_000));
 });
@@ -514,16 +501,16 @@ test("buyer entry plan types every visible field in operator order", () => {
     taxIdentifier: "CZ00000001",
   });
   assert.deepEqual(steps.map(({ selector }) => selector), [
-    "#r1-country",
-    "#r1-company",
-    "#r1-street",
-    "#r1-postal-code",
-    "#r1-city",
-    "#r1-email",
-    "#r1-tax-identifier",
-    "#r1-registration-number",
-    "#r1-vat-registration",
-    "#r1-confirm",
+    "#buyerCountry",
+    "#buyerCompanyName",
+    "#buyerStreet",
+    "#buyerPostalCode",
+    "#buyerCity",
+    "#buyerEmail",
+    "#buyerTaxIdentifier",
+    "#buyerRegistrationNumber",
+    "#buyerIdentifierIsVatRegistration",
+    "#buyerDataConfirmed",
   ]);
   assert.ok(steps.every(({ dwellAfterMs }) => dwellAfterMs >= 1_500));
   assert.ok(steps.filter(({ action }) => action === "type").every(({ typingDelayMs }) => typingDelayMs >= 70));
@@ -613,8 +600,8 @@ test("performBuyerEntry uses paced real interactions for each field", async () =
   });
 
   assert.equal(completed.length, 10);
-  assert.deepEqual(calls.find((call) => call[0] === "#r1-country" && call[1] === "select"), ["#r1-country", "select", "CZ"]);
-  assert.deepEqual(calls.find((call) => call[0] === "#r1-company" && call[1] === "type"), ["#r1-company", "type", "Example Praha s.r.o.", { delay: 80 }]);
+  assert.deepEqual(calls.find((call) => call[0] === "#buyerCountry" && call[1] === "select"), ["#buyerCountry", "select", "CZ"]);
+  assert.deepEqual(calls.find((call) => call[0] === "#buyerCompanyName" && call[1] === "type"), ["#buyerCompanyName", "type", "Example Praha s.r.o.", { delay: 80 }]);
   assert.ok(calls.filter((call) => call[0] === "wait").every(([, milliseconds]) => milliseconds >= 1_500));
 });
 
@@ -646,7 +633,7 @@ test("artifact manifest provides replacement viewing order and marks the legacy 
       videosNonEmpty: true,
     },
     browserArtifacts: {
-      lockedBuyerControls: { lockedBuyerControlCount: 11, lockedBuyerControlsDisabled: true },
+      postCheckoutBuyerEntry: { postCheckoutBuyerControlsAbsent: true },
       screenshots: ["01-company-invoice-choice.png"],
       videos: {
         billingExplainer: "billing-rules-explainer.webm",

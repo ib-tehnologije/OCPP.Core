@@ -2,8 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createProtocolScenarioDriver } from "../../../lib/protocol_scenarios.mjs";
 import { setIdleWindow } from "../../../lib/sqlite_helpers.mjs";
+import { resolveStackDefaults } from "../../common.mjs";
 
-const SERVER_WS_BASE = process.env.SERVER_WS_BASE ?? "ws://127.0.0.1:8081/OCPP";
+const SERVER_WS_BASE = resolveStackDefaults().serverWsBaseUrl;
 const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH ?? "";
 const EMAIL_SINK_DIR = process.env.EMAIL_SINK_DIR ?? "";
 
@@ -64,11 +65,39 @@ export async function startPublicSession(page, target, options = {}) {
   await page.goto(`/Public/Start?cp=${encodeURIComponent(target.chargePointId)}&conn=${encodeURIComponent(target.connectorId)}`);
   if (options.requestR1Invoice) {
     await page.locator("#wantsR1").check();
+    if (options.buyerCountry !== undefined) {
+      await page.locator("#buyerCountry").selectOption(options.buyerCountry);
+    }
     if (options.buyerCompanyName !== undefined) {
       await page.locator("#buyerCompanyName").fill(options.buyerCompanyName);
     }
-    if (options.buyerOib !== undefined) {
-      await page.locator("#buyerOib").fill(options.buyerOib);
+    if (options.buyerStreet !== undefined) {
+      await page.locator("#buyerStreet").fill(options.buyerStreet);
+    }
+    if (options.buyerPostalCode !== undefined) {
+      await page.locator("#buyerPostalCode").fill(options.buyerPostalCode);
+    }
+    if (options.buyerCity !== undefined) {
+      await page.locator("#buyerCity").fill(options.buyerCity);
+    }
+    if (options.buyerEmail !== undefined) {
+      await page.locator("#buyerEmail").fill(options.buyerEmail);
+    }
+    const taxIdentifier = options.buyerTaxIdentifier ?? options.buyerOib;
+    if (taxIdentifier !== undefined) {
+      await page.locator("#buyerTaxIdentifier").fill(taxIdentifier);
+    }
+    if (options.buyerRegistrationNumber !== undefined) {
+      await page.locator("#buyerRegistrationNumber").fill(options.buyerRegistrationNumber);
+    }
+    if (options.buyerIdentifierIsVatRegistration) {
+      await page.locator("#buyerIdentifierIsVatRegistration").check();
+    }
+    if (options.buyerDataConfirmed !== false) {
+      await page.locator("#buyerDataConfirmed").check();
+    }
+    if (options.rememberInvoiceBuyer) {
+      await page.locator("#rememberInvoiceBuyer").check();
     }
   }
   await page.getByRole("button", { name: /Start charging/i }).click();

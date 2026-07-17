@@ -160,6 +160,7 @@ SELECT json_object(
   'reservationId', ReservationId,
   'transactionId', TransactionId,
   'provider', Provider,
+  'providerOperation', ProviderOperation,
   'mode', Mode,
   'status', Status,
   'invoiceKind', InvoiceKind,

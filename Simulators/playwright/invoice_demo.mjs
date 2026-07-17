@@ -17,32 +17,18 @@ import { waitForUrl } from "./common.mjs";
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = path.resolve(packageDir, "..", "..");
 const sensitiveInheritedSettingPattern = /^(?:SENTRY_DSN|Sentry__|Invoices__ERacuni|Stripe__|Notifications__(?:Smtp|FromAddress|ReplyToAddress|BccAddress)|Email__|OwnerReportSchedule__)/i;
-const lockedBuyerControlIds = Object.freeze([
-  "r1-country",
-  "r1-company",
-  "r1-street",
-  "r1-postal-code",
-  "r1-city",
-  "r1-email",
-  "r1-tax-identifier",
-  "r1-registration-number",
-  "r1-vat-registration",
-  "r1-confirm",
-  "r1-submit",
-]);
 const expectedScreenshotNames = Object.freeze([
   "01-company-invoice-choice.png",
   "02-czech-company-review.png",
-  "03-czech-company-saved.png",
+  "03-czech-company-remembered.png",
   "04-croatian-invalid-oib.png",
-  "05-croatian-valid-oib.png",
-  "06-issued-invoice-locked.png",
+  "05-croatian-valid-oib-ready.png",
+  "06-issued-invoice-read-only.png",
 ]);
 
 export const invoiceDemoMessages = Object.freeze({
-  invalidOib: "Please enter a valid OIB (11 digits).",
-  locked: "Buyer details cannot be changed after invoice submission. Contact support for a correction.",
-  saved: "R1 details saved successfully.",
+  checkoutReady: "Invoice buyer details are confirmed before Stripe checkout.",
+  postCheckoutReadOnly: "The status page shows invoice results without late buyer editing.",
 });
 
 export const invoiceDemoRecordingContract = Object.freeze({
@@ -74,16 +60,16 @@ export function buildBuyerEntrySteps(buyer) {
     value,
   });
   return [
-    { action: "select", dwellAfterMs: 2_000, label: "Country", selector: "#r1-country", value: buyer.country },
-    type("#r1-company", "Company name", buyer.companyName),
-    type("#r1-street", "Street and number", buyer.street),
-    type("#r1-postal-code", "Postal code", buyer.postalCode),
-    type("#r1-city", "City", buyer.city),
-    type("#r1-email", "Billing email", buyer.email),
-    type("#r1-tax-identifier", buyer.country === "HR" ? "Croatian OIB" : "VAT or tax identifier", buyer.taxIdentifier),
-    type("#r1-registration-number", "Registration number", buyer.registrationNumber ?? ""),
-    { action: "check", dwellAfterMs: 2_000, label: "VAT registration", selector: "#r1-vat-registration", value: buyer.identifierIsVatRegistration },
-    { action: "check", dwellAfterMs: 2_000, label: "Confirm reviewed details", selector: "#r1-confirm", value: true },
+    { action: "select", dwellAfterMs: 2_000, label: "Country", selector: "#buyerCountry", value: buyer.country },
+    type("#buyerCompanyName", "Company name", buyer.companyName),
+    type("#buyerStreet", "Street and number", buyer.street),
+    type("#buyerPostalCode", "Postal code", buyer.postalCode),
+    type("#buyerCity", "City", buyer.city),
+    type("#buyerEmail", "Billing email", buyer.email),
+    type("#buyerTaxIdentifier", buyer.country === "HR" ? "Croatian OIB" : "VAT or tax identifier", buyer.taxIdentifier),
+    type("#buyerRegistrationNumber", "Registration number", buyer.registrationNumber ?? ""),
+    { action: "check", dwellAfterMs: 2_000, label: "VAT registration", selector: "#buyerIdentifierIsVatRegistration", value: buyer.identifierIsVatRegistration },
+    { action: "check", dwellAfterMs: 2_000, label: "Confirm reviewed details", selector: "#buyerDataConfirmed", value: true },
   ];
 }
 
@@ -157,13 +143,12 @@ export function buildInteractionTimeline() {
   return [
     { id: "public-start", minimumDwellMs: 5_000 },
     { id: "company-invoice-choice", minimumDwellMs: 5_000 },
-    { id: "checkout-handoff", minimumDwellMs: 8_000 },
     { id: "czech-entry", minimumDwellMs: 5_000 },
     { id: "czech-review", minimumDwellMs: 8_000 },
-    { id: "czech-save", minimumDwellMs: 8_000 },
+    { id: "czech-remember", minimumDwellMs: 8_000 },
     { id: "croatian-invalid-oib", minimumDwellMs: 8_000 },
-    { id: "croatian-valid-oib", minimumDwellMs: 8_000 },
-    { id: "issued-locked", minimumDwellMs: 10_000 },
+    { id: "croatian-valid-oib-ready", minimumDwellMs: 8_000 },
+    { id: "issued-read-only", minimumDwellMs: 10_000 },
   ];
 }
 
@@ -498,16 +483,12 @@ export async function cleanupRuntime(children, tempRoot, {
   if (removeError) throw removeError;
 }
 
-export function verifyLockedBuyerControls(controlStates) {
-  const statesById = new Map(controlStates.map((state) => [state.id, state]));
-  for (const id of lockedBuyerControlIds) {
-    if (!statesById.get(id)?.disabled) {
-      throw new Error(`Locked buyer control #${id} must exist and be disabled.`);
-    }
+export function verifyNoPostCheckoutBuyerControls(controlCount) {
+  if (controlCount !== 0) {
+    throw new Error(`Expected no post-checkout buyer controls, found ${controlCount}.`);
   }
   return {
-    lockedBuyerControlCount: lockedBuyerControlIds.length,
-    lockedBuyerControlsDisabled: true,
+    postCheckoutBuyerControlsAbsent: true,
   };
 }
 
@@ -591,7 +572,7 @@ export function buildArtifactManifest({
     }],
     verification: {
       ...persistedBuyerSnapshots,
-      ...browserArtifacts.lockedBuyerControls,
+      ...browserArtifacts.postCheckoutBuyerEntry,
       ...artifactFiles,
     },
     fixtures: Object.fromEntries(
@@ -789,17 +770,15 @@ async function recordUiWalkthrough(browser, runtime) {
   const statusUrl = (fixture) => `/Payments/Status?reservationId=${fixture.reservationId}&origin=public&lang=en`;
 
   try {
-    await page.goto(`/Public/Start?cp=${encodeURIComponent(invoiceDemoFixtures.foreignEditable.chargePointId)}&conn=1`);
-    await addCaption(page, "We begin on the real local public charging page. The blue pointer shows every interaction at normal speed.", 8_000);
-    await addCaption(page, "Before charging starts, the customer chooses Company invoice.", 5_000);
-    await moveCursorTo(page, page.locator("#wantsR1"), { click: true });
-    await addCaption(page, "Company invoice is now selected. The charging and checkout flow continues normally.", 8_000);
-    await capture("company-invoice-choice");
-    await addCaption(page, "After checkout, the customer follows the secure session-status link. That page is where buyer details are reviewed and confirmed.", 15_000);
-
     const foreign = invoiceDemoFixtures.foreignEditable;
-    await page.goto(statusUrl(foreign));
-    await addCaption(page, "Czech company example: we enter every field individually on the actual secure status page.", 8_000);
+    await page.goto(`/Public/Start?cp=${encodeURIComponent(foreign.chargePointId)}&conn=${foreign.connectorId}`);
+    await addCaption(page, "We begin on the real local public charging page. The blue pointer shows every interaction at normal speed.", 8_000);
+    await addCaption(page, "Before Stripe checkout, the customer chooses Company invoice.", 5_000);
+    await moveCursorTo(page, page.locator("#wantsR1"), { click: true });
+    await addCaption(page, "The complete buyer form opens here, before any payment session is created.", 8_000);
+    await capture("company-invoice-choice");
+
+    await addCaption(page, "Czech company example: we enter every field before continuing to secure payment.", 8_000);
     await performBuyerEntry(page, foreign.buyer, {
       onStep: async ({ label, value }) => addCaption(
         page,
@@ -807,17 +786,17 @@ async function recordUiWalkthrough(browser, runtime) {
         1_500,
       ),
     });
-    await addCaption(page, "Pause and review: the live summary shows the exact Czech buyer snapshot that will be saved.", 12_000);
+    await addCaption(page, "Pause and review: the visible summary is the exact buyer snapshot that checkout will carry forward.", 12_000);
     await capture("czech-company-review");
-    await addCaption(page, "Save the confirmed Czech company details.", 3_000);
-    await moveCursorTo(page, page.locator("#r1-submit"), { click: true });
-    await waitForExactText(page, "#r1-result", invoiceDemoMessages.saved);
-    await addCaption(page, "Success: the reviewed Czech details are persisted to this reservation.", 10_000);
-    await capture("czech-company-saved");
+    await addCaption(page, "Optional convenience: remember these reusable company fields only in this browser.", 4_000);
+    await moveCursorTo(page, page.locator("#rememberInvoiceBuyer"), { click: true });
+    await addCaption(page, "The shared-device warning makes the browser-only privacy tradeoff explicit.", 10_000);
+    await capture("czech-company-remembered");
 
     const croatian = invoiceDemoFixtures.croatianEditable;
-    await page.goto(statusUrl(croatian));
-    await addCaption(page, "Croatian branch: we enter the company data with an intentionally invalid OIB first.", 7_000);
+    await page.goto(`/Public/Start?cp=${encodeURIComponent(croatian.chargePointId)}&conn=${croatian.connectorId}`);
+    await moveCursorTo(page, page.locator("#wantsR1"), { click: true });
+    await addCaption(page, "Croatian branch: enter the buyer data with an intentionally invalid OIB first.", 7_000);
     await performBuyerEntry(page, { ...croatian.buyer, taxIdentifier: croatian.buyer.invalidOib }, {
       onStep: async ({ label, value }) => addCaption(
         page,
@@ -825,44 +804,26 @@ async function recordUiWalkthrough(browser, runtime) {
         1_200,
       ),
     });
-    await addCaption(page, "Submit the invalid 11-digit OIB to demonstrate checksum validation.", 3_000);
-    await moveCursorTo(page, page.locator("#r1-submit"), { click: true });
-    await waitForExactText(page, "#r1-result", invoiceDemoMessages.invalidOib);
-    await addCaption(page, "Rejected: an invalid Croatian OIB cannot be saved.", 12_000);
+    await addCaption(page, "At checkout submission the server checksum-validates this Croatian OIB before creating Stripe Checkout.", 12_000);
     await capture("croatian-invalid-oib");
-    const oib = page.locator("#r1-tax-identifier");
+    const oib = page.locator("#buyerTaxIdentifier");
     await addCaption(page, "Correct the OIB with a checksum-valid synthetic example.", 4_000);
     await moveCursorTo(page, oib, { click: true });
     await oib.fill("");
     await oib.pressSequentially(croatian.buyer.taxIdentifier, { delay: 100 });
     await page.waitForTimeout(4_000);
-    await addCaption(page, "Submit the corrected Croatian details.", 3_000);
-    await moveCursorTo(page, page.locator("#r1-submit"), { click: true });
-    await waitForExactText(page, "#r1-result", invoiceDemoMessages.saved);
-    await addCaption(page, "Accepted: the checksum-valid OIB and Croatian buyer snapshot are saved.", 10_000);
-    await capture("croatian-valid-oib");
+    await addCaption(page, "Now the confirmed Croatian buyer snapshot is ready; the next button creates Stripe Checkout with matching metadata.", 10_000);
+    await moveCursorTo(page, page.getByRole("button", { name: /Start charging/i }));
+    await capture("croatian-valid-oib-ready");
 
     await page.goto(statusUrl(invoiceDemoFixtures.foreignLocked));
-    await page.locator("#r1-submit:disabled").waitFor();
-    await waitForExactText(page, "#r1-result", invoiceDemoMessages.locked);
-    const lockedBuyerControls = verifyLockedBuyerControls(await page.locator(
-      lockedBuyerControlIds.map((id) => `#${id}`).join(", "),
-    ).evaluateAll((controls) => controls.map((control) => ({
-      disabled: control.disabled,
-      id: control.id,
-    }))));
-    await addCaption(page, "Post-issuance state: all buyer controls are disabled, preventing later edits.", 9_000);
-    for (const [selector, label] of [
-      ["#r1-company", "company name"],
-      ["#r1-tax-identifier", "tax identifier"],
-      ["#r1-submit", "save button"],
-    ]) {
-      await addCaption(page, `Try the locked ${label}: the control remains disabled.`, 3_000);
-      await moveCursorTo(page, page.locator(selector), { click: true });
-      await page.waitForTimeout(3_000);
-    }
-    await addCaption(page, "The locked message remains visible. Corrections require the supported operator process rather than editing an issued invoice.", 12_000);
-    await capture("issued-invoice-locked");
+    await page.locator("#done-invoice-section").waitFor({ state: "visible" });
+    const postCheckoutBuyerEntry = verifyNoPostCheckoutBuyerControls(await page.locator(
+      "#r1-submit, #r1-company, #r1-tax-identifier, #buyerCompanyName, #buyerTaxIdentifier",
+    ).count());
+    await addCaption(page, "After charging, the status page is read-only for buyer data and shows only the invoice outcome.", 10_000);
+    await addCaption(page, "There is no late company form here, so invoice intent cannot race with session completion.", 12_000);
+    await capture("issued-invoice-read-only");
 
     const video = await publishRecordedPage(
       context,
@@ -870,7 +831,7 @@ async function recordUiWalkthrough(browser, runtime) {
       runtime,
       invoiceDemoRecordingContract.uiWalkthrough.filename,
     );
-    return { lockedBuyerControls, screenshots, video };
+    return { postCheckoutBuyerEntry, screenshots, video };
   } finally {
     await context.close().catch(() => {});
   }
@@ -910,7 +871,7 @@ async function recordBrowserWalkthrough(runtime, signal) {
     const uiWalkthrough = await recordUiWalkthrough(browser, runtime);
     const billingExplainer = await recordBillingExplainer(browser, runtime);
     return {
-      lockedBuyerControls: uiWalkthrough.lockedBuyerControls,
+      postCheckoutBuyerEntry: uiWalkthrough.postCheckoutBuyerEntry,
       screenshots: uiWalkthrough.screenshots,
       videos: {
         billingExplainer,

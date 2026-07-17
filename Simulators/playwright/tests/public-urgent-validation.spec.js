@@ -29,7 +29,7 @@ async function waitForInvoiceEvidence(reservationId, buyerCompanyName, buyerOib)
       return null;
     }
 
-    return ["Submitted", "Failed"].includes(log.status)
+    return ["Submitted", "LoggedOnly", "Failed"].includes(log.status)
       ? log.status
       : null;
   }, {
@@ -39,16 +39,19 @@ async function waitForInvoiceEvidence(reservationId, buyerCompanyName, buyerOib)
 
   const invoiceLog = readLatestInvoiceSubmissionLog(reservationId);
   expect(invoiceLog).toBeTruthy();
-  expect(invoiceLog.mode).toBe("Submit");
+  expect(invoiceLog.providerOperation).toBe("SalesInvoiceCreate");
   expect(invoiceLog.invoiceKind).toBe("R1");
   expect(invoiceLog.requestPayloadJson).toContain(buyerCompanyName);
   expect(invoiceLog.requestPayloadJson).toContain(buyerOib);
 
   if (invoiceLog.status === "Submitted") {
     expect(invoiceLog.externalDocumentId).toBeTruthy();
-  } else {
+  } else if (invoiceLog.status === "Failed") {
     expect(invoiceLog.status).toBe("Failed");
     expect(invoiceLog.error || invoiceLog.responseBody || "").toContain("e-racuni");
+  } else {
+    expect(invoiceLog.status).toBe("LoggedOnly");
+    expect(invoiceLog.mode).toBe("LogOnly");
   }
 
   return invoiceLog;
@@ -133,8 +136,15 @@ test("@invoice public start R1 details flow into Stripe metadata and invoice sub
   await withDriver(publicStartInvoiceTarget, "live_meter_progress", async (driver) => {
     const reservationId = await startPublicSession(page, publicStartInvoiceTarget, {
       requestR1Invoice: true,
+      buyerCountry: "HR",
       buyerCompanyName,
+      buyerStreet: "Ilica 1",
+      buyerPostalCode: "10000",
+      buyerCity: "Zagreb",
+      buyerEmail: "invoices@example.test",
       buyerOib,
+      buyerRegistrationNumber: "MBS-123",
+      buyerIdentifierIsVatRegistration: true,
     });
 
     expect(reservationId).toBeTruthy();
@@ -150,27 +160,35 @@ test("@invoice public start R1 details flow into Stripe metadata and invoice sub
   });
 });
 
-test("@invoice public status R1 submission updates metadata and produces an R1 invoice log", async ({ page }) => {
+test("@invoice public start remembers buyer details without late status editing", async ({ page }) => {
   test.skip(!invoicesEnabled, "Invoice validation requires OCPP_PLAYWRIGHT_ENABLE_INVOICES=1");
 
-  const buyerCompanyName = "Status Buyer d.o.o.";
+  const buyerCompanyName = "Remembered Buyer d.o.o.";
   const buyerOib = "12345678903";
 
   await withDriver(publicStatusInvoiceTarget, "live_meter_progress", async (driver) => {
-    const reservationId = await startPublicSession(page, publicStatusInvoiceTarget);
+    const reservationId = await startPublicSession(page, publicStatusInvoiceTarget, {
+      requestR1Invoice: true,
+      buyerCountry: "HR",
+      buyerCompanyName,
+      buyerStreet: "Vukovarska 2",
+      buyerPostalCode: "10000",
+      buyerCity: "Zagreb",
+      buyerEmail: "remembered@example.test",
+      buyerOib,
+      rememberInvoiceBuyer: true,
+    });
     expect(reservationId).toBeTruthy();
 
-    await page.locator("#r1-company").fill(buyerCompanyName);
-    await page.locator("#r1-oib").fill(buyerOib);
-    await page.locator("#r1-submit").click();
-    await expect(page.locator("#r1-result")).toContainText("saved successfully");
-
+    await expect(page.locator("#r1-submit")).toHaveCount(0);
     await waitForStripeMetadata(reservationId, buyerCompanyName, buyerOib);
-
     await completeChargingSession(page, driver);
 
-    const invoiceLog = await waitForInvoiceEvidence(reservationId, buyerCompanyName, buyerOib);
-    await expect(page.locator("#done-invoice-section")).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator("#done-invoice-status")).toHaveText(invoiceLog.status);
+    await page.goto(`/Public/Start?cp=${encodeURIComponent(publicStatusInvoiceTarget.chargePointId)}&conn=${publicStatusInvoiceTarget.connectorId}`);
+    await expect(page.locator("#rememberInvoiceBuyer")).toBeChecked();
+    await page.locator("#wantsR1").check();
+    await expect(page.locator("#buyerCompanyName")).toHaveValue(buyerCompanyName);
+    await expect(page.locator("#buyerTaxIdentifier")).toHaveValue(buyerOib);
+    await expect(page.locator("#buyerEmail")).toHaveValue("remembered@example.test");
   });
 });

@@ -62,7 +62,7 @@ test("public result, status, and map views expose localization hooks for dynamic
     [mapView, "map.noUsableCoordinates"],
     [publicStatusView, 'fillTemplate("status.connectorFallback"'],
     [publicStatusView, "translateMessage(data.failureMessage)"],
-    [publicStatusView, 't("status.r1.saved")'],
+    [publicStatusView, "invoice.customerBuyerDataLocked"],
   ];
 
   for (const [source, snippet] of requiredSnippets) {
@@ -178,7 +178,7 @@ test("public portal translations localize Italian result, status, map, and serve
           <body>
             <button data-i18n="status.step.wait">② Wait</button>
             <span id="status-waiting" data-i18n="status.badge.waiting">Waiting for charger...</span>
-            <span id="status-r1" data-i18n="status.r1.subtitle">Need an R1 invoice? You can submit company details now or later using this secure session link.</span>
+            <span id="status-r1" data-i18n="status.r1.subtitle">R1 invoice buyer details are confirmed before checkout on the start page.</span>
             <span id="connector-fallback" data-i18n-template="status.connectorFallback" data-i18n-param-id="1">Connector 1</span>
             <span id="result-heading" data-i18n="result.paymentAuthorized">Payment authorized</span>
             <span id="result-message" data-i18n-message="Charging session will start shortly.">Charging session will start shortly.</span>
@@ -198,7 +198,7 @@ test("public portal translations localize Italian result, status, map, and serve
 
   await expect(page.locator('[data-i18n="status.step.wait"]')).toHaveText("② Attesa");
   await expect(page.locator("#status-waiting")).toHaveText("In attesa del caricatore...");
-  await expect(page.locator("#status-r1")).toHaveText("Ti serve una fattura R1? Puoi inviare i dati aziendali ora o più tardi usando questo link sicuro della sessione.");
+  await expect(page.locator("#status-r1")).toHaveText("I dati dell'acquirente per la fattura R1 vengono confermati prima del pagamento nella pagina iniziale.");
   await expect(page.locator("#connector-fallback")).toHaveText("Connettore 1");
   await expect(page.locator("#result-heading")).toHaveText("Pagamento autorizzato");
   await expect(page.locator("#result-message")).toHaveText("La sessione di ricarica inizierà a breve.");

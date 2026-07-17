@@ -391,9 +391,9 @@
 
                             <label class="field-label field-label--spaced">
                                 <input type="checkbox" id="rememberInvoiceBuyer" name="RememberInvoiceBuyer" value="true" @(Model.RememberInvoiceBuyer ? "checked" : null) />
-                                <span>Remember company details on this device</span>
+                                <span data-i18n="start.rememberInvoiceBuyer">Remember company details on this device</span>
                             </label>
-                            <div class="field-help">Stored only in this browser. Other users of a shared device may see these details.</div>
+                            <div class="field-help" data-i18n="start.rememberInvoiceBuyerWarning">Stored only in this browser. Other users of a shared device may see these details.</div>
                         </div>
 
                         <button type="submit" class="btn-primary">
@@ -626,6 +626,10 @@
                 });
                 remember.checked = true;
             }
+
+            remember.addEventListener('change', () => {
+                if (!remember.checked) invoiceBuyerStorage.clear(localStorage);
+            });
 
             form.addEventListener('submit', () => {
                 if (!wantsR1.checked) return;

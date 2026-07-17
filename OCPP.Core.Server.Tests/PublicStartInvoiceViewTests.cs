@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -27,19 +28,36 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("invoiceBuyerStorage.load", view);
             Assert.Contains("invoiceBuyerStorage.save", view);
             Assert.Contains("invoiceBuyerStorage.clear", view);
+            Assert.Contains("data-i18n=\"start.rememberInvoiceBuyer\"", view);
+            Assert.Contains("data-i18n=\"start.rememberInvoiceBuyerWarning\"", view);
             Assert.DoesNotContain("Buyer data is collected after checkout", view);
+        }
+
+        [Fact]
+        public void PublicPortalTranslations_DescribePreCheckoutInvoiceConfirmation()
+        {
+            var script = ReadProjectFile("OCPP.Core.Management", "wwwroot", "js", "public-portal.js");
+
+            Assert.DoesNotContain("After checkout, review and confirm", script, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Buyer data is collected after checkout", script, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("submit company details now or later", script, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ReadView()
         {
+            return ReadProjectFile("OCPP.Core.Management", "Views", "Public", "Start.cshtml");
+        }
+
+        private static string ReadProjectFile(params string[] parts)
+        {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory != null)
             {
-                var path = Path.Combine(directory.FullName, "OCPP.Core.Management", "Views", "Public", "Start.cshtml");
+                var path = Path.Combine(new[] { directory.FullName }.Concat(parts).ToArray());
                 if (File.Exists(path)) return File.ReadAllText(path);
                 directory = directory.Parent;
             }
-            throw new FileNotFoundException("Could not locate Views/Public/Start.cshtml.");
+            throw new FileNotFoundException($"Could not locate {string.Join('/', parts)}.");
         }
     }
 }
