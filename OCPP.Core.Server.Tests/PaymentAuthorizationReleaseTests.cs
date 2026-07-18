@@ -284,6 +284,159 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0, intents.CancelCalls);
         }
 
+        [Fact]
+        public void CheckoutCompletedWebhook_ReconcilesCleanupBeforeWebhookRace()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            reservation.StripeCheckoutSessionId = "sess_late";
+            reservation.StripePaymentIntentId = null;
+            context.SaveChanges();
+
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            intents.GetResponse.Id = "pi_late";
+            var stripeEvent = new Event
+            {
+                Id = "evt_checkout_late",
+                Type = EventTypes.CheckoutSessionCompleted,
+                Data = new EventData
+                {
+                    Object = new Session
+                    {
+                        Id = "sess_late",
+                        PaymentIntentId = "pi_late",
+                        PaymentStatus = "paid"
+                    }
+                }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+
+            Assert.Equal(PaymentReservationStatus.Abandoned, reservation.Status);
+            Assert.Equal("pi_late", reservation.StripePaymentIntentId);
+            Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
+            Assert.Equal(1, intents.CancelCalls);
+            Assert.Equal(PaymentAuthorizationReleaseTrigger.CheckoutCompletedWebhook,
+                context.PaymentAuthorizationReleaseAttempts.Single().Trigger);
+            Assert.Single(context.StripeWebhookEvents);
+        }
+
+        [Fact]
+        public void CheckoutCompletedWebhook_PreservesNormalPendingAuthorizationFlow()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.Pending);
+            reservation.StripeCheckoutSessionId = "sess_normal";
+            reservation.StripePaymentIntentId = null;
+            context.SaveChanges();
+            var intents = new ReleasePaymentIntentService();
+            var stripeEvent = new Event
+            {
+                Id = "evt_checkout_normal",
+                Type = EventTypes.CheckoutSessionCompleted,
+                Data = new EventData
+                {
+                    Object = new Session
+                    {
+                        Id = "sess_normal",
+                        PaymentIntentId = "pi_normal",
+                        PaymentStatus = "paid"
+                    }
+                }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+
+            Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
+            Assert.Equal("pi_normal", reservation.StripePaymentIntentId);
+            Assert.Null(reservation.AuthorizationReleaseState);
+            Assert.Equal(0, intents.GetCalls);
+            Assert.Equal(0, intents.CancelCalls);
+        }
+
+        [Fact]
+        public void AmountCapturableWebhook_ReconcilesArmedTerminalReservation()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var stripeEvent = new Event
+            {
+                Id = "evt_capturable",
+                Type = "payment_intent.amount_capturable_updated",
+                Data = new EventData
+                {
+                    Object = new PaymentIntent
+                    {
+                        Id = reservation.StripePaymentIntentId,
+                        Status = "requires_capture",
+                        AmountCapturable = 500,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["reservation_id"] = reservation.ReservationId.ToString()
+                        }
+                    }
+                }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+
+            Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
+            Assert.Equal(1, intents.CancelCalls);
+            Assert.Equal(PaymentAuthorizationReleaseTrigger.AmountCapturableWebhook,
+                context.PaymentAuthorizationReleaseAttempts.Single().Trigger);
+        }
+
+        [Fact]
+        public void AmountCapturableWebhook_BeforeCleanupDoesNotReleaseActiveReservation()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.Pending);
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var stripeEvent = new Event
+            {
+                Id = "evt_capturable_early",
+                Type = "payment_intent.amount_capturable_updated",
+                Data = new EventData
+                {
+                    Object = intents.GetResponse
+                }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+
+            Assert.Equal(PaymentReservationStatus.Pending, reservation.Status);
+            Assert.Null(reservation.AuthorizationReleaseState);
+            Assert.Equal(0, intents.GetCalls);
+            Assert.Equal(0, intents.CancelCalls);
+        }
+
+        [Fact]
+        public void AmountCapturableWebhook_DuplicateDeliveryDoesNotRepeatRelease()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var stripeEvent = new Event
+            {
+                Id = "evt_capturable_duplicate",
+                Type = "payment_intent.amount_capturable_updated",
+                Data = new EventData { Object = intents.GetResponse }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+
+            Assert.Equal(1, intents.CancelCalls);
+            Assert.Single(context.PaymentAuthorizationReleaseAttempts);
+            Assert.Single(context.StripeWebhookEvents);
+        }
+
         private static OCPPCoreContext CreateContext()
         {
             var options = new DbContextOptionsBuilder<OCPPCoreContext>()
@@ -337,7 +490,8 @@ namespace OCPP.Core.Server.Tests
 
         private static StripePaymentCoordinator CreateCoordinator(
             ReleasePaymentIntentService intents,
-            IDictionary<string, string?>? settings = null)
+            IDictionary<string, string?>? settings = null,
+            Event? stripeEvent = null)
         {
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(settings ?? new Dictionary<string, string?>())
@@ -348,13 +502,14 @@ namespace OCPP.Core.Server.Tests
                 {
                     Enabled = true,
                     ApiKey = "test",
-                    ReturnBaseUrl = "https://return"
+                    ReturnBaseUrl = "https://return",
+                    WebhookSecret = "whsec_test"
                 }),
                 Options.Create(new PaymentFlowOptions()),
                 NullLogger<StripePaymentCoordinator>.Instance,
                 new ReleaseSessionService(),
                 intents,
-                new ReleaseEventFactory(),
+                new ReleaseEventFactory { EventToReturn = stripeEvent ?? new Event() },
                 () => Now,
                 configuration: configuration);
         }
@@ -406,7 +561,9 @@ namespace OCPP.Core.Server.Tests
 
     internal sealed class ReleaseEventFactory : IStripeEventFactory
     {
+        public Event EventToReturn { get; set; } = new();
+
         public Event ConstructEvent(string payload, string signatureHeader, string webhookSecret, bool throwOnApiVersionMismatch = true) =>
-            throw new NotImplementedException();
+            EventToReturn;
     }
 }

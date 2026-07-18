@@ -1768,6 +1768,9 @@ namespace OCPP.Core.Server.Payments
                 case EventTypes.PaymentIntentPaymentFailed:
                     linkedReservationId = HandlePaymentFailed(dbContext, stripeEvent);
                     break;
+                case "payment_intent.amount_capturable_updated":
+                    linkedReservationId = HandleAmountCapturableUpdated(dbContext, stripeEvent);
+                    break;
                 default:
                     _logger.LogDebug("Unhandled Stripe event type: {Type}", stripeEvent.Type);
                     break;
@@ -1840,8 +1843,72 @@ namespace OCPP.Core.Server.Payments
 
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
+
+            if (IsArmedTerminalAuthorizationRelease(reservation))
+            {
+                ReconcileTerminalPaymentAuthorization(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseTrigger.CheckoutCompletedWebhook);
+            }
+
             return reservation.ReservationId;
         }
+
+        private Guid? HandleAmountCapturableUpdated(OCPPCoreContext dbContext, Event stripeEvent)
+        {
+            var paymentIntent = stripeEvent.Data.Object as PaymentIntent;
+            if (paymentIntent == null || string.IsNullOrWhiteSpace(paymentIntent.Id)) return null;
+
+            var reservation = dbContext.ChargePaymentReservations
+                .FirstOrDefault(candidate => candidate.StripePaymentIntentId == paymentIntent.Id);
+
+            if (reservation == null &&
+                paymentIntent.Metadata != null &&
+                paymentIntent.Metadata.TryGetValue("reservation_id", out var providerReservationId) &&
+                Guid.TryParse(providerReservationId, out var reservationId))
+            {
+                reservation = dbContext.ChargePaymentReservations.Find(reservationId);
+            }
+
+            if (reservation == null)
+            {
+                _logger.LogWarning(
+                    "Stripe/Webhook => Capturable payment intent reservation not found paymentIntent={PaymentIntentId}",
+                    paymentIntent.Id);
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
+            {
+                reservation.StripePaymentIntentId = paymentIntent.Id;
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+            }
+            else if (!string.Equals(reservation.StripePaymentIntentId, paymentIntent.Id, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Stripe/Webhook => Capturable payment intent does not match reservation={ReservationId}",
+                    reservation.ReservationId);
+                return reservation.ReservationId;
+            }
+
+            if (IsArmedTerminalAuthorizationRelease(reservation))
+            {
+                ReconcileTerminalPaymentAuthorization(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseTrigger.AmountCapturableWebhook);
+            }
+
+            return reservation.ReservationId;
+        }
+
+        private static bool IsArmedTerminalAuthorizationRelease(ChargePaymentReservation reservation) =>
+            reservation != null &&
+            PaymentAuthorizationReleaseState.IsArmed(reservation.AuthorizationReleaseState) &&
+            (string.Equals(reservation.Status, PaymentReservationStatus.Abandoned, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(reservation.Status, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase));
 
         private Guid? HandleCheckoutExpired(OCPPCoreContext dbContext, Event stripeEvent)
         {
