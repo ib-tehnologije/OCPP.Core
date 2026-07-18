@@ -84,6 +84,36 @@ test("buildDemoEnvironment can target each loopback application", () => {
   assert.equal(buildDemoEnvironment(runtime, "management").ServerApiUrl, runtime.serverApiBaseUrl);
 });
 
+test("connectInvoiceDemoChargePoint brings the local fixture charger online", async () => {
+  const calls = [];
+  const driver = {
+    async connect() {
+      calls.push("connect");
+    },
+  };
+  const runtime = {
+    serverWsBase: "ws://127.0.0.1:28181/OCPP",
+  };
+
+  const connected = await invoiceDemoRunner.connectInvoiceDemoChargePoint(runtime, (options) => {
+    calls.push(options);
+    return driver;
+  });
+
+  assert.equal(connected, driver);
+  assert.deepEqual(calls, [
+    {
+      chargePointId: "INVOICE-DEMO-LOCAL",
+      chargeTagId: "DEMO-TAG-1",
+      connectorId: 1,
+      protocol: "1.6",
+      scenario: "live_meter_progress",
+      serverWsBase: runtime.serverWsBase,
+    },
+    "connect",
+  ]);
+});
+
 test("assertPrivateArtifactDirectory rejects repository paths", () => {
   const repoRoot = "/work/ocpp-core";
 
@@ -134,7 +164,8 @@ test("verifyPersistedBuyerSnapshots requires exact Czech and Croatian database s
   assert.equal(typeof invoiceDemoRunner.verifyPersistedBuyerSnapshots, "function");
   const rows = [
     {
-      ReservationId: "10000000-0000-4000-8000-000000000001",
+      ReservationId: "20000000-0000-4000-8000-000000000001",
+      ConnectorId: 1,
       InvoiceBuyerCountry: "CZ",
       InvoiceBuyerCompanyName: "Example Praha s.r.o.",
       InvoiceBuyerStreet: "Testovaci 10",
@@ -147,7 +178,8 @@ test("verifyPersistedBuyerSnapshots requires exact Czech and Croatian database s
       InvoiceBuyerConfirmedAtUtc: "2026-07-15T10:00:00Z",
     },
     {
-      ReservationId: "10000000-0000-4000-8000-000000000002",
+      ReservationId: "20000000-0000-4000-8000-000000000002",
+      ConnectorId: 2,
       InvoiceBuyerCountry: "HR",
       InvoiceBuyerCompanyName: "Primjer Zagreb d.o.o.",
       InvoiceBuyerStreet: "Testna ulica 20",
@@ -160,14 +192,21 @@ test("verifyPersistedBuyerSnapshots requires exact Czech and Croatian database s
       InvoiceBuyerConfirmedAtUtc: "2026-07-15T10:01:00Z",
     },
   ];
+  let verificationSql;
 
   assert.deepEqual(
-    await invoiceDemoRunner.verifyPersistedBuyerSnapshots("/tmp/demo.sqlite", { query: async () => rows }),
+    await invoiceDemoRunner.verifyPersistedBuyerSnapshots("/tmp/demo.sqlite", { query: async (_databasePath, sql) => {
+      verificationSql = sql;
+      return rows;
+    } }),
     { croatianBuyerSnapshotPersisted: true, czechBuyerSnapshotPersisted: true },
   );
+  assert.match(verificationSql, /ChargePointId\s*=\s*'INVOICE-DEMO-LOCAL'/);
+  assert.match(verificationSql, /ConnectorId\s+IN\s*\(1,\s*2\)/);
+  assert.match(verificationSql, /InvoiceBuyerConfirmedAtUtc\s+IS\s+NOT\s+NULL/);
   await assert.rejects(
     invoiceDemoRunner.verifyPersistedBuyerSnapshots("/tmp/demo.sqlite", {
-      query: async () => rows.map((row) => row.ReservationId.endsWith("0001")
+      query: async () => rows.map((row) => row.ConnectorId === 1
         ? { ...row, InvoiceBuyerCity: "Brno" }
         : row),
     }),
@@ -175,7 +214,7 @@ test("verifyPersistedBuyerSnapshots requires exact Czech and Croatian database s
   );
   await assert.rejects(
     invoiceDemoRunner.verifyPersistedBuyerSnapshots("/tmp/demo.sqlite", {
-      query: async () => rows.map((row) => row.ReservationId.endsWith("0002")
+      query: async () => rows.map((row) => row.ConnectorId === 2
         ? { ...row, InvoiceBuyerIdentifierIsVatRegistration: null }
         : row),
     }),
@@ -191,17 +230,115 @@ test("verifyNoPostCheckoutBuyerControls rejects late buyer entry", () => {
   assert.throws(() => invoiceDemoRunner.verifyNoPostCheckoutBuyerControls(1), /no post-checkout buyer controls.*1/i);
 });
 
+test("readMockStripeSnapshotCounts and verifyNoMockStripeCreateCall prove blocked submissions stop before Stripe", (t) => {
+  const diagnosticsDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-stripe-test-"));
+  t.after(() => fs.rmSync(diagnosticsDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(diagnosticsDir, "mock-stripe-store.json"), JSON.stringify({
+    sessions: [{ id: "session-1" }, { id: "session-2" }, { id: "session-3" }],
+    paymentIntents: [{ id: "intent-1" }, { id: "intent-2" }, { id: "intent-3" }],
+  }));
+
+  assert.deepEqual(invoiceDemoRunner.readMockStripeSnapshotCounts(diagnosticsDir), {
+    paymentIntentCount: 3,
+    sessionCount: 3,
+  });
+  assert.deepEqual(invoiceDemoRunner.verifyNoMockStripeCreateCall({
+    after: 3,
+    before: 3,
+    reason: "unconfirmed buyer data",
+  }), {
+    blockedBeforeMockStripe: true,
+    mockStripeSessionCount: 3,
+  });
+  assert.throws(
+    () => invoiceDemoRunner.verifyNoMockStripeCreateCall({
+      after: 4,
+      before: 3,
+      reason: "invalid Croatian OIB",
+    }),
+    /invalid Croatian OIB.*created 1 mock Stripe session/i,
+  );
+});
+
+test("inspectBuyerBrowserState requires buyer-free storage and empty fresh-start fields", async () => {
+  const values = new Map([
+    ["#buyerCompanyName", ""],
+    ["#buyerStreet", ""],
+    ["#buyerPostalCode", ""],
+    ["#buyerCity", ""],
+    ["#buyerEmail", ""],
+    ["#buyerTaxIdentifier", ""],
+    ["#buyerRegistrationNumber", ""],
+  ]);
+  const page = {
+    evaluate: async () => ({
+      localStorageEntries: [["publicPortalLang", "en"]],
+      sessionStorageEntries: [],
+    }),
+    locator: (selector) => ({ inputValue: async () => values.get(selector) }),
+  };
+
+  assert.deepEqual(await invoiceDemoRunner.inspectBuyerBrowserState(page, {
+    buyerValues: ["Example Praha s.r.o.", "CZ00000001", "invoice-prague@example.test"],
+  }), {
+    buyerBrowserStorageAbsent: true,
+    freshStartBuyerFieldsEmpty: true,
+    localStorageKeys: ["publicPortalLang"],
+    sessionStorageKeys: [],
+  });
+
+  values.set("#buyerEmail", "invoice-prague@example.test");
+  await assert.rejects(
+    () => invoiceDemoRunner.inspectBuyerBrowserState(page, {
+      buyerValues: ["Example Praha s.r.o.", "CZ00000001", "invoice-prague@example.test"],
+    }),
+    /fresh browser session.*buyerEmail/i,
+  );
+});
+
+test("concatenateRecordedVideos uses ffmpeg concat copy and removes its list", () => {
+  const calls = [];
+  const listPath = "/tmp/invoice-demo-concat.txt";
+  invoiceDemoRunner.concatenateRecordedVideos(
+    ["/tmp/ui-part-1.webm", "/tmp/ui-part-2.webm"],
+    "/tmp/ui-walkthrough.webm",
+    {
+      concatListPath: listPath,
+      remove: (...args) => calls.push(["remove", ...args]),
+      run: (...args) => {
+        calls.push(["run", ...args]);
+        return { status: 0, stderr: "" };
+      },
+      write: (...args) => calls.push(["write", ...args]),
+    },
+  );
+
+  assert.deepEqual(calls[0], [
+    "write",
+    listPath,
+    "file '/tmp/ui-part-1.webm'\nfile '/tmp/ui-part-2.webm'\n",
+  ]);
+  assert.deepEqual(calls[1], [
+    "run",
+    "ffmpeg",
+    ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", "/tmp/ui-walkthrough.webm"],
+    { encoding: "utf8", stdio: "pipe" },
+  ]);
+  assert.deepEqual(calls[2], ["remove", listPath, { force: true }]);
+});
+
 test("verifyArtifactFiles requires every expected PNG and both accepted WebM recordings", (t) => {
   assert.equal(typeof invoiceDemoRunner.verifyArtifactFiles, "function");
   const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoice-demo-artifacts-test-"));
   t.after(() => fs.rmSync(artifactDir, { recursive: true, force: true }));
   const screenshots = [
     "01-company-invoice-choice.png",
-    "02-czech-company-review.png",
-    "03-czech-company-confirmed.png",
-    "04-croatian-invalid-oib.png",
+    "02-foreign-unconfirmed-blocked.png",
+    "03-mock-stripe-handoff.png",
+    "04-croatian-invalid-oib-rejected.png",
     "05-croatian-valid-oib-ready.png",
-    "06-issued-invoice-read-only.png",
+    "06-new-browser-session-empty.png",
+    "07-issued-invoice-read-only.png",
   ];
   for (const filename of [...screenshots, "ui-walkthrough.webm", "billing-rules-explainer.webm"]) {
     fs.writeFileSync(path.join(artifactDir, filename), "content");
@@ -221,10 +358,10 @@ test("verifyArtifactFiles requires every expected PNG and both accepted WebM rec
     screenshotsNonEmpty: true,
     uiWalkthroughDurationAccepted: true,
     uiWalkthroughSeconds: 210,
-    verifiedScreenshotCount: 6,
+    verifiedScreenshotCount: 7,
     videosNonEmpty: true,
   });
-  fs.writeFileSync(path.join(artifactDir, "02-czech-company-review.png"), "");
+  fs.writeFileSync(path.join(artifactDir, "02-foreign-unconfirmed-blocked.png"), "");
   assert.throws(
     () => invoiceDemoRunner.verifyArtifactFiles(artifactDir, {
       screenshots,
@@ -235,7 +372,7 @@ test("verifyArtifactFiles requires every expected PNG and both accepted WebM rec
     }, {
       readDuration: () => 210,
     }),
-    /02-czech-company-review\.png.*nonempty/i,
+    /02-foreign-unconfirmed-blocked\.png.*nonempty/i,
   );
 });
 
@@ -271,6 +408,7 @@ test("assertPrivateArtifactDirectory rejects an external symlink into the reposi
 
 test("buildChromiumLaunchOptions falls back to an installed system Chrome", () => {
   assert.deepEqual(buildChromiumLaunchOptions({ bundledExists: true, chromeExists: true }), {
+    channel: "chrome",
     headless: true,
   });
   assert.deepEqual(buildChromiumLaunchOptions({ bundledExists: false, chromeExists: true }), {
@@ -563,6 +701,28 @@ test("moveCursorTo visibly moves and clicks at the locator centre", async () => 
   ]);
 });
 
+test("activateWithVisibleCursor uses locator actionability after moving the pointer", async () => {
+  const calls = [];
+  const page = {
+    mouse: {
+      move: async (...args) => calls.push(["move", ...args]),
+    },
+  };
+  const locator = {
+    boundingBox: async () => ({ height: 40, width: 100, x: 20, y: 30 }),
+    click: async () => calls.push(["locator-click"]),
+    scrollIntoViewIfNeeded: async () => calls.push(["scroll"]),
+  };
+
+  await invoiceDemoRunner.activateWithVisibleCursor(page, locator);
+
+  assert.deepEqual(calls, [
+    ["scroll"],
+    ["move", 70, 50, { steps: 24 }],
+    ["locator-click"],
+  ]);
+});
+
 test("performBuyerEntry uses paced real interactions for each field", async () => {
   const calls = [];
   const states = new Map();
@@ -570,6 +730,7 @@ test("performBuyerEntry uses paced real interactions for each field", async () =
     locator(selector) {
       return {
         boundingBox: async () => ({ height: 20, width: 80, x: 10, y: 10 }),
+        click: async () => calls.push([selector, "click"]),
         fill: async (value) => calls.push([selector, "fill", value]),
         isChecked: async () => states.get(selector) ?? false,
         pressSequentially: async (value, options) => calls.push([selector, "type", value, options]),
@@ -605,6 +766,22 @@ test("performBuyerEntry uses paced real interactions for each field", async () =
   assert.ok(calls.filter((call) => call[0] === "wait").every(([, milliseconds]) => milliseconds >= 1_500));
 });
 
+test("browser recording exercises blocked attempts, mock handoff, a fresh context, and concatenation", () => {
+  const source = fs.readFileSync(
+    path.resolve("Simulators/playwright/invoice_demo.mjs"),
+    "utf8",
+  );
+
+  assert.match(source, /unconfirmedAttemptBlockedBeforeMockStripe\s*:/);
+  assert.match(source, /invalidOibAttemptBlockedBeforeMockStripe\s*:/);
+  assert.match(source, /mockStripeHandoffShown\s*:/);
+  assert.match(source, /inspectBuyerBrowserState\(freshPage/);
+  assert.match(source, /browser\.newContext\(/);
+  assert.match(source, /concatenateRecordedVideos\(\s*\[/);
+  assert.match(source, /waitForURL\(\/\\\/Payments\\\/MockCheckout/);
+  assert.match(source, /server rejected the invalid Croatian OIB/i);
+});
+
 test("readMediaDurationSeconds parses a finite ffprobe duration", () => {
   assert.equal(invoiceDemoRunner.readMediaDurationSeconds("/tmp/demo.webm", {
     run: (command, args) => {
@@ -633,6 +810,13 @@ test("artifact manifest provides replacement viewing order and marks the legacy 
       videosNonEmpty: true,
     },
     browserArtifacts: {
+      evidence: {
+        buyerBrowserStorageAbsent: true,
+        freshStartBuyerFieldsEmpty: true,
+        invalidOibAttemptBlockedBeforeMockStripe: true,
+        mockStripeHandoffShown: true,
+        unconfirmedAttemptBlockedBeforeMockStripe: true,
+      },
       postCheckoutBuyerEntry: { postCheckoutBuyerControlsAbsent: true },
       screenshots: ["01-company-invoice-choice.png"],
       videos: {
@@ -658,6 +842,11 @@ test("artifact manifest provides replacement viewing order and marks the legacy 
   }]);
   assert.equal(manifest.verification.uiWalkthroughSeconds, 210);
   assert.equal(manifest.verification.billingExplainerSeconds, 75);
+  assert.equal(manifest.verification.unconfirmedAttemptBlockedBeforeMockStripe, true);
+  assert.equal(manifest.verification.invalidOibAttemptBlockedBeforeMockStripe, true);
+  assert.equal(manifest.verification.mockStripeHandoffShown, true);
+  assert.equal(manifest.verification.buyerBrowserStorageAbsent, true);
+  assert.equal(manifest.verification.freshStartBuyerFieldsEmpty, true);
 });
 
 test("demo stack builds once before both no-build application launches", () => {
