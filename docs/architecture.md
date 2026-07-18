@@ -41,7 +41,7 @@ Location: `OCPP.Core.Database/`
 - `OCPPCoreContext.cs` defines the EF Core model and relationships.
 - `DbContextExtensions.cs` selects SQL Server when `ConnectionStrings:SqlServer` exists, otherwise SQLite when `ConnectionStrings:SQLite` exists.
 - `Migrations/` contains SQL Server-oriented EF migrations and model snapshot.
-- `ChargePaymentReservation*`, `StripeWebhookEvent`, and `InvoiceSubmissionLog` support payment/invoice lifecycle state.
+- `ChargePaymentReservation*`, `PaymentAuthorizationReleaseAttempt`, `StripeWebhookEvent`, and `InvoiceSubmissionLog` support payment/invoice lifecycle state and release auditability.
 
 ### Extensions
 
@@ -87,6 +87,7 @@ Locations: `OCPP.Core.Server.Tests/`, `OCPP.Core.Test/`, `Simulators/`
 4. The server payment coordinator creates or resumes a reservation and may redirect to Stripe or use mock services in test mode.
 5. After checkout confirmation, server code requests charger start through the live OCPP session and updates reservation/transaction state.
 6. Public status pages poll server payment status and can request stop or R1 invoice data.
+7. When a newly terminal reservation still owns an uncaptured authorization, the server persists an armed release state before provider work. Webhooks and the cleanup sweep converge on the same strict, idempotent reconciler; retry state survives restarts and historical unarmed rows stay outside the workflow.
 
 ### Database Flow
 

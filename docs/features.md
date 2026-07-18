@@ -128,12 +128,15 @@ Known behavior:
 - Idle fee calculation and idle warning emails are supported.
 - Sessions with missing, inconsistent, or below-threshold delivered energy are treated as no-charge sessions under `Payments:MinimumSessionFeeKwh` (default `1.0` kWh). The uncaptured payment intent is cancelled, billable line amounts are zeroed, and invoice integration plus paid-completion emails are skipped.
 - Positive final capture amounts at or above the delivered-energy threshold but below `Payments:MinimumChargeAmountCents` (default `50`) are cancelled before Stripe capture. Exactly the configured minimum remains capturable; invoice integration and completion emails only run after a successful paid completion.
+- New terminal reservations that still need an uncaptured authorization released are explicitly armed for reconciliation. The coordinator re-reads Stripe state, verifies reservation ownership, excludes active/captured/invoiced cases, and cancels only a matching `requires_capture` intent with a positive capturable amount.
+- Release reconciliation is idempotent across checkout and capturable-amount webhooks, cleanup sweeps, transient provider failures, and server restarts. Attempts and sanitized outcomes are stored for support review. Existing terminal rows are not backfilled or selected unless they were explicitly armed by the new flow.
 - Free-tag access can bypass paid flow for configured tag/charge point combinations.
 
 Important edge cases:
 
 - Reservation, transaction, connector, and Stripe state must stay synchronized.
 - Cleanup services run on intervals and can change visible state after timeouts.
+- A `ReviewRequired` or `PermanentFailure` authorization-release state is terminal for automated retries and requires operator investigation; the application never captures or invoices as part of release reconciliation.
 - Server API and UI status pages must be validated together after payment changes.
 
 ## Invoice and Email Integrations

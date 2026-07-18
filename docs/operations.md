@@ -59,7 +59,7 @@ Important configuration areas:
 | Database | `ConnectionStrings:SqlServer`, `ConnectionStrings:SQLite`, `AutoMigrateDB` |
 | Server API | `ApiKey`, `ServerApiUrl` in management |
 | OCPP | `MessageDumpDir`, `DbMessageLog`, `ShowIndexInfo`, `MaxMessageSize`, `ValidateMessages`, `DenyConcurrentTx`, `HeartBeatInterval` |
-| Maintenance | `Maintenance:PendingPaymentTimeoutMinutes`, `Maintenance:ReservationTimeoutMinutes`, `Maintenance:StatusReleaseMinutes`, `Maintenance:CleanupIntervalSeconds`, `Maintenance:IdleWarningSweepSeconds`, `Maintenance:AvailableStatusOpenTransactionGraceMinutes` |
+| Maintenance | `Maintenance:PendingPaymentTimeoutMinutes`, `Maintenance:ReservationTimeoutMinutes`, `Maintenance:StatusReleaseMinutes`, `Maintenance:CleanupIntervalSeconds`, `Maintenance:IdleWarningSweepSeconds`, `Maintenance:AvailableStatusOpenTransactionGraceMinutes`, `Maintenance:AuthorizationReleaseMaxAttempts`, `Maintenance:AuthorizationReleaseRetryBaseMinutes` |
 | Payments | `Payments:RequirePreparingBeforeRemoteStart`, `Payments:RemoteStartIdTokenType`, `Payments:StartWindowMinutes`, `Payments:MinimumSessionFeeKwh`, `Payments:MinimumChargeAmountCents`, `Payments:IdleFeeExcludedWindow`, `Payments:IdleFeeExcludedTimeZoneId`, `Payments:IdleAutoStopMinutes`, `Payments:ChargerResponseTimeoutMs` |
 | Stripe | `Stripe:Enabled`, `Stripe:UseMockServices`, `Stripe:ApiKey`, `Stripe:WebhookSecret`, `Stripe:AllowInsecureWebhooks`, `Stripe:Currency`, `Stripe:ReturnBaseUrl`, `Stripe:ProductName`, `Stripe:MockCustomerEmail`, `Stripe:MockDiagnosticsDirectory` |
 | Notifications | `Notifications:EnableCustomerEmails`, `Notifications:IdleWarningLeadMinutes`, `Notifications:SinkDirectory`, `Notifications:FromAddress`, `Notifications:FromName`, `Notifications:ReplyToAddress`, `Notifications:BccAddress`, `Notifications:Smtp:*` |
@@ -90,6 +90,8 @@ SQL Server:
 - `make migrate` scaffolds a timestamped migration name.
 - Always run `make check-migration-metadata` after migration changes.
 
+Migration `AddPaymentAuthorizationReleaseReconciliation` adds nullable release-summary fields to `ChargePaymentReservation` and an append-only `PaymentAuthorizationReleaseAttempt` audit table. Nullable state is intentional: existing terminal reservations remain unarmed, so deploying the migration does not start historical cancellation or remediation.
+
 SQLite:
 
 - Used for local/test runs.
@@ -106,7 +108,7 @@ Unknown / verify:
 Server app:
 
 - `StartupMaintenance.Run` executes on startup to repair reservation active keys, abandon stale pending reservations, and release stale connector statuses.
-- `PaymentReservationCleanupService` runs periodically to abandon stale pending reservations, time out starts, recover open transactions on available connectors, and complete waiting-for-disconnect reservations.
+- `PaymentReservationCleanupService` runs periodically to abandon stale pending reservations, time out starts, recover open transactions on available connectors, complete waiting-for-disconnect reservations, and retry due authorization releases that were explicitly armed by the application.
 - `IdleFeeWarningEmailService` periodically sends customer idle-fee warning emails when notifications and Stripe are configured.
 - Hangfire server starts only when SQL Server connection string is configured. The server uses a configurable queue, defaulting to `payments`.
 
@@ -151,6 +153,8 @@ Unknown / verify:
 - SQL Server migrations are not validated by SQLite E2E runs.
 - `Payments:MinimumSessionFeeKwh` defaults to `1.0`. Completed sessions with missing, inconsistent, or lower delivered-energy readings are no-charge: billable line amounts are zeroed, the uncaptured payment intent is cancelled, and invoice creation plus paid-completion emails are skipped.
 - `Payments:MinimumChargeAmountCents` defaults to `50`. Positive final amounts at or above the delivered-energy threshold but below the configured minimum cancel the uncaptured payment intent and skip invoice creation and paid-completion emails. Exactly the configured minimum remains capturable.
+- Authorization release retries default to four total attempts with a one-minute exponential base delay. Set `Maintenance:AuthorizationReleaseMaxAttempts` and `Maintenance:AuthorizationReleaseRetryBaseMinutes` to change those bounds. Provider state and reservation ownership are rechecked on every attempt; active, captured, invoiced, succeeded, or ambiguous cases are not cancelled automatically.
+- `payment_intent.amount_capturable_updated` must remain enabled on the Stripe webhook endpoint. It closes the race where a terminal reservation becomes capturable after checkout/cleanup ordering, while webhook-event deduplication prevents repeat cancellation.
 - Public payment behavior depends on server, management, database, Stripe/mock Stripe, and time-based cleanup settings.
 - OCPP schema validation is optional and logs/continues on validation errors.
 - Do not expose Hangfire dashboard or appsettings-derived secrets without deployment-specific access controls.
