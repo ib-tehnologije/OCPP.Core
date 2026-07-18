@@ -1134,6 +1134,11 @@ namespace OCPP.Core.Server.Payments
                 idleSnapshot.TotalMinutes,
                 idleSnapshot.TotalAmount);
 
+            var authorizationReleaseExpected = shouldNoChargeForDeliveredEnergy ||
+                                               amountToCapture <= 0 ||
+                                               (minimumChargeAmountCents > 0 &&
+                                                amountToCapture < minimumChargeAmountCents);
+
             try
             {
                 var paymentIntent = _paymentIntentService.Get(reservation.StripePaymentIntentId);
@@ -1149,6 +1154,7 @@ namespace OCPP.Core.Server.Payments
                             minimumChargeAmountCents > 0 &&
                             finalCaptureAmount < minimumChargeAmountCents)
                         {
+                            authorizationReleaseExpected = true;
                             _paymentIntentService.Cancel(
                                 paymentIntent.Id,
                                 BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
@@ -1187,6 +1193,7 @@ namespace OCPP.Core.Server.Payments
                         }
                         else
                         {
+                            authorizationReleaseExpected = true;
                             _paymentIntentService.Cancel(
                                 paymentIntent.Id,
                                 BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
@@ -1203,6 +1210,7 @@ namespace OCPP.Core.Server.Payments
                     }
                     else
                     {
+                        authorizationReleaseExpected = true;
                         _paymentIntentService.Cancel(
                             paymentIntent.Id,
                             BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
@@ -1255,9 +1263,27 @@ namespace OCPP.Core.Server.Payments
             }
             catch (StripeException sex)
             {
-                _logger.LogError(sex, "Stripe capture failed for reservation {ReservationId}", reservation.ReservationId);
+                var providerErrorCode = sex.StripeError?.Code ?? sex.StripeError?.Type ?? "stripe_error";
+                var sanitizedProviderErrorCode = Truncate(SanitizeProviderError(providerErrorCode), 100);
+                var sanitizedProviderError = SanitizeProviderError(
+                    $"{providerErrorCode}: {sex.StripeError?.Message ?? sex.Message}");
+                _logger.LogError(
+                    "Stripe capture failed for reservation={ReservationId} providerCode={ProviderCode} providerError={ProviderError}",
+                    reservation.ReservationId,
+                    sanitizedProviderErrorCode,
+                    sanitizedProviderError);
                 reservation.Status = PaymentReservationStatus.Failed;
-                reservation.LastError = sex.Message;
+                if (authorizationReleaseExpected)
+                {
+                    reservation.LastError = "Payment authorization release could not be completed automatically.";
+                    reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
+                    reservation.AuthorizationReleaseNextAttemptAtUtc = null;
+                    reservation.AuthorizationReleaseLastError = sanitizedProviderError;
+                }
+                else
+                {
+                    reservation.LastError = sanitizedProviderError;
+                }
                 reservation.UpdatedAtUtc = now;
                 dbContext.SaveChanges();
             }
@@ -1768,6 +1794,9 @@ namespace OCPP.Core.Server.Payments
                 case EventTypes.PaymentIntentPaymentFailed:
                     linkedReservationId = HandlePaymentFailed(dbContext, stripeEvent);
                     break;
+                case "payment_intent.amount_capturable_updated":
+                    linkedReservationId = HandleAmountCapturableUpdated(dbContext, stripeEvent);
+                    break;
                 default:
                     _logger.LogDebug("Unhandled Stripe event type: {Type}", stripeEvent.Type);
                     break;
@@ -1840,8 +1869,72 @@ namespace OCPP.Core.Server.Payments
 
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
+
+            if (IsArmedTerminalAuthorizationRelease(reservation))
+            {
+                ReconcileTerminalPaymentAuthorization(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseTrigger.CheckoutCompletedWebhook);
+            }
+
             return reservation.ReservationId;
         }
+
+        private Guid? HandleAmountCapturableUpdated(OCPPCoreContext dbContext, Event stripeEvent)
+        {
+            var paymentIntent = stripeEvent.Data.Object as PaymentIntent;
+            if (paymentIntent == null || string.IsNullOrWhiteSpace(paymentIntent.Id)) return null;
+
+            var reservation = dbContext.ChargePaymentReservations
+                .FirstOrDefault(candidate => candidate.StripePaymentIntentId == paymentIntent.Id);
+
+            if (reservation == null &&
+                paymentIntent.Metadata != null &&
+                paymentIntent.Metadata.TryGetValue("reservation_id", out var providerReservationId) &&
+                Guid.TryParse(providerReservationId, out var reservationId))
+            {
+                reservation = dbContext.ChargePaymentReservations.Find(reservationId);
+            }
+
+            if (reservation == null)
+            {
+                _logger.LogWarning(
+                    "Stripe/Webhook => Capturable payment intent reservation not found paymentIntent={PaymentIntentId}",
+                    paymentIntent.Id);
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
+            {
+                reservation.StripePaymentIntentId = paymentIntent.Id;
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+            }
+            else if (!string.Equals(reservation.StripePaymentIntentId, paymentIntent.Id, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Stripe/Webhook => Capturable payment intent does not match reservation={ReservationId}",
+                    reservation.ReservationId);
+                return reservation.ReservationId;
+            }
+
+            if (IsArmedTerminalAuthorizationRelease(reservation))
+            {
+                ReconcileTerminalPaymentAuthorization(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseTrigger.AmountCapturableWebhook);
+            }
+
+            return reservation.ReservationId;
+        }
+
+        private static bool IsArmedTerminalAuthorizationRelease(ChargePaymentReservation reservation) =>
+            reservation != null &&
+            PaymentAuthorizationReleaseState.IsArmed(reservation.AuthorizationReleaseState) &&
+            (string.Equals(reservation.Status, PaymentReservationStatus.Abandoned, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(reservation.Status, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase));
 
         private Guid? HandleCheckoutExpired(OCPPCoreContext dbContext, Event stripeEvent)
         {
@@ -2347,7 +2440,7 @@ namespace OCPP.Core.Server.Payments
         PaymentIntent Get(string id);
         PaymentIntent Update(string id, PaymentIntentUpdateOptions options, RequestOptions requestOptions = null);
         PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null);
-        void Cancel(string id, RequestOptions requestOptions = null);
+        PaymentIntent Cancel(string id, RequestOptions requestOptions = null);
     }
 
     internal interface IStripeEventFactory
@@ -2378,7 +2471,7 @@ namespace OCPP.Core.Server.Payments
 
         public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null) => _inner.Capture(id, options, requestOptions);
 
-        public void Cancel(string id, RequestOptions requestOptions = null) =>
+        public PaymentIntent Cancel(string id, RequestOptions requestOptions = null) =>
             _inner.Cancel(id, options: null, requestOptions: requestOptions);
     }
 

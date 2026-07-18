@@ -50,6 +50,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<PublicPortalSettings> PublicPortalSettings { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
         public virtual DbSet<ChargePaymentReservation> ChargePaymentReservations { get; set; }
+        public virtual DbSet<PaymentAuthorizationReleaseAttempt> PaymentAuthorizationReleaseAttempts { get; set; }
         public virtual DbSet<StripeWebhookEvent> StripeWebhookEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -188,6 +189,48 @@ namespace OCPP.Core.Database
                     .IsRequired();
 
                 entity.HasIndex(e => e.ProcessedAtUtc);
+            });
+
+            modelBuilder.Entity<PaymentAuthorizationReleaseAttempt>(entity =>
+            {
+                entity.HasKey(e => e.PaymentAuthorizationReleaseAttemptId);
+
+                entity.ToTable("PaymentAuthorizationReleaseAttempt");
+
+                entity.Property(e => e.StripePaymentIntentId)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.Trigger)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.ProviderStatus)
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.Outcome)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                entity.Property(e => e.ErrorCode)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.ErrorMessage)
+                    .HasMaxLength(500);
+
+                entity.HasIndex(e => new { e.ReservationId, e.AttemptNumber })
+                    .IsUnique()
+                    .HasDatabaseName("UX_AuthorizationReleaseAttempt_Reservation_Number");
+
+                entity.HasIndex(e => new { e.ReservationId, e.StartedAtUtc })
+                    .HasDatabaseName("IX_AuthorizationReleaseAttempt_Reservation_Started");
+
+                entity.HasIndex(e => e.NextRetryAtUtc)
+                    .HasDatabaseName("IX_AuthorizationReleaseAttempt_NextRetry");
+
+                entity.HasOne(e => e.Reservation)
+                    .WithMany()
+                    .HasForeignKey(e => e.ReservationId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<PublicPortalSettings>(entity =>
@@ -410,12 +453,17 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.InvoiceBuyerIdentifierIsVatRegistration);
                 entity.Property(e => e.InvoiceBuyerConfirmedAtUtc)
                     .IsConcurrencyToken();
+                entity.Property(e => e.AuthorizationReleaseState).HasMaxLength(50);
+                entity.Property(e => e.AuthorizationReleaseLastError).HasMaxLength(500);
 
                 entity.HasIndex(e => e.StripeCheckoutSessionId)
                     .HasDatabaseName("IX_PaymentReservations_StripeSession");
 
                 entity.HasIndex(e => e.StripePaymentIntentId)
                     .HasDatabaseName("IX_PaymentReservations_PaymentIntent");
+
+                entity.HasIndex(e => new { e.AuthorizationReleaseState, e.AuthorizationReleaseNextAttemptAtUtc })
+                    .HasDatabaseName("IX_PaymentReservations_AuthorizationReleaseDue");
 
                 entity.HasIndex(e => new { e.ChargePointId, e.ConnectorId, e.OcppIdTag })
                     .HasDatabaseName("IX_PaymentReservations_CpConnTag");

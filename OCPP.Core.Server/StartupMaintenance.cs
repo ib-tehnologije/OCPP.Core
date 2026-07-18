@@ -131,6 +131,8 @@ namespace OCPP.Core.Server
 
                 reservation.Status = PaymentReservationStatus.Abandoned;
                 reservation.LastError = "Auto-cancelled: stale pending reservation at startup";
+                reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
+                reservation.AuthorizationReleaseNextAttemptAtUtc = null;
                 reservation.UpdatedAtUtc = now;
             }
 

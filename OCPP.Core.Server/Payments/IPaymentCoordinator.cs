@@ -18,6 +18,14 @@ namespace OCPP.Core.Server.Payments
         PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request);
         void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason);
         void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason);
+        PaymentAuthorizationReleaseResult ReconcileTerminalPaymentAuthorization(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            string trigger) =>
+            new PaymentAuthorizationReleaseResult
+            {
+                Outcome = PaymentAuthorizationReleaseOutcome.SkippedNotEligible
+            };
         void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId);
         void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction);
         void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc);

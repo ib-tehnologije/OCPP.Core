@@ -98,36 +98,53 @@ namespace OCPP.Core.Server.Payments
 
             var availableOpenTransactions = await LoadAvailableOpenTransactionsAsync(db, now, token);
             var waitingForDisconnectReservations = await LoadWaitingForDisconnectAvailableReservationsAsync(db, now, token);
+            var inProgressTimeoutMinutes = Math.Clamp(
+                _configuration.GetValue<int?>("Maintenance:AuthorizationReleaseInProgressTimeoutMinutes") ?? 5,
+                1,
+                60);
+            var expiredInProgressCutoff = now.AddMinutes(-inProgressTimeoutMinutes);
+            var dueAuthorizationReleases = await db.ChargePaymentReservations
+                .Where(r =>
+                    (r.Status == PaymentReservationStatus.Abandoned ||
+                     r.Status == PaymentReservationStatus.Failed) &&
+                    (((r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.Pending ||
+                       r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.RetryScheduled) &&
+                      (!r.AuthorizationReleaseNextAttemptAtUtc.HasValue ||
+                       r.AuthorizationReleaseNextAttemptAtUtc.Value <= now)) ||
+                     (r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.InProgress &&
+                      (!r.AuthorizationReleaseLastAttemptAtUtc.HasValue ||
+                       r.AuthorizationReleaseLastAttemptAtUtc.Value <= expiredInProgressCutoff))))
+                .ToListAsync(token);
 
-            if (!stale.Any() && !timedOutStarts.Any() && !availableOpenTransactions.Any() && !waitingForDisconnectReservations.Any()) return;
+            if (!stale.Any() &&
+                !timedOutStarts.Any() &&
+                !availableOpenTransactions.Any() &&
+                !waitingForDisconnectReservations.Any() &&
+                !dueAuthorizationReleases.Any()) return;
 
             foreach (var reservation in stale)
             {
-                try
+                var previousStatus = reservation.Status;
+                var previousUpdatedAt = reservation.UpdatedAtUtc;
+                reservation.Status = PaymentReservationStatus.Abandoned;
+                const string cleanupMessage = "Auto-cancelled: stale reservation (background sweep)";
+                if (string.IsNullOrWhiteSpace(reservation.LastError))
                 {
-                    coordinator?.CancelPaymentIntentIfCancelable(db, reservation, "Reservation stale");
+                    reservation.LastError = cleanupMessage;
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "PaymentReservationCleanup => CancelPaymentIntent stale failed reservation={ReservationId}", reservation.ReservationId);
-                }
+                reservation.FailureCode = "CleanupTimeout";
+                reservation.FailureMessage = cleanupMessage;
+                reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
+                reservation.AuthorizationReleaseNextAttemptAtUtc = null;
+                reservation.UpdatedAtUtc = now;
 
                 _logger.LogInformation(
-                    "PaymentReservationCleanup => Cancelling stale reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} status={Status} lastUpdate={LastUpdate:u}",
+                    "PaymentReservationCleanup => Arming stale reservation for authorization release reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} previousStatus={Status} lastUpdate={LastUpdate:u}",
                     reservation.ReservationId,
                     reservation.ChargePointId,
                     reservation.ConnectorId,
-                    reservation.Status,
-                    reservation.UpdatedAtUtc);
-            }
-
-            foreach (var reservation in stale)
-            {
-                reservation.Status = PaymentReservationStatus.Abandoned;
-                reservation.LastError = "Auto-cancelled: stale reservation (background sweep)";
-                reservation.FailureCode = "CleanupTimeout";
-                reservation.FailureMessage = reservation.LastError;
-                reservation.UpdatedAtUtc = now;
+                    previousStatus,
+                    previousUpdatedAt);
             }
 
             foreach (var reservation in timedOutStarts)
@@ -208,7 +225,37 @@ namespace OCPP.Core.Server.Payments
                 }
             }
 
+            // Persist stale terminal state and arm the release before the strict reconciler
+            // calls the provider. A crash or restart leaves a durable candidate for the next sweep.
             await db.SaveChangesAsync(token);
+
+            if (coordinator != null)
+            {
+                var releaseCandidates = dueAuthorizationReleases
+                    .Concat(stale)
+                    .GroupBy(r => r.ReservationId)
+                    .Select(group => group.First())
+                    .ToList();
+
+                foreach (var reservation in releaseCandidates)
+                {
+                    try
+                    {
+                        coordinator.ReconcileTerminalPaymentAuthorization(
+                            db,
+                            reservation,
+                            PaymentAuthorizationReleaseTrigger.CleanupSweep);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "PaymentReservationCleanup => authorization release reconciliation failed reservation={ReservationId}",
+                            reservation.ReservationId);
+                    }
+                }
+            }
+
             if (stale.Any())
             {
                 _logger.LogInformation("PaymentReservationCleanupService => abandoned {Count} stale pending reservations (>{Timeout} min)", stale.Count(), pendingTimeoutMinutes);

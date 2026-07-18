@@ -74,6 +74,7 @@ Also inspect the generated migration and model snapshot manually for provider-sp
 
 - Keep migrations and `OCPPCoreContextModelSnapshot.cs` aligned with entity/model changes.
 - Run `scripts/check-mssql-migration-metadata.sh` after migration scaffolding.
+- For authorization-release changes, test webhook ordering, restart/due-retry behavior, ownership mismatches, active/captured/invoiced exclusions, provider retry limits, and historical unarmed rows.
 - Keep public docs current with config keys and validation commands.
 - Review checked runtime artifacts under `SQLite/` and `Simulators/playwright/` before adding new generated files.
 - Keep simulator scenarios in sync with payment and protocol behavior.

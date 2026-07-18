@@ -75,5 +75,11 @@ namespace OCPP.Core.Database
         public string InvoiceBuyerRegistrationNumber { get; set; }
         public bool? InvoiceBuyerIdentifierIsVatRegistration { get; set; }
         public DateTime? InvoiceBuyerConfirmedAtUtc { get; set; }
+        public string AuthorizationReleaseState { get; set; }
+        public int AuthorizationReleaseAttemptCount { get; set; }
+        public DateTime? AuthorizationReleaseLastAttemptAtUtc { get; set; }
+        public DateTime? AuthorizationReleaseNextAttemptAtUtc { get; set; }
+        public DateTime? AuthorizationReleasedAtUtc { get; set; }
+        public string AuthorizationReleaseLastError { get; set; }
     }
 }

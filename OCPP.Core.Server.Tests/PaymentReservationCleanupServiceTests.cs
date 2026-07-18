@@ -11,6 +11,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using Stripe;
+using Stripe.Checkout;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -18,7 +20,7 @@ namespace OCPP.Core.Server.Tests
     public class PaymentReservationCleanupServiceTests
     {
         [Fact]
-        public async Task CleanupAsync_AbandonsStalePendingReservation_AndRequestsCancel()
+        public async Task CleanupAsync_AbandonsStalePendingReservation_AndReconcilesAfterArming()
         {
             var coordinator = new RecordingPaymentCoordinator();
             using var provider = BuildProvider(
@@ -62,11 +64,253 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal(PaymentReservationStatus.Abandoned, reservation.Status);
                 Assert.Equal("CleanupTimeout", reservation.FailureCode);
                 Assert.Contains("Auto-cancelled", reservation.LastError);
+                Assert.Equal(PaymentAuthorizationReleaseState.Pending, reservation.AuthorizationReleaseState);
             }
 
-            Assert.Single(coordinator.CancelCalls);
-            Assert.Equal(reservationId, coordinator.CancelCalls[0].ReservationId);
-            Assert.Equal("Reservation stale", coordinator.CancelCalls[0].Reason);
+            Assert.Empty(coordinator.CancelCalls);
+            Assert.Single(coordinator.ReconcileCalls);
+            Assert.Equal(reservationId, coordinator.ReconcileCalls[0].ReservationId);
+            Assert.Equal(PaymentAuthorizationReleaseTrigger.CleanupSweep, coordinator.ReconcileCalls[0].Trigger);
+        }
+
+        [Fact]
+        public async Task CleanupAsync_PreservesSpecificProviderErrorWhenReservationBecomesAbandoned()
+        {
+            var coordinator = new RecordingPaymentCoordinator
+            {
+                ReconcileErrorToRecord = "Detailed provider timeout while releasing authorization."
+            };
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "1",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30"
+                });
+
+            var reservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP1",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG1",
+                    StripePaymentIntentId = "pi_stale_error",
+                    Status = PaymentReservationStatus.Pending,
+                    Currency = "eur",
+                    CreatedAtUtc = DateTime.UtcNow.AddHours(-2),
+                    UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
+                });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>());
+
+            await service.RunOnce();
+
+            using var verificationScope = provider.CreateScope();
+            var verificationDb = verificationScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+            var reservation = verificationDb.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentReservationStatus.Abandoned, reservation.Status);
+            Assert.Contains("Auto-cancelled", reservation.LastError);
+            Assert.Contains("Auto-cancelled", reservation.FailureMessage);
+            Assert.Equal(PaymentAuthorizationReleaseState.Pending, reservation.AuthorizationReleaseState);
+            Assert.Equal("Detailed provider timeout while releasing authorization.", reservation.AuthorizationReleaseLastError);
+        }
+
+        [Fact]
+        public async Task CleanupAsync_RetriesOnlyArmedDueTerminalReservations()
+        {
+            var coordinator = new RecordingPaymentCoordinator();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30"
+                });
+
+            Guid dueId;
+            Guid futureId;
+            Guid historicalId;
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                var due = NewTerminalReservation("pi_due", PaymentAuthorizationReleaseState.RetryScheduled, DateTime.UtcNow.AddMinutes(-1));
+                var future = NewTerminalReservation("pi_future", PaymentAuthorizationReleaseState.RetryScheduled, DateTime.UtcNow.AddMinutes(10));
+                var historical = NewTerminalReservation("pi_historical", null, null);
+                db.ChargePaymentReservations.AddRange(due, future, historical);
+                db.SaveChanges();
+                dueId = due.ReservationId;
+                futureId = future.ReservationId;
+                historicalId = historical.ReservationId;
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>());
+
+            await service.RunOnce();
+
+            Assert.Single(coordinator.ReconcileCalls);
+            Assert.Equal(dueId, coordinator.ReconcileCalls[0].ReservationId);
+            Assert.DoesNotContain(coordinator.ReconcileCalls, call => call.ReservationId == futureId);
+            Assert.DoesNotContain(coordinator.ReconcileCalls, call => call.ReservationId == historicalId);
+        }
+
+        [Fact]
+        public async Task CleanupAsync_RecoversOnlyExpiredInProgressLease()
+        {
+            var coordinator = new RecordingPaymentCoordinator();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30",
+                    ["Maintenance:AuthorizationReleaseInProgressTimeoutMinutes"] = "5"
+                });
+            Guid freshId;
+            Guid expiredId;
+
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                var fresh = NewTerminalReservation("pi_fresh_lease", PaymentAuthorizationReleaseState.InProgress, null);
+                fresh.AuthorizationReleaseLastAttemptAtUtc = DateTime.UtcNow;
+                var expired = NewTerminalReservation("pi_expired_lease", PaymentAuthorizationReleaseState.InProgress, null);
+                expired.AuthorizationReleaseLastAttemptAtUtc = DateTime.UtcNow.AddMinutes(-10);
+                db.AddRange(fresh, expired);
+                db.SaveChanges();
+                freshId = fresh.ReservationId;
+                expiredId = expired.ReservationId;
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>());
+            await service.RunOnce();
+
+            Assert.Single(coordinator.ReconcileCalls);
+            Assert.Equal(expiredId, coordinator.ReconcileCalls[0].ReservationId);
+            Assert.DoesNotContain(coordinator.ReconcileCalls, call => call.ReservationId == freshId);
+        }
+
+        [Fact]
+        public async Task CleanupAsync_LateCheckoutWebhookReleasesAuthorizationAfterMissingIntentLinkage()
+        {
+            var settings = new Dictionary<string, string?>
+            {
+                ["Maintenance:PendingPaymentTimeoutMinutes"] = "1",
+                ["Maintenance:CleanupIntervalSeconds"] = "30"
+            };
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+            var intents = new ReleasePaymentIntentService();
+            var eventFactory = new ReleaseEventFactory();
+            var sessions = new ReleaseSessionService();
+            var coordinator = new StripePaymentCoordinator(
+                Options.Create(new StripeOptions
+                {
+                    Enabled = true,
+                    ApiKey = "test",
+                    ReturnBaseUrl = "https://return",
+                    WebhookSecret = "whsec_test"
+                }),
+                Options.Create(new PaymentFlowOptions()),
+                NullLogger<StripePaymentCoordinator>.Instance,
+                sessions,
+                intents,
+                eventFactory,
+                () => DateTime.UtcNow,
+                configuration: configuration);
+            using var provider = BuildProvider(coordinator, settings);
+            var reservationId = Guid.NewGuid();
+            sessions.GetResponse = new Session
+            {
+                Id = "sess_late_cleanup",
+                Metadata = new Dictionary<string, string>
+                {
+                    ["reservation_id"] = reservationId.ToString()
+                }
+            };
+
+            using (var setupScope = provider.CreateScope())
+            {
+                var db = setupScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP-LATE",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG-LATE",
+                    StripeCheckoutSessionId = "sess_late_cleanup",
+                    Status = PaymentReservationStatus.Pending,
+                    Currency = "eur",
+                    CreatedAtUtc = DateTime.UtcNow.AddHours(-2),
+                    UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
+                });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>());
+            await service.RunOnce();
+
+            using (var armedScope = provider.CreateScope())
+            {
+                var armedDb = armedScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                var armed = armedDb.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                Assert.Equal(PaymentReservationStatus.Abandoned, armed.Status);
+                Assert.Equal(PaymentAuthorizationReleaseState.RetryScheduled, armed.AuthorizationReleaseState);
+                Assert.Single(armedDb.PaymentAuthorizationReleaseAttempts);
+            }
+
+            intents.GetResponse = new PaymentIntent
+            {
+                Id = "pi_late_cleanup",
+                Status = "requires_capture",
+                AmountCapturable = 500,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["reservation_id"] = reservationId.ToString()
+                }
+            };
+            eventFactory.EventToReturn = new Event
+            {
+                Id = "evt_late_cleanup",
+                Type = EventTypes.CheckoutSessionCompleted,
+                Data = new EventData
+                {
+                    Object = new Session
+                    {
+                        Id = "sess_late_cleanup",
+                        PaymentIntentId = "pi_late_cleanup",
+                        PaymentStatus = "paid"
+                    }
+                }
+            };
+
+            using (var webhookScope = provider.CreateScope())
+            {
+                var webhookDb = webhookScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                coordinator.HandleWebhookEvent(webhookDb, "payload", "signature");
+            }
+
+            using var verificationScope = provider.CreateScope();
+            var verificationDb = verificationScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+            var released = verificationDb.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentAuthorizationReleaseState.Released, released.AuthorizationReleaseState);
+            Assert.Equal(1, intents.CancelCalls);
+            Assert.Equal(
+                PaymentAuthorizationReleaseTrigger.CheckoutCompletedWebhook,
+                verificationDb.PaymentAuthorizationReleaseAttempts.OrderBy(attempt => attempt.AttemptNumber).Last().Trigger);
+            Assert.Equal(2, verificationDb.PaymentAuthorizationReleaseAttempts.Count());
         }
 
         [Fact]
@@ -442,7 +686,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         private static ServiceProvider BuildProvider(
-            RecordingPaymentCoordinator coordinator,
+            IPaymentCoordinator coordinator,
             IDictionary<string, string?> configurationData)
         {
             var dbName = Guid.NewGuid().ToString();
@@ -456,6 +700,27 @@ namespace OCPP.Core.Server.Tests
                 options.UseInMemoryDatabase(dbName));
             services.AddSingleton<IPaymentCoordinator>(coordinator);
             return services.BuildServiceProvider();
+        }
+
+        private static ChargePaymentReservation NewTerminalReservation(
+            string paymentIntentId,
+            string? releaseState,
+            DateTime? nextAttemptAtUtc)
+        {
+            return new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = Math.Abs(paymentIntentId.GetHashCode()) % 10000 + 1,
+                ChargeTagId = paymentIntentId,
+                StripePaymentIntentId = paymentIntentId,
+                Status = PaymentReservationStatus.Abandoned,
+                Currency = "eur",
+                CreatedAtUtc = DateTime.UtcNow.AddHours(-1),
+                UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                AuthorizationReleaseState = releaseState,
+                AuthorizationReleaseNextAttemptAtUtc = nextAttemptAtUtc
+            };
         }
     }
 
@@ -507,7 +772,9 @@ namespace OCPP.Core.Server.Tests
     {
         public bool IsEnabled => true;
         public List<(Guid ReservationId, string Reason)> CancelCalls { get; } = new();
+        public List<(Guid ReservationId, string Trigger)> ReconcileCalls { get; } = new();
         public List<int> CompleteCalls { get; } = new();
+        public string? ReconcileErrorToRecord { get; set; }
 
         public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) =>
             throw new NotImplementedException();
@@ -527,6 +794,23 @@ namespace OCPP.Core.Server.Tests
         public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason)
         {
             CancelCalls.Add((reservation?.ReservationId ?? Guid.Empty, reason));
+        }
+
+        public PaymentAuthorizationReleaseResult ReconcileTerminalPaymentAuthorization(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            string trigger)
+        {
+            ReconcileCalls.Add((reservation?.ReservationId ?? Guid.Empty, trigger));
+            if (reservation != null && !string.IsNullOrWhiteSpace(ReconcileErrorToRecord))
+            {
+                reservation.AuthorizationReleaseLastError = ReconcileErrorToRecord;
+                dbContext.SaveChanges();
+            }
+            return new PaymentAuthorizationReleaseResult
+            {
+                Outcome = PaymentAuthorizationReleaseOutcome.SkippedNotEligible
+            };
         }
 
         public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) =>

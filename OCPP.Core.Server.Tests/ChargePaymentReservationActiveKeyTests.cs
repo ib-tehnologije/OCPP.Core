@@ -75,6 +75,40 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public void StartupMaintenance_Run_ArmsNewlyAbandonedStaleReservationForRelease()
+        {
+            using var connection = CreateConnection();
+            using var context = CreateContext(connection);
+            var now = new DateTime(2026, 7, 18, 12, 0, 0, DateTimeKind.Utc);
+            var reservation = CreateReservation(PaymentReservationStatus.Pending);
+            reservation.StripePaymentIntentId = "pi_startup_stale";
+            reservation.CreatedAtUtc = now.AddHours(-1);
+            reservation.UpdatedAtUtc = now.AddHours(-1);
+            var historicalReservation = CreateReservation(PaymentReservationStatus.Abandoned);
+            historicalReservation.StripePaymentIntentId = "pi_historical_terminal";
+            historicalReservation.CreatedAtUtc = now.AddDays(-30);
+            historicalReservation.UpdatedAtUtc = now.AddDays(-30);
+            context.ChargePaymentReservations.AddRange(reservation, historicalReservation);
+            context.SaveChanges();
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "1",
+                    ["Maintenance:StatusReleaseMinutes"] = "0"
+                })
+                .Build();
+
+            StartupMaintenance.Run(context, NullLogger.Instance, configuration, () => now);
+
+            Assert.Equal(PaymentReservationStatus.Abandoned, reservation.Status);
+            Assert.Equal(PaymentAuthorizationReleaseState.Pending, reservation.AuthorizationReleaseState);
+            Assert.Null(reservation.AuthorizationReleaseNextAttemptAtUtc);
+            Assert.Equal(0, reservation.AuthorizationReleaseAttemptCount);
+            Assert.Null(historicalReservation.AuthorizationReleaseState);
+            Assert.Equal(0, historicalReservation.AuthorizationReleaseAttemptCount);
+        }
+
         [Theory]
         [InlineData(PaymentReservationStatus.Cancelled)]
         [InlineData(PaymentReservationStatus.Failed)]

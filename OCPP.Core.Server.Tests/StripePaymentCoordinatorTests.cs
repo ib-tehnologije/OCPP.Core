@@ -8,6 +8,7 @@ using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
 using System.Linq;
 using System.Collections.Generic;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -2943,6 +2944,66 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CompleteReservation_ArmsReleaseWhenNoChargeCancellationFails()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-NO-CHARGE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-NO-CHARGE",
+                StripePaymentIntentId = "pi_no_charge_failure",
+                Status = PaymentReservationStatus.Charging,
+                Currency = "eur"
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 991,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = new DateTime(2026, 7, 18, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 7, 18, 12, 5, 0, DateTimeKind.Utc),
+                MeterStart = 0,
+                MeterStop = 0
+            };
+            context.AddRange(reservation, transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = reservation.StripePaymentIntentId,
+                    Status = "requires_capture",
+                    Amount = 10_000
+                },
+                CancelException = new StripeException(
+                    HttpStatusCode.ServiceUnavailable,
+                    new StripeError
+                    {
+                        Type = "api_error",
+                        Code = "provider_unavailable",
+                        Message = "Release failed for pi_sensitive and driver@example.com"
+                    },
+                    "Release failed for pi_sensitive and driver@example.com")
+            };
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), intentService);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
+            Assert.Equal(PaymentAuthorizationReleaseState.Pending, reservation.AuthorizationReleaseState);
+            Assert.Null(reservation.AuthorizationReleaseNextAttemptAtUtc);
+            Assert.Contains("provider_unavailable", reservation.AuthorizationReleaseLastError);
+            Assert.DoesNotContain("pi_sensitive", reservation.AuthorizationReleaseLastError);
+            Assert.DoesNotContain("driver@example.com", reservation.AuthorizationReleaseLastError);
+            Assert.Equal("Payment authorization release could not be completed automatically.", reservation.LastError);
+            Assert.DoesNotContain("provider_unavailable", reservation.LastError);
+        }
+
+        [Fact]
         public void CompleteReservation_UsesAlreadySucceededPaymentIntent()
         {
             using var context = CreateContext();
@@ -3746,6 +3807,7 @@ namespace OCPP.Core.Server.Tests
         public bool CaptureCalled { get; private set; }
         public bool CancelCalled { get; private set; }
         public RequestOptions? LastCancelRequestOptions { get; private set; }
+        public StripeException? CancelException { get; set; }
 
         public PaymentIntent Get(string id) => GetResponse;
 
@@ -3767,10 +3829,15 @@ namespace OCPP.Core.Server.Tests
             return new PaymentIntent { Id = id, Status = "succeeded", AmountReceived = capturedAmount };
         }
 
-        public void Cancel(string id, RequestOptions requestOptions = null!)
+        public PaymentIntent Cancel(string id, RequestOptions requestOptions = null!)
         {
             CancelCalled = true;
             LastCancelRequestOptions = requestOptions;
+            if (CancelException != null)
+            {
+                throw CancelException;
+            }
+            return new PaymentIntent { Id = id, Status = "canceled" };
         }
     }
 
