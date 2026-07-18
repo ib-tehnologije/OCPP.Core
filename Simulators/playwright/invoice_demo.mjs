@@ -11,6 +11,7 @@ import {
   invoiceDemoFixtures,
   seedInvoiceDemoFixtures,
 } from "../lib/invoice_demo_fixtures.mjs";
+import { createProtocolScenarioDriver } from "../lib/protocol_scenarios.mjs";
 import { querySqliteJson, seedTestStack } from "../lib/sqlite_helpers.mjs";
 import { waitForUrl } from "./common.mjs";
 
@@ -129,6 +130,11 @@ export async function moveCursorTo(page, locator, { click = false } = {}) {
   if (click) await page.mouse.click(x, y, { delay: 180 });
 }
 
+export async function activateWithVisibleCursor(page, locator) {
+  await moveCursorTo(page, locator);
+  await locator.click();
+}
+
 export async function performBuyerEntry(page, buyer, { onStep = async () => {} } = {}) {
   const steps = buildBuyerEntrySteps(buyer);
   for (const step of steps) {
@@ -143,7 +149,7 @@ export async function performBuyerEntry(page, buyer, { onStep = async () => {} }
       if (step.value) await locator.pressSequentially(step.value, { delay: step.typingDelayMs });
     } else if (step.action === "check") {
       const checked = await locator.isChecked();
-      if (Boolean(step.value) !== checked) await moveCursorTo(page, locator, { click: true });
+      if (Boolean(step.value) !== checked) await activateWithVisibleCursor(page, locator);
     }
     await page.waitForTimeout(step.dwellAfterMs);
   }
@@ -280,6 +286,7 @@ export function buildDemoEnvironment(runtime, application = "server") {
 }
 
 export function buildChromiumLaunchOptions({ bundledExists, chromeExists, headless = true }) {
+  if (headless && chromeExists) return { channel: "chrome", headless };
   if (bundledExists) return { headless };
   if (chromeExists) return { channel: "chrome", headless };
   throw new Error("Playwright Chromium is not installed and no system Chrome fallback is available.");
@@ -417,6 +424,7 @@ async function createRuntime(artifactDir) {
     managementBaseUrl,
     serverApiBaseUrl: `${serverBaseUrl}/API`,
     serverBaseUrl,
+    serverWsBase: `ws://127.0.0.1:${serverPort}/OCPP`,
     stripeDiagnosticsDir: path.join(tempRoot, "stripe-diagnostics"),
     tempRoot,
   };
@@ -427,6 +435,24 @@ async function createRuntime(artifactDir) {
     `${JSON.stringify(buildInvoiceDemoMockStripeSnapshot(), null, 2)}\n`,
   );
   return runtime;
+}
+
+export async function connectInvoiceDemoChargePoint(runtime, factory = createProtocolScenarioDriver) {
+  const driver = factory({
+    chargePointId: invoiceDemoFixtures.foreignEditable.chargePointId,
+    chargeTagId: "DEMO-TAG-1",
+    connectorId: invoiceDemoFixtures.foreignEditable.connectorId,
+    protocol: "1.6",
+    scenario: "live_meter_progress",
+    serverWsBase: runtime.serverWsBase,
+  });
+  try {
+    await driver.connect();
+    return driver;
+  } catch (error) {
+    driver.close?.();
+    throw error;
+  }
 }
 
 export function buildDotnetRunArgs(projectPath) {
@@ -698,9 +724,9 @@ export async function verifyPersistedBuyerSnapshots(databasePath, { query = quer
     ["Czech", invoiceDemoFixtures.foreignEditable],
     ["Croatian", invoiceDemoFixtures.croatianEditable],
   ];
-  const reservationIds = fixtures.map(([, fixture]) => `'${fixture.reservationId}'`).join(", ");
   const rows = await query(databasePath, `
 SELECT ReservationId,
+       ConnectorId,
        InvoiceBuyerCountry,
        InvoiceBuyerCompanyName,
        InvoiceBuyerStreet,
@@ -712,11 +738,18 @@ SELECT ReservationId,
        InvoiceBuyerIdentifierIsVatRegistration,
        InvoiceBuyerConfirmedAtUtc
 FROM ChargePaymentReservation
-WHERE ReservationId IN (${reservationIds});`);
-  const rowsByReservation = new Map(rows.map((row) => [row.ReservationId, row]));
+WHERE ChargePointId = 'INVOICE-DEMO-LOCAL'
+  AND ConnectorId IN (1, 2)
+  AND InvoiceBuyerConfirmedAtUtc IS NOT NULL
+ORDER BY CreatedAtUtc DESC;`);
+  const rowsByConnector = new Map();
+  for (const row of rows) {
+    const connectorId = Number(row.ConnectorId);
+    if (!rowsByConnector.has(connectorId)) rowsByConnector.set(connectorId, row);
+  }
 
   for (const [label, fixture] of fixtures) {
-    const row = rowsByReservation.get(fixture.reservationId);
+    const row = rowsByConnector.get(fixture.connectorId);
     if (!row) throw new Error(`${label} buyer snapshot is missing from SQLite.`);
     for (const [fixtureField, column] of Object.entries(persistedBuyerColumns)) {
       const expected = fixture.buyer[fixtureField] ?? null;
@@ -858,25 +891,31 @@ async function publishRecordedPage(context, page, runtime, filename) {
 }
 
 async function recordUiWalkthrough(browser, runtime) {
-  const { context, page } = await createRecordedPage(browser, runtime);
   const screenshots = [];
-  let screenshotNumber = 0;
-  const capture = async (slug) => {
-    screenshotNumber += 1;
-    const filename = `${String(screenshotNumber).padStart(2, "0")}-${slug}.png`;
+  const capture = async (page, filename) => {
     await page.screenshot({ path: path.join(runtime.artifactDir, filename), fullPage: true });
     screenshots.push(filename);
   };
   const statusUrl = (fixture) => `/Payments/Status?reservationId=${fixture.reservationId}&origin=public&lang=en`;
+  const firstSegmentFilename = "ui-walkthrough-part-1.webm";
+  const secondSegmentFilename = "ui-walkthrough-part-2.webm";
+  let unconfirmedAttemptBlockedBeforeMockStripe = false;
+  let invalidOibAttemptBlockedBeforeMockStripe = false;
+  let mockStripeHandoffShown = false;
+  let croatianValidOibAcceptedBeforeMockStripe = false;
 
+  const first = await createRecordedPage(browser, runtime);
   try {
+    const { context, page } = first;
+    const submit = () => page.getByRole("button", { name: /Start charging/i });
+
     const foreign = invoiceDemoFixtures.foreignEditable;
     await page.goto(`/Public/Start?cp=${encodeURIComponent(foreign.chargePointId)}&conn=${foreign.connectorId}`);
     await addCaption(page, "We begin on the real local public charging page. The blue pointer shows every interaction at normal speed.", 8_000);
     await addCaption(page, "Before Stripe checkout, the customer chooses Company invoice.", 5_000);
-    await moveCursorTo(page, page.locator("#wantsR1"), { click: true });
+    await activateWithVisibleCursor(page, page.locator("#wantsR1"));
     await addCaption(page, "The complete buyer form opens here, before any payment session is created.", 8_000);
-    await capture("company-invoice-choice");
+    await capture(page, "01-company-invoice-choice.png");
 
     await addCaption(page, "Czech company example: we enter every field before continuing to secure payment.", 8_000);
     await performBuyerEntry(page, foreign.buyer, {
@@ -886,14 +925,58 @@ async function recordUiWalkthrough(browser, runtime) {
         1_500,
       ),
     });
-    await addCaption(page, "Pause and review: the visible summary is the exact buyer snapshot that checkout will carry forward.", 12_000);
-    await capture("czech-company-review");
-    await addCaption(page, "The confirmed buyer snapshot is ready for checkout without storing reusable buyer data in the browser.", 10_000);
-    await capture("czech-company-confirmed");
+    await addCaption(page, "Pause and review: the visible summary is the exact buyer snapshot that checkout will carry forward.", 10_000);
+
+    const foreignConfirmation = page.locator("#buyerDataConfirmed");
+    await addCaption(page, "First we remove confirmation and try to continue. Required, unconfirmed buyer data must stop before any mock Stripe create call.", 8_000);
+    await activateWithVisibleCursor(page, foreignConfirmation);
+    const beforeUnconfirmed = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    await activateWithVisibleCursor(page, submit());
+    await page.waitForTimeout(3_000);
+    const afterUnconfirmed = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    const unconfirmedBlock = verifyNoMockStripeCreateCall({
+      after: afterUnconfirmed,
+      before: beforeUnconfirmed,
+      reason: "unconfirmed buyer data",
+    });
+    for (const [fieldName, selector] of Object.entries(buyerFormFields)) {
+      const expected = {
+        buyerCity: foreign.buyer.city,
+        buyerCompanyName: foreign.buyer.companyName,
+        buyerEmail: foreign.buyer.email,
+        buyerPostalCode: foreign.buyer.postalCode,
+        buyerRegistrationNumber: foreign.buyer.registrationNumber,
+        buyerStreet: foreign.buyer.street,
+        buyerTaxIdentifier: foreign.buyer.taxIdentifier,
+      }[fieldName];
+      const actual = await page.locator(selector).inputValue();
+      if (actual !== expected) {
+        throw new Error(`Unconfirmed submission did not preserve ${fieldName}.`);
+      }
+    }
+    unconfirmedAttemptBlockedBeforeMockStripe = unconfirmedBlock.blockedBeforeMockStripe;
+    await addCaption(page, "No mock Stripe session was created, and every entered value remains on the form for correction or confirmation.", 8_000);
+    await capture(page, "02-foreign-unconfirmed-blocked.png");
+
+    await addCaption(page, "Now we explicitly confirm the reviewed foreign-company snapshot and continue.", 5_000);
+    await activateWithVisibleCursor(page, foreignConfirmation);
+    const beforeForeignCheckout = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    await Promise.all([
+      page.waitForURL(/\/Payments\/MockCheckout/),
+      activateWithVisibleCursor(page, submit()),
+    ]);
+    const afterForeignCheckout = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    if (afterForeignCheckout !== beforeForeignCheckout + 1) {
+      throw new Error("Confirmed foreign buyer did not create exactly one mock Stripe session.");
+    }
+    await page.locator("#mock-pay-now").waitFor({ state: "visible" });
+    mockStripeHandoffShown = true;
+    await addCaption(page, "Secure-payment handoff: this is the local Mock Stripe checkout, reached only after the complete buyer snapshot was confirmed.", 10_000);
+    await capture(page, "03-mock-stripe-handoff.png");
 
     const croatian = invoiceDemoFixtures.croatianEditable;
     await page.goto(`/Public/Start?cp=${encodeURIComponent(croatian.chargePointId)}&conn=${croatian.connectorId}`);
-    await moveCursorTo(page, page.locator("#wantsR1"), { click: true });
+    await activateWithVisibleCursor(page, page.locator("#wantsR1"));
     await addCaption(page, "Croatian branch: enter the buyer data with an intentionally invalid OIB first.", 7_000);
     await performBuyerEntry(page, { ...croatian.buyer, taxIdentifier: croatian.buyer.invalidOib }, {
       onStep: async ({ label, value }) => addCaption(
@@ -902,37 +985,124 @@ async function recordUiWalkthrough(browser, runtime) {
         1_200,
       ),
     });
-    await addCaption(page, "At checkout submission the server checksum-validates this Croatian OIB before creating Stripe Checkout.", 12_000);
-    await capture("croatian-invalid-oib");
+    await addCaption(page, "Submit the invalid OIB now. The server must reject it before creating a mock Stripe session and preserve the entered form.", 7_000);
+    const beforeInvalidOib = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      activateWithVisibleCursor(page, submit()),
+    ]);
+    const validationMessage = page.locator(".alert-box.danger");
+    await validationMessage.waitFor({ state: "visible" });
+    if (!/OIB|identifier|invalid/i.test(await validationMessage.innerText())) {
+      throw new Error("Invalid Croatian OIB submission did not show the expected server validation message.");
+    }
+    if (await page.locator("#buyerTaxIdentifier").inputValue() !== croatian.buyer.invalidOib) {
+      throw new Error("Invalid Croatian OIB submission did not preserve the entered identifier.");
+    }
+    const afterInvalidOib = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    const invalidOibBlock = verifyNoMockStripeCreateCall({
+      after: afterInvalidOib,
+      before: beforeInvalidOib,
+      reason: "invalid Croatian OIB",
+    });
+    invalidOibAttemptBlockedBeforeMockStripe = invalidOibBlock.blockedBeforeMockStripe;
+    await addCaption(page, "The server rejected the invalid Croatian OIB, created no mock Stripe session, and returned the same buyer values for correction.", 10_000);
+    await capture(page, "04-croatian-invalid-oib-rejected.png");
+
     const oib = page.locator("#buyerTaxIdentifier");
     await addCaption(page, "Correct the OIB with a checksum-valid synthetic example.", 4_000);
     await moveCursorTo(page, oib, { click: true });
     await oib.fill("");
     await oib.pressSequentially(croatian.buyer.taxIdentifier, { delay: 100 });
     await page.waitForTimeout(4_000);
-    await addCaption(page, "Now the confirmed Croatian buyer snapshot is ready; the next button creates Stripe Checkout with matching metadata.", 10_000);
-    await moveCursorTo(page, page.getByRole("button", { name: /Start charging/i }));
-    await capture("croatian-valid-oib-ready");
+    const croatianConfirmation = page.locator("#buyerDataConfirmed");
+    if (!(await croatianConfirmation.isChecked())) {
+      await activateWithVisibleCursor(page, croatianConfirmation);
+    }
+    await addCaption(page, "The corrected checksum-valid OIB is explicitly confirmed before checkout.", 8_000);
+    await capture(page, "05-croatian-valid-oib-ready.png");
+    const beforeValidOib = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    await Promise.all([
+      page.waitForURL(/\/Payments\/MockCheckout/),
+      activateWithVisibleCursor(page, submit()),
+    ]);
+    const afterValidOib = readMockStripeSnapshotCounts(runtime.stripeDiagnosticsDir).sessionCount;
+    if (afterValidOib !== beforeValidOib + 1) {
+      throw new Error("Checksum-valid Croatian OIB did not create exactly one mock Stripe session.");
+    }
+    croatianValidOibAcceptedBeforeMockStripe = true;
+    await addCaption(page, "The server accepted the valid Croatian OIB and handed the confirmed snapshot to local Mock Stripe.", 8_000);
 
-    await page.goto(statusUrl(invoiceDemoFixtures.foreignLocked));
-    await page.locator("#done-invoice-section").waitFor({ state: "visible" });
-    const postCheckoutBuyerEntry = verifyNoPostCheckoutBuyerControls(await page.locator(
-      "#r1-submit, #r1-company, #r1-tax-identifier, #buyerCompanyName, #buyerTaxIdentifier",
-    ).count());
-    await addCaption(page, "After charging, the status page is read-only for buyer data and shows only the invoice outcome.", 10_000);
-    await addCaption(page, "There is no late company form here, so invoice intent cannot race with session completion.", 12_000);
-    await capture("issued-invoice-read-only");
-
-    const video = await publishRecordedPage(
+    await publishRecordedPage(
       context,
       page,
       runtime,
-      invoiceDemoRecordingContract.uiWalkthrough.filename,
+      firstSegmentFilename,
     );
-    return { postCheckoutBuyerEntry, screenshots, video };
   } finally {
-    await context.close().catch(() => {});
+    await first.context.close().catch(() => {});
   }
+
+  const fresh = await createRecordedPage(browser, runtime);
+  let browserState;
+  let postCheckoutBuyerEntry;
+  try {
+    const { context, page: freshPage } = fresh;
+    const foreign = invoiceDemoFixtures.foreignEditable;
+    await freshPage.goto(`/Public/Start?cp=${encodeURIComponent(foreign.chargePointId)}&conn=${foreign.connectorId}`);
+    await addCaption(freshPage, "Fresh browser context: no prior cookies, session storage, or page state are reused.", 8_000);
+    browserState = await inspectBuyerBrowserState(freshPage, {
+      buyerValues: [
+        foreign.buyer.companyName,
+        foreign.buyer.email,
+        foreign.buyer.taxIdentifier,
+        invoiceDemoFixtures.croatianEditable.buyer.companyName,
+        invoiceDemoFixtures.croatianEditable.buyer.email,
+        invoiceDemoFixtures.croatianEditable.buyer.taxIdentifier,
+      ],
+    });
+    await activateWithVisibleCursor(freshPage, freshPage.locator("#wantsR1"));
+    await addCaption(freshPage, "The new session opens an empty company form. Buyer data was not retained in localStorage or sessionStorage and is not repopulated.", 12_000);
+    await capture(freshPage, "06-new-browser-session-empty.png");
+
+    await freshPage.goto(statusUrl(invoiceDemoFixtures.foreignLocked));
+    await freshPage.locator("#done-invoice-section").waitFor({ state: "visible" });
+    postCheckoutBuyerEntry = verifyNoPostCheckoutBuyerControls(await freshPage.locator(
+      "#r1-submit, #r1-company, #r1-tax-identifier, #buyerCompanyName, #buyerTaxIdentifier",
+    ).count());
+    await addCaption(freshPage, "After charging, the status page is read-only for buyer data and shows only the invoice outcome.", 10_000);
+    await addCaption(freshPage, "There is no late company form here. The legacy endpoint remains server-side compatibility only for older clients.", 12_000);
+    await capture(freshPage, "07-issued-invoice-read-only.png");
+
+    await publishRecordedPage(context, freshPage, runtime, secondSegmentFilename);
+  } finally {
+    await fresh.context.close().catch(() => {});
+  }
+
+  const firstSegmentPath = path.join(runtime.artifactDir, firstSegmentFilename);
+  const secondSegmentPath = path.join(runtime.artifactDir, secondSegmentFilename);
+  const videoPath = path.join(runtime.artifactDir, invoiceDemoRecordingContract.uiWalkthrough.filename);
+  concatenateRecordedVideos(
+    [firstSegmentPath, secondSegmentPath],
+    videoPath,
+    { concatListPath: path.join(runtime.tempRoot, "ui-walkthrough-concat.txt") },
+  );
+  fs.rmSync(firstSegmentPath, { force: true });
+  fs.rmSync(secondSegmentPath, { force: true });
+
+  return {
+    evidence: {
+      buyerBrowserStorageAbsent: browserState.buyerBrowserStorageAbsent,
+      croatianValidOibAcceptedBeforeMockStripe,
+      freshStartBuyerFieldsEmpty: browserState.freshStartBuyerFieldsEmpty,
+      invalidOibAttemptBlockedBeforeMockStripe: invalidOibAttemptBlockedBeforeMockStripe,
+      mockStripeHandoffShown: mockStripeHandoffShown,
+      unconfirmedAttemptBlockedBeforeMockStripe: unconfirmedAttemptBlockedBeforeMockStripe,
+    },
+    postCheckoutBuyerEntry,
+    screenshots,
+    video: path.basename(videoPath),
+  };
 }
 
 async function recordBillingExplainer(browser, runtime) {
@@ -969,6 +1139,7 @@ async function recordBrowserWalkthrough(runtime, signal) {
     const uiWalkthrough = await recordUiWalkthrough(browser, runtime);
     const billingExplainer = await recordBillingExplainer(browser, runtime);
     return {
+      evidence: uiWalkthrough.evidence,
       postCheckoutBuyerEntry: uiWalkthrough.postCheckoutBuyerEntry,
       screenshots: uiWalkthrough.screenshots,
       videos: {
@@ -990,6 +1161,7 @@ export async function runInvoiceDemo({
   fs.mkdirSync(privateArtifactDir, { recursive: true });
   const runtime = await createRuntime(privateArtifactDir);
   const children = [];
+  let chargePointDriver;
   const signalHandlers = installSignalAbortHandlers();
   const { signal } = signalHandlers;
 
@@ -1016,6 +1188,7 @@ export async function runInvoiceDemo({
     ]), signal);
     await abortable(seedTestStack(runtime.databasePath), signal);
     await abortable(seedInvoiceDemoFixtures(runtime.databasePath), signal);
+    chargePointDriver = await abortable(connectInvoiceDemoChargePoint(runtime), signal);
 
     const browserArtifacts = await abortable(recordBrowserWalkthrough(runtime, signal), signal);
     const persistedBuyerSnapshots = await abortable(verifyPersistedBuyerSnapshots(runtime.databasePath), signal);
@@ -1030,6 +1203,7 @@ export async function runInvoiceDemo({
     return manifest;
   } finally {
     signalHandlers.dispose();
+    chargePointDriver?.close();
     await cleanupRuntime(children, runtime.tempRoot);
   }
 }
