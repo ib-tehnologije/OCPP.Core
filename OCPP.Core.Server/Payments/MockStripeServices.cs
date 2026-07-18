@@ -400,14 +400,18 @@ namespace OCPP.Core.Server.Payments
             return CloneIntent(intent);
         }
 
-        public void Cancel(string id, RequestOptions requestOptions = null)
+        public PaymentIntent Cancel(string id, RequestOptions requestOptions = null)
         {
             if (_store.PaymentIntents.TryGetValue(id ?? string.Empty, out var intent))
             {
                 intent.Status = "canceled";
+                intent.AmountCapturable = 0;
                 _store.PaymentIntents[id] = intent;
                 _store.PersistSnapshot();
+                return CloneIntent(intent);
             }
+
+            return null;
         }
 
         private static PaymentIntent CloneIntent(PaymentIntent intent)
@@ -422,6 +426,7 @@ namespace OCPP.Core.Server.Payments
                 Id = intent.Id,
                 Status = intent.Status,
                 Amount = intent.Amount,
+                AmountCapturable = intent.AmountCapturable,
                 AmountReceived = intent.AmountReceived,
                 Metadata = intent.Metadata == null
                     ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

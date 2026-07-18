@@ -2347,7 +2347,7 @@ namespace OCPP.Core.Server.Payments
         PaymentIntent Get(string id);
         PaymentIntent Update(string id, PaymentIntentUpdateOptions options, RequestOptions requestOptions = null);
         PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null);
-        void Cancel(string id, RequestOptions requestOptions = null);
+        PaymentIntent Cancel(string id, RequestOptions requestOptions = null);
     }
 
     internal interface IStripeEventFactory
@@ -2378,7 +2378,7 @@ namespace OCPP.Core.Server.Payments
 
         public PaymentIntent Capture(string id, PaymentIntentCaptureOptions options, RequestOptions requestOptions = null) => _inner.Capture(id, options, requestOptions);
 
-        public void Cancel(string id, RequestOptions requestOptions = null) =>
+        public PaymentIntent Cancel(string id, RequestOptions requestOptions = null) =>
             _inner.Cancel(id, options: null, requestOptions: requestOptions);
     }
 

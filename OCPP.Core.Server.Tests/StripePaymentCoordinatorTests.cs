@@ -3767,10 +3767,11 @@ namespace OCPP.Core.Server.Tests
             return new PaymentIntent { Id = id, Status = "succeeded", AmountReceived = capturedAmount };
         }
 
-        public void Cancel(string id, RequestOptions requestOptions = null!)
+        public PaymentIntent Cancel(string id, RequestOptions requestOptions = null!)
         {
             CancelCalled = true;
             LastCancelRequestOptions = requestOptions;
+            return new PaymentIntent { Id = id, Status = "canceled" };
         }
     }
 
