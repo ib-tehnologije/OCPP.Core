@@ -1134,6 +1134,11 @@ namespace OCPP.Core.Server.Payments
                 idleSnapshot.TotalMinutes,
                 idleSnapshot.TotalAmount);
 
+            var authorizationReleaseExpected = shouldNoChargeForDeliveredEnergy ||
+                                               amountToCapture <= 0 ||
+                                               (minimumChargeAmountCents > 0 &&
+                                                amountToCapture < minimumChargeAmountCents);
+
             try
             {
                 var paymentIntent = _paymentIntentService.Get(reservation.StripePaymentIntentId);
@@ -1149,6 +1154,7 @@ namespace OCPP.Core.Server.Payments
                             minimumChargeAmountCents > 0 &&
                             finalCaptureAmount < minimumChargeAmountCents)
                         {
+                            authorizationReleaseExpected = true;
                             _paymentIntentService.Cancel(
                                 paymentIntent.Id,
                                 BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
@@ -1187,6 +1193,7 @@ namespace OCPP.Core.Server.Payments
                         }
                         else
                         {
+                            authorizationReleaseExpected = true;
                             _paymentIntentService.Cancel(
                                 paymentIntent.Id,
                                 BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
@@ -1203,6 +1210,7 @@ namespace OCPP.Core.Server.Payments
                     }
                     else
                     {
+                        authorizationReleaseExpected = true;
                         _paymentIntentService.Cancel(
                             paymentIntent.Id,
                             BuildIdempotencyOptions(IdempotencyCancel, reservation.ReservationId));
@@ -1256,8 +1264,17 @@ namespace OCPP.Core.Server.Payments
             catch (StripeException sex)
             {
                 _logger.LogError(sex, "Stripe capture failed for reservation {ReservationId}", reservation.ReservationId);
+                var providerErrorCode = sex.StripeError?.Code ?? sex.StripeError?.Type ?? "stripe_error";
+                var sanitizedProviderError = SanitizeProviderError(
+                    $"{providerErrorCode}: {sex.StripeError?.Message ?? sex.Message}");
                 reservation.Status = PaymentReservationStatus.Failed;
-                reservation.LastError = sex.Message;
+                reservation.LastError = sanitizedProviderError;
+                if (authorizationReleaseExpected)
+                {
+                    reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
+                    reservation.AuthorizationReleaseNextAttemptAtUtc = null;
+                    reservation.AuthorizationReleaseLastError = sanitizedProviderError;
+                }
                 reservation.UpdatedAtUtc = now;
                 dbContext.SaveChanges();
             }

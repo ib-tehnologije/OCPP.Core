@@ -98,8 +98,22 @@ namespace OCPP.Core.Server.Payments
 
             var availableOpenTransactions = await LoadAvailableOpenTransactionsAsync(db, now, token);
             var waitingForDisconnectReservations = await LoadWaitingForDisconnectAvailableReservationsAsync(db, now, token);
+            var dueAuthorizationReleases = await db.ChargePaymentReservations
+                .Where(r =>
+                    (r.Status == PaymentReservationStatus.Abandoned ||
+                     r.Status == PaymentReservationStatus.Failed) &&
+                    (r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.Pending ||
+                     r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.InProgress ||
+                     r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.RetryScheduled) &&
+                    (!r.AuthorizationReleaseNextAttemptAtUtc.HasValue ||
+                     r.AuthorizationReleaseNextAttemptAtUtc.Value <= now))
+                .ToListAsync(token);
 
-            if (!stale.Any() && !timedOutStarts.Any() && !availableOpenTransactions.Any() && !waitingForDisconnectReservations.Any()) return;
+            if (!stale.Any() &&
+                !timedOutStarts.Any() &&
+                !availableOpenTransactions.Any() &&
+                !waitingForDisconnectReservations.Any() &&
+                !dueAuthorizationReleases.Any()) return;
 
             foreach (var reservation in stale)
             {
@@ -124,9 +138,15 @@ namespace OCPP.Core.Server.Payments
             foreach (var reservation in stale)
             {
                 reservation.Status = PaymentReservationStatus.Abandoned;
-                reservation.LastError = "Auto-cancelled: stale reservation (background sweep)";
+                const string cleanupMessage = "Auto-cancelled: stale reservation (background sweep)";
+                if (string.IsNullOrWhiteSpace(reservation.LastError))
+                {
+                    reservation.LastError = cleanupMessage;
+                }
                 reservation.FailureCode = "CleanupTimeout";
-                reservation.FailureMessage = reservation.LastError;
+                reservation.FailureMessage = cleanupMessage;
+                reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
+                reservation.AuthorizationReleaseNextAttemptAtUtc = null;
                 reservation.UpdatedAtUtc = now;
             }
 
@@ -208,7 +228,37 @@ namespace OCPP.Core.Server.Payments
                 }
             }
 
+            // Persist terminal state and arm the release before any provider call. A crash or
+            // restart after this point leaves a durable candidate for the next sweep.
             await db.SaveChangesAsync(token);
+
+            if (coordinator != null)
+            {
+                var releaseCandidates = dueAuthorizationReleases
+                    .Concat(stale)
+                    .GroupBy(r => r.ReservationId)
+                    .Select(group => group.First())
+                    .ToList();
+
+                foreach (var reservation in releaseCandidates)
+                {
+                    try
+                    {
+                        coordinator.ReconcileTerminalPaymentAuthorization(
+                            db,
+                            reservation,
+                            PaymentAuthorizationReleaseTrigger.CleanupSweep);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "PaymentReservationCleanup => authorization release reconciliation failed reservation={ReservationId}",
+                            reservation.ReservationId);
+                    }
+                }
+            }
+
             if (stale.Any())
             {
                 _logger.LogInformation("PaymentReservationCleanupService => abandoned {Count} stale pending reservations (>{Timeout} min)", stale.Count(), pendingTimeoutMinutes);
