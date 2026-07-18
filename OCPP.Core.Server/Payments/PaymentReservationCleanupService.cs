@@ -98,15 +98,22 @@ namespace OCPP.Core.Server.Payments
 
             var availableOpenTransactions = await LoadAvailableOpenTransactionsAsync(db, now, token);
             var waitingForDisconnectReservations = await LoadWaitingForDisconnectAvailableReservationsAsync(db, now, token);
+            var inProgressTimeoutMinutes = Math.Clamp(
+                _configuration.GetValue<int?>("Maintenance:AuthorizationReleaseInProgressTimeoutMinutes") ?? 5,
+                1,
+                60);
+            var expiredInProgressCutoff = now.AddMinutes(-inProgressTimeoutMinutes);
             var dueAuthorizationReleases = await db.ChargePaymentReservations
                 .Where(r =>
                     (r.Status == PaymentReservationStatus.Abandoned ||
                      r.Status == PaymentReservationStatus.Failed) &&
-                    (r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.Pending ||
-                     r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.InProgress ||
-                     r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.RetryScheduled) &&
-                    (!r.AuthorizationReleaseNextAttemptAtUtc.HasValue ||
-                     r.AuthorizationReleaseNextAttemptAtUtc.Value <= now))
+                    (((r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.Pending ||
+                       r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.RetryScheduled) &&
+                      (!r.AuthorizationReleaseNextAttemptAtUtc.HasValue ||
+                       r.AuthorizationReleaseNextAttemptAtUtc.Value <= now)) ||
+                     (r.AuthorizationReleaseState == PaymentAuthorizationReleaseState.InProgress &&
+                      (!r.AuthorizationReleaseLastAttemptAtUtc.HasValue ||
+                       r.AuthorizationReleaseLastAttemptAtUtc.Value <= expiredInProgressCutoff))))
                 .ToListAsync(token);
 
             if (!stale.Any() &&
@@ -117,26 +124,8 @@ namespace OCPP.Core.Server.Payments
 
             foreach (var reservation in stale)
             {
-                try
-                {
-                    coordinator?.CancelPaymentIntentIfCancelable(db, reservation, "Reservation stale");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "PaymentReservationCleanup => CancelPaymentIntent stale failed reservation={ReservationId}", reservation.ReservationId);
-                }
-
-                _logger.LogInformation(
-                    "PaymentReservationCleanup => Cancelling stale reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} status={Status} lastUpdate={LastUpdate:u}",
-                    reservation.ReservationId,
-                    reservation.ChargePointId,
-                    reservation.ConnectorId,
-                    reservation.Status,
-                    reservation.UpdatedAtUtc);
-            }
-
-            foreach (var reservation in stale)
-            {
+                var previousStatus = reservation.Status;
+                var previousUpdatedAt = reservation.UpdatedAtUtc;
                 reservation.Status = PaymentReservationStatus.Abandoned;
                 const string cleanupMessage = "Auto-cancelled: stale reservation (background sweep)";
                 if (string.IsNullOrWhiteSpace(reservation.LastError))
@@ -148,6 +137,14 @@ namespace OCPP.Core.Server.Payments
                 reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
                 reservation.AuthorizationReleaseNextAttemptAtUtc = null;
                 reservation.UpdatedAtUtc = now;
+
+                _logger.LogInformation(
+                    "PaymentReservationCleanup => Arming stale reservation for authorization release reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} previousStatus={Status} lastUpdate={LastUpdate:u}",
+                    reservation.ReservationId,
+                    reservation.ChargePointId,
+                    reservation.ConnectorId,
+                    previousStatus,
+                    previousUpdatedAt);
             }
 
             foreach (var reservation in timedOutStarts)
@@ -228,8 +225,8 @@ namespace OCPP.Core.Server.Payments
                 }
             }
 
-            // Persist terminal state and arm the release before any provider call. A crash or
-            // restart after this point leaves a durable candidate for the next sweep.
+            // Persist stale terminal state and arm the release before the strict reconciler
+            // calls the provider. A crash or restart leaves a durable candidate for the next sweep.
             await db.SaveChangesAsync(token);
 
             if (coordinator != null)

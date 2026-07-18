@@ -1263,17 +1263,26 @@ namespace OCPP.Core.Server.Payments
             }
             catch (StripeException sex)
             {
-                _logger.LogError(sex, "Stripe capture failed for reservation {ReservationId}", reservation.ReservationId);
                 var providerErrorCode = sex.StripeError?.Code ?? sex.StripeError?.Type ?? "stripe_error";
+                var sanitizedProviderErrorCode = Truncate(SanitizeProviderError(providerErrorCode), 100);
                 var sanitizedProviderError = SanitizeProviderError(
                     $"{providerErrorCode}: {sex.StripeError?.Message ?? sex.Message}");
+                _logger.LogError(
+                    "Stripe capture failed for reservation={ReservationId} providerCode={ProviderCode} providerError={ProviderError}",
+                    reservation.ReservationId,
+                    sanitizedProviderErrorCode,
+                    sanitizedProviderError);
                 reservation.Status = PaymentReservationStatus.Failed;
-                reservation.LastError = sanitizedProviderError;
                 if (authorizationReleaseExpected)
                 {
+                    reservation.LastError = "Payment authorization release could not be completed automatically.";
                     reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
                     reservation.AuthorizationReleaseNextAttemptAtUtc = null;
                     reservation.AuthorizationReleaseLastError = sanitizedProviderError;
+                }
+                else
+                {
+                    reservation.LastError = sanitizedProviderError;
                 }
                 reservation.UpdatedAtUtc = now;
                 dbContext.SaveChanges();

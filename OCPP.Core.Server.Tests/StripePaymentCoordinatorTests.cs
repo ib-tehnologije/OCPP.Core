@@ -2999,6 +2999,8 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("provider_unavailable", reservation.AuthorizationReleaseLastError);
             Assert.DoesNotContain("pi_sensitive", reservation.AuthorizationReleaseLastError);
             Assert.DoesNotContain("driver@example.com", reservation.AuthorizationReleaseLastError);
+            Assert.Equal("Payment authorization release could not be completed automatically.", reservation.LastError);
+            Assert.DoesNotContain("provider_unavailable", reservation.LastError);
         }
 
         [Fact]

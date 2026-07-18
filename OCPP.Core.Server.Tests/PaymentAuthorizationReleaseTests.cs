@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Net;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Invoices;
 using Stripe;
 using Stripe.Checkout;
 using Xunit;
@@ -41,10 +44,30 @@ namespace OCPP.Core.Server.Tests
 
             var attempt = context.PaymentAuthorizationReleaseAttempts.Single();
             Assert.Equal(1, attempt.AttemptNumber);
-            Assert.Equal("requires_capture", attempt.ProviderStatus);
+            Assert.Equal("canceled", attempt.ProviderStatus);
             Assert.Equal(500, attempt.AmountCapturableCents);
             Assert.Equal(PaymentAuthorizationReleaseOutcome.Released, attempt.Outcome);
             Assert.Equal(Now, attempt.FinishedAtUtc);
+        }
+
+        [Fact]
+        public void Reconcile_DoesNotClaimReleaseWhenProviderReturnsNoCancellationState()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            intents.CancelResponse = null!;
+            var coordinator = CreateCoordinator(intents);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.RetryScheduled, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.RetryScheduled, reservation.AuthorizationReleaseState);
+            Assert.Null(reservation.AuthorizationReleasedAtUtc);
+            Assert.Contains("missing", reservation.AuthorizationReleaseLastError, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -64,6 +87,26 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
             Assert.Equal(Now, reservation.AuthorizationReleasedAtUtc);
             Assert.Equal(0, intents.CancelCalls);
+        }
+
+        [Fact]
+        public void Reconcile_RequiresReviewWhenCanceledProviderIntentContainsReceivedFunds()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            var intents = OwnedIntentService(reservation, "canceled", amountCapturable: 0);
+            intents.GetResponse.AmountReceived = 100;
+            var coordinator = CreateCoordinator(intents);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.ReviewRequired, reservation.AuthorizationReleaseState);
+            Assert.Equal(0, intents.CancelCalls);
+            Assert.Contains("received", reservation.AuthorizationReleaseLastError, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -114,6 +157,35 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0, intents.GetCalls);
             Assert.Equal(0, intents.CancelCalls);
             Assert.Contains("active transaction", reservation.AuthorizationReleaseLastError, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Reconcile_ExcludesUnlinkedActiveTransactionUsingOcppTagBeforeProviderRead()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            reservation.OcppIdTag = "PAYMENT-OCPP-TAG";
+            context.Transactions.Add(new Transaction
+            {
+                TransactionId = 43,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.OcppIdTag,
+                StartTime = Now.AddMinutes(-5)
+            });
+            context.SaveChanges();
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var coordinator = CreateCoordinator(intents);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.ReviewRequired, reservation.AuthorizationReleaseState);
+            Assert.Equal(0, intents.GetCalls);
+            Assert.Equal(0, intents.CancelCalls);
         }
 
         [Fact]
@@ -203,6 +275,49 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Reconcile_RequiresReviewWhenProviderReportsAmountReceived()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            intents.GetResponse.AmountReceived = 100;
+            var coordinator = CreateCoordinator(intents);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.ReviewRequired, reservation.AuthorizationReleaseState);
+            Assert.Equal(0, intents.CancelCalls);
+            Assert.Contains("received", reservation.AuthorizationReleaseLastError, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Reconcile_SkipsFreshInProgressLease()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.InProgress;
+            reservation.AuthorizationReleaseAttemptCount = 1;
+            reservation.AuthorizationReleaseLastAttemptAtUtc = Now;
+            context.SaveChanges();
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var coordinator = CreateCoordinator(intents);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.AmountCapturableWebhook);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.SkippedNotEligible, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.InProgress, reservation.AuthorizationReleaseState);
+            Assert.Equal(0, intents.GetCalls);
+            Assert.Empty(context.PaymentAuthorizationReleaseAttempts);
+        }
+
+        [Fact]
         public void Reconcile_TransientProviderFailureSchedulesSanitizedRetry()
         {
             using var context = CreateContext();
@@ -280,8 +395,59 @@ namespace OCPP.Core.Server.Tests
 
             Assert.Equal(PaymentAuthorizationReleaseOutcome.PermanentFailure, result.Outcome);
             Assert.Equal(PaymentAuthorizationReleaseState.PermanentFailure, reservation.AuthorizationReleaseState);
-            Assert.Equal(0, intents.GetCalls);
+            Assert.Equal(1, intents.GetCalls);
             Assert.Equal(0, intents.CancelCalls);
+        }
+
+        [Fact]
+        public void Reconcile_FinalVerificationRecoversCanceledProviderStateAfterLastTransientFailure()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            reservation.AuthorizationReleaseAttemptCount = 1;
+            context.SaveChanges();
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            intents.CancelException = new StripeException(
+                HttpStatusCode.ServiceUnavailable,
+                new StripeError { Type = "api_error", Code = "timeout", Message = "provider timeout" },
+                "provider timeout");
+            var currentTime = Now;
+            var coordinator = CreateCoordinator(
+                intents,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:AuthorizationReleaseMaxAttempts"] = "2"
+                },
+                now: () => currentTime);
+
+            var failedResult = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.RetryScheduled, failedResult.Outcome);
+            Assert.Equal(2, reservation.AuthorizationReleaseAttemptCount);
+
+            intents.CancelException = null;
+            intents.GetResponse.Status = "canceled";
+            intents.GetResponse.AmountCapturable = 0;
+            currentTime = Now.AddMinutes(3);
+
+            var verificationResult = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.AlreadyReleased, verificationResult.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
+            Assert.Equal(2, reservation.AuthorizationReleaseAttemptCount);
+            Assert.Equal(1, intents.CancelCalls);
+
+            var attempt = context.PaymentAuthorizationReleaseAttempts.Single();
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.AlreadyReleased, attempt.Outcome);
+            Assert.Equal("canceled", attempt.ProviderStatus);
+            Assert.Equal(currentTime, attempt.FinishedAtUtc);
+            Assert.Null(attempt.NextRetryAtUtc);
         }
 
         [Fact]
@@ -295,6 +461,17 @@ namespace OCPP.Core.Server.Tests
 
             var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
             intents.GetResponse.Id = "pi_late";
+            var sessions = new ReleaseSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_late",
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["reservation_id"] = reservation.ReservationId.ToString()
+                    }
+                }
+            };
             var stripeEvent = new Event
             {
                 Id = "evt_checkout_late",
@@ -309,7 +486,16 @@ namespace OCPP.Core.Server.Tests
                     }
                 }
             };
-            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent, sessions: sessions);
+
+            var cleanupResult = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.RetryScheduled, cleanupResult.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.RetryScheduled, reservation.AuthorizationReleaseState);
+            Assert.Single(context.PaymentAuthorizationReleaseAttempts);
 
             coordinator.HandleWebhookEvent(context, "payload", "signature");
 
@@ -318,8 +504,95 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
             Assert.Equal(1, intents.CancelCalls);
             Assert.Equal(PaymentAuthorizationReleaseTrigger.CheckoutCompletedWebhook,
-                context.PaymentAuthorizationReleaseAttempts.Single().Trigger);
+                context.PaymentAuthorizationReleaseAttempts.OrderBy(attempt => attempt.AttemptNumber).Last().Trigger);
+            Assert.Equal(2, context.PaymentAuthorizationReleaseAttempts.Count());
             Assert.Single(context.StripeWebhookEvents);
+        }
+
+        [Fact]
+        public void Reconcile_RecoversMissingWebhookByLinkingOwnedCheckoutSession()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            reservation.StripeCheckoutSessionId = "sess_missed_webhook";
+            reservation.StripePaymentIntentId = null;
+            context.SaveChanges();
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            intents.GetResponse.Id = "pi_from_session";
+            var sessions = new ReleaseSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = reservation.StripeCheckoutSessionId,
+                    PaymentIntentId = "pi_from_session",
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["reservation_id"] = reservation.ReservationId.ToString()
+                    }
+                }
+            };
+            var coordinator = CreateCoordinator(intents, sessions: sessions);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.Released, result.Outcome);
+            Assert.Equal("pi_from_session", reservation.StripePaymentIntentId);
+            Assert.Equal(1, sessions.GetCalls);
+            Assert.Equal(1, intents.CancelCalls);
+        }
+
+        [Fact]
+        public void InvoiceLookup_StrictVariantReportsQueryFailureInsteadOfNoInvoice()
+        {
+            using var connection = new SqliteConnection("Data Source=:memory:");
+            connection.Open();
+            var options = new DbContextOptionsBuilder<OCPPCoreContext>().UseSqlite(connection).Options;
+            using var context = new OCPPCoreContext(options);
+            context.Database.EnsureCreated();
+            connection.Close();
+
+            var lookupSucceeded = InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
+                context,
+                Guid.NewGuid(),
+                NullLogger.Instance,
+                "strict release test",
+                out var hasInvoice);
+
+            Assert.False(lookupSucceeded);
+            Assert.False(hasInvoice);
+        }
+
+        [Fact]
+        public void Reconcile_RequiresReviewWithoutProviderReadWhenInvoiceQueryFails()
+        {
+            using var connection = new SqliteConnection("Data Source=:memory:");
+            connection.Open();
+            var options = new DbContextOptionsBuilder<OCPPCoreContext>()
+                .UseSqlite(connection)
+                .AddInterceptors(new ThrowingInvoiceQueryInterceptor())
+                .Options;
+            using var context = new OCPPCoreContext(options);
+            context.Database.EnsureCreated();
+            var reservation = AddReservation(context);
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var coordinator = CreateCoordinator(intents);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.ReviewRequired, reservation.AuthorizationReleaseState);
+            Assert.Contains("invoice exclusion", reservation.AuthorizationReleaseLastError, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, intents.GetCalls);
+            Assert.Equal(0, intents.CancelCalls);
+            Assert.Equal(
+                PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                context.PaymentAuthorizationReleaseAttempts.Single().Outcome);
         }
 
         [Fact]
@@ -491,7 +764,9 @@ namespace OCPP.Core.Server.Tests
         private static StripePaymentCoordinator CreateCoordinator(
             ReleasePaymentIntentService intents,
             IDictionary<string, string?>? settings = null,
-            Event? stripeEvent = null)
+            Event? stripeEvent = null,
+            ReleaseSessionService? sessions = null,
+            Func<DateTime>? now = null)
         {
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(settings ?? new Dictionary<string, string?>())
@@ -507,11 +782,27 @@ namespace OCPP.Core.Server.Tests
                 }),
                 Options.Create(new PaymentFlowOptions()),
                 NullLogger<StripePaymentCoordinator>.Instance,
-                new ReleaseSessionService(),
+                sessions ?? new ReleaseSessionService(),
                 intents,
                 new ReleaseEventFactory { EventToReturn = stripeEvent ?? new Event() },
-                () => Now,
+                now ?? (() => Now),
                 configuration: configuration);
+        }
+    }
+
+    internal sealed class ThrowingInvoiceQueryInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public override Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<DbDataReader> result)
+        {
+            if (command.CommandText.Contains("InvoiceSubmissionLog", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Simulated invoice query failure.");
+            }
+
+            return result;
         }
     }
 
@@ -543,17 +834,29 @@ namespace OCPP.Core.Server.Tests
             CancelCalls++;
             LastCancelRequestOptions = requestOptions;
             if (CancelException != null) throw CancelException;
-            CancelResponse.Id = id;
-            return CancelResponse;
+            if (CancelResponse != null)
+            {
+                CancelResponse.Id = id;
+            }
+            return CancelResponse!;
         }
     }
 
     internal sealed class ReleaseSessionService : IStripeSessionService
     {
+        public Session? GetResponse { get; set; }
+        public StripeException? GetException { get; set; }
+        public int GetCalls { get; private set; }
+
         public Session Create(SessionCreateOptions options, RequestOptions requestOptions = null!) =>
             throw new NotImplementedException();
 
-        public Session Get(string id) => throw new NotImplementedException();
+        public Session Get(string id)
+        {
+            GetCalls++;
+            if (GetException != null) throw GetException;
+            return GetResponse!;
+        }
 
         public Session Update(string id, SessionUpdateOptions options, RequestOptions requestOptions = null!) =>
             throw new NotImplementedException();

@@ -12,7 +12,7 @@ Use one durable reconciliation path with three triggers:
 - `payment_intent.amount_capturable_updated`, when Stripe reports that a manual-capture PaymentIntent has funds available to capture
 - the existing payment reservation cleanup sweep, which recovers missed or reordered webhooks and resumes bounded retries after process restarts
 
-All triggers call the same coordinator method. That method always retrieves the current PaymentIntent from Stripe before deciding whether to cancel it. A cancellation is allowed only when the local reservation is explicitly armed for prevention, the reservation is `Abandoned` or `Failed`, there is no active transaction, no captured amount or capture timestamp, no submitted invoice evidence, the PaymentIntent metadata belongs to the reservation, and the provider status is exactly `requires_capture` with a positive capturable amount.
+All triggers call the same coordinator method. If local PaymentIntent linkage is absent, that method first retrieves the owned Checkout Session, then always retrieves the current PaymentIntent from Stripe before deciding whether to cancel it. A cancellation is allowed only when the local reservation is explicitly armed for prevention, the reservation is `Abandoned` or `Failed`, there is no active transaction, no captured amount or capture timestamp, no submitted invoice evidence, the PaymentIntent metadata belongs to the reservation, no funds were received, and the provider status is exactly `requires_capture` with a positive capturable amount. An invoice lookup failure is ambiguous and fails closed to `ReviewRequired`.
 
 ## Prevention-Only Boundary
 
@@ -61,9 +61,9 @@ The audit table has a foreign key to the reservation, a unique `(ReservationId, 
 
 ## Retry and Idempotency
 
-The maximum attempt count and exponential retry base use bounded `Maintenance` configuration with safe defaults. Each attempt retrieves provider state first. Cancellation uses an idempotency key derived from the reservation and attempt number.
+The maximum attempt count, exponential retry base, and in-progress lease use bounded `Maintenance` configuration with safe defaults. Each attempt retrieves provider state first. A fresh in-progress lease prevents overlapping sweep or webhook attempts; an expired lease is restart-recoverable. Cancellation uses an idempotency key derived from the reservation and attempt number.
 
-If a provider call has an indeterminate result, the next attempt retrieves the PaymentIntent again. If the earlier cancellation succeeded, the provider now reports `canceled` and reconciliation finishes as `AlreadyReleased`; otherwise the new attempt uses a new key only after provider state still proves `requires_capture`. This keeps retries safe without pinning every later attempt to a cached provider error.
+If a provider call has an indeterminate result, the next attempt retrieves the PaymentIntent again. If the earlier cancellation succeeded, the provider now reports `canceled` and reconciliation finishes as `AlreadyReleased`; otherwise the new attempt uses a new key only after provider state still proves `requires_capture`. The last indeterminate mutation attempt is followed by one direct, read-only provider verification before permanent failure. This keeps retries safe without pinning every later attempt to a cached provider error.
 
 ## Error Handling and Privacy
 

@@ -69,6 +69,23 @@ namespace OCPP.Core.Server.Payments.Invoices
             ILogger logger,
             string reason)
         {
+            return TryHasSubmittedOrExternalInvoice(
+                       dbContext,
+                       reservationId,
+                       logger,
+                       reason,
+                       out var hasInvoice) &&
+                   hasInvoice;
+        }
+
+        public static bool TryHasSubmittedOrExternalInvoice(
+            OCPPCoreContext dbContext,
+            Guid reservationId,
+            ILogger logger,
+            string reason,
+            out bool hasInvoice)
+        {
+            hasInvoice = false;
             if (dbContext == null || reservationId == Guid.Empty)
             {
                 return false;
@@ -76,13 +93,14 @@ namespace OCPP.Core.Server.Payments.Invoices
 
             try
             {
-                return dbContext.InvoiceSubmissionLogs.AsNoTracking().Any(log =>
+                hasInvoice = dbContext.InvoiceSubmissionLogs.AsNoTracking().Any(log =>
                     log.ReservationId == reservationId &&
                     (log.Status == "Submitted" ||
                      log.ExternalDocumentId != null ||
                      log.ExternalInvoiceNumber != null ||
                      log.ExternalPublicUrl != null ||
                      log.ExternalPdfUrl != null));
+                return true;
             }
             catch (Exception ex)
             {
@@ -91,6 +109,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                     "Invoice/Lookup => Unable to determine issued state reservation={ReservationId} reason={Reason}",
                     reservationId,
                     reason);
+                hasInvoice = false;
                 return false;
             }
         }

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments.Invoices;
 using Stripe;
+using Stripe.Checkout;
 
 namespace OCPP.Core.Server.Payments
 {
@@ -13,6 +14,7 @@ namespace OCPP.Core.Server.Payments
         private const string IdempotencyAuthorizationRelease = "authorization_release";
         private const int DefaultAuthorizationReleaseMaxAttempts = 4;
         private const int DefaultAuthorizationReleaseRetryBaseMinutes = 1;
+        private const int DefaultAuthorizationReleaseInProgressTimeoutMinutes = 5;
 
         private static readonly Regex ProviderIdentifierPattern = new(
             @"\b(?:pi|ch|cs|req|cus|pm|evt|in|src|tok)_[A-Za-z0-9_]+\b",
@@ -39,8 +41,20 @@ namespace OCPP.Core.Server.Payments
             }
 
             var now = _utcNow();
+            if (string.Equals(
+                    reservation.AuthorizationReleaseState,
+                    PaymentAuthorizationReleaseState.InProgress,
+                    StringComparison.OrdinalIgnoreCase) &&
+                reservation.AuthorizationReleaseLastAttemptAtUtc.HasValue &&
+                reservation.AuthorizationReleaseLastAttemptAtUtc.Value > now.Subtract(ResolveAuthorizationReleaseInProgressTimeout()))
+            {
+                return SkippedResult();
+            }
+
+            var providerSignalTrigger = IsProviderSignalTrigger(trigger);
             if (reservation.AuthorizationReleaseNextAttemptAtUtc.HasValue &&
-                reservation.AuthorizationReleaseNextAttemptAtUtc.Value > now)
+                reservation.AuthorizationReleaseNextAttemptAtUtc.Value > now &&
+                !providerSignalTrigger)
             {
                 return new PaymentAuthorizationReleaseResult
                 {
@@ -52,16 +66,7 @@ namespace OCPP.Core.Server.Payments
             var maxAttempts = ResolveAuthorizationReleaseMaxAttempts();
             if (reservation.AuthorizationReleaseAttemptCount >= maxAttempts)
             {
-                const string exhausted = "Authorization release retry budget exhausted.";
-                reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.PermanentFailure;
-                reservation.AuthorizationReleaseNextAttemptAtUtc = null;
-                reservation.AuthorizationReleaseLastError = exhausted;
-                dbContext.SaveChanges();
-                return new PaymentAuthorizationReleaseResult
-                {
-                    Outcome = PaymentAuthorizationReleaseOutcome.PermanentFailure,
-                    Error = exhausted
-                };
+                return VerifyAuthorizationReleaseAfterRetryBudget(dbContext, reservation);
             }
 
             var attempt = BeginAuthorizationReleaseAttempt(dbContext, reservation, trigger, now);
@@ -70,11 +75,6 @@ namespace OCPP.Core.Server.Payments
                 !string.Equals(reservation.Status, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase))
             {
                 return FinishReviewRequired(dbContext, reservation, attempt, "Reservation is not an eligible terminal no-charge status.");
-            }
-
-            if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
-            {
-                return FinishReviewRequired(dbContext, reservation, attempt, "Payment authorization identifier is missing.");
             }
 
             if ((reservation.CapturedAmountCents ?? 0) > 0 || reservation.CapturedAtUtc.HasValue)
@@ -87,13 +87,80 @@ namespace OCPP.Core.Server.Payments
                 return FinishReviewRequired(dbContext, reservation, attempt, "An active transaction still exists for this reservation.");
             }
 
-            if (InvoiceSubmissionLogLookup.HasSubmittedOrExternalInvoice(
-                dbContext,
-                reservation.ReservationId,
-                _logger,
-                "authorization release eligibility"))
+            if (!InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
+                    dbContext,
+                    reservation.ReservationId,
+                    _logger,
+                    "authorization release eligibility",
+                    out var hasSubmittedOrExternalInvoice))
+            {
+                return FinishReviewRequired(
+                    dbContext,
+                    reservation,
+                    attempt,
+                    "Unable to verify invoice exclusion; automatic release is forbidden.");
+            }
+
+            if (hasSubmittedOrExternalInvoice)
             {
                 return FinishReviewRequired(dbContext, reservation, attempt, "Submitted or external invoice evidence exists.");
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
+            {
+                if (string.IsNullOrWhiteSpace(reservation.StripeCheckoutSessionId))
+                {
+                    return FinishReviewRequired(
+                        dbContext,
+                        reservation,
+                        attempt,
+                        "Payment authorization identifier and checkout session identifier are missing.");
+                }
+
+                Session checkoutSession;
+                try
+                {
+                    checkoutSession = _sessionService.Get(reservation.StripeCheckoutSessionId);
+                }
+                catch (StripeException ex)
+                {
+                    return FinishProviderFailure(dbContext, reservation, attempt, ex, maxAttempts);
+                }
+
+                if (checkoutSession == null ||
+                    !string.Equals(checkoutSession.Id, reservation.StripeCheckoutSessionId, StringComparison.Ordinal))
+                {
+                    return FinishReviewRequired(
+                        dbContext,
+                        reservation,
+                        attempt,
+                        "Provider checkout session identifier is missing or inconsistent.");
+                }
+
+                if (!ProviderOwnershipMatches(checkoutSession, reservation.ReservationId))
+                {
+                    return FinishReviewRequired(
+                        dbContext,
+                        reservation,
+                        attempt,
+                        "Provider checkout session ownership metadata is missing or inconsistent.");
+                }
+
+                if (string.IsNullOrWhiteSpace(checkoutSession.PaymentIntentId))
+                {
+                    return FinishIndeterminateProviderResult(
+                        dbContext,
+                        reservation,
+                        attempt,
+                        "payment_intent_linkage_pending",
+                        "Provider checkout session has not linked a payment authorization yet.",
+                        maxAttempts);
+                }
+
+                reservation.StripePaymentIntentId = checkoutSession.PaymentIntentId;
+                reservation.UpdatedAtUtc = now;
+                attempt.StripePaymentIntentId = Truncate(checkoutSession.PaymentIntentId, 200);
+                dbContext.SaveChanges();
             }
 
             PaymentIntent paymentIntent;
@@ -118,6 +185,15 @@ namespace OCPP.Core.Server.Payments
             if (!ProviderOwnershipMatches(paymentIntent, reservation.ReservationId))
             {
                 return FinishReviewRequired(dbContext, reservation, attempt, "Provider ownership metadata is missing or inconsistent.");
+            }
+
+            if (paymentIntent.AmountReceived > 0)
+            {
+                return FinishReviewRequired(
+                    dbContext,
+                    reservation,
+                    attempt,
+                    "Provider payment authorization contains received funds; automatic release is forbidden.");
             }
 
             if (string.Equals(paymentIntent.Status, "canceled", StringComparison.OrdinalIgnoreCase))
@@ -154,8 +230,18 @@ namespace OCPP.Core.Server.Payments
                         reservation.ReservationId,
                         attempt.AttemptNumber));
 
-                if (canceled != null &&
-                    !string.Equals(canceled.Status, "canceled", StringComparison.OrdinalIgnoreCase))
+                if (canceled == null)
+                {
+                    return FinishIndeterminateProviderResult(
+                        dbContext,
+                        reservation,
+                        attempt,
+                        "missing_cancel_response",
+                        "Provider cancellation returned a missing status response.",
+                        maxAttempts);
+                }
+
+                if (!string.Equals(canceled.Status, "canceled", StringComparison.OrdinalIgnoreCase))
                 {
                     return FinishReviewRequired(
                         dbContext,
@@ -169,7 +255,7 @@ namespace OCPP.Core.Server.Payments
                     reservation,
                     attempt,
                     PaymentAuthorizationReleaseOutcome.Released,
-                    attempt.ProviderStatus);
+                    canceled.Status);
             }
             catch (StripeException ex)
             {
@@ -272,7 +358,9 @@ namespace OCPP.Core.Server.Payments
                 100);
             var message = SanitizeProviderError(
                 exception?.StripeError?.Message ?? exception?.Message ?? "Provider request failed.");
-            var shouldRetry = IsTransientProviderFailure(exception) && attempt.AttemptNumber < maxAttempts;
+            // A transient failure on the last mutation attempt still schedules one final,
+            // read-only provider verification before the reservation becomes permanent failure.
+            var shouldRetry = IsTransientProviderFailure(exception) && attempt.AttemptNumber <= maxAttempts;
             var nextRetry = shouldRetry
                 ? now.Add(ResolveAuthorizationReleaseRetryDelay(attempt.AttemptNumber))
                 : (DateTime?)null;
@@ -302,6 +390,275 @@ namespace OCPP.Core.Server.Payments
             };
         }
 
+        private PaymentAuthorizationReleaseResult FinishIndeterminateProviderResult(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            PaymentAuthorizationReleaseAttempt attempt,
+            string errorCode,
+            string message,
+            int maxAttempts)
+        {
+            var now = _utcNow();
+            var sanitized = SanitizeProviderError(message);
+            var shouldRetry = attempt.AttemptNumber <= maxAttempts;
+            var nextRetry = shouldRetry
+                ? now.Add(ResolveAuthorizationReleaseRetryDelay(attempt.AttemptNumber))
+                : (DateTime?)null;
+            var outcome = shouldRetry
+                ? PaymentAuthorizationReleaseOutcome.RetryScheduled
+                : PaymentAuthorizationReleaseOutcome.PermanentFailure;
+
+            attempt.FinishedAtUtc = now;
+            attempt.Outcome = outcome;
+            attempt.ErrorCode = Truncate(errorCode, 100);
+            attempt.ErrorMessage = sanitized;
+            attempt.NextRetryAtUtc = nextRetry;
+
+            reservation.AuthorizationReleaseState = shouldRetry
+                ? PaymentAuthorizationReleaseState.RetryScheduled
+                : PaymentAuthorizationReleaseState.PermanentFailure;
+            reservation.AuthorizationReleaseNextAttemptAtUtc = nextRetry;
+            reservation.AuthorizationReleaseLastError = sanitized;
+            dbContext.SaveChanges();
+
+            return new PaymentAuthorizationReleaseResult
+            {
+                Outcome = outcome,
+                ProviderStatus = attempt.ProviderStatus,
+                NextRetryAtUtc = nextRetry,
+                Error = sanitized
+            };
+        }
+
+        private PaymentAuthorizationReleaseResult VerifyAuthorizationReleaseAfterRetryBudget(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation)
+        {
+            if (!string.Equals(reservation.Status, PaymentReservationStatus.Abandoned, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(reservation.Status, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase))
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    null,
+                    "Reservation is not an eligible terminal no-charge status.");
+            }
+
+            if ((reservation.CapturedAmountCents ?? 0) > 0 || reservation.CapturedAtUtc.HasValue)
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    null,
+                    "Captured payment evidence exists.");
+            }
+
+            if (HasActiveTransaction(dbContext, reservation))
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    null,
+                    "An active transaction still exists for this reservation.");
+            }
+
+            if (!InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
+                    dbContext,
+                    reservation.ReservationId,
+                    _logger,
+                    "authorization release final verification",
+                    out var hasSubmittedOrExternalInvoice))
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    null,
+                    "Unable to verify invoice exclusion; automatic release is forbidden.");
+            }
+
+            if (hasSubmittedOrExternalInvoice)
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    null,
+                    "Submitted or external invoice evidence exists.");
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
+            {
+                if (string.IsNullOrWhiteSpace(reservation.StripeCheckoutSessionId))
+                {
+                    return FinishReservationOnly(
+                        dbContext,
+                        reservation,
+                        PaymentAuthorizationReleaseState.PermanentFailure,
+                        PaymentAuthorizationReleaseOutcome.PermanentFailure,
+                        null,
+                        "Authorization release retry budget exhausted without provider identifiers.");
+                }
+
+                Session checkoutSession;
+                try
+                {
+                    checkoutSession = _sessionService.Get(reservation.StripeCheckoutSessionId);
+                }
+                catch (StripeException ex)
+                {
+                    return FinishReservationOnly(
+                        dbContext,
+                        reservation,
+                        PaymentAuthorizationReleaseState.PermanentFailure,
+                        PaymentAuthorizationReleaseOutcome.PermanentFailure,
+                        null,
+                        FormatProviderError(ex, "Provider checkout verification failed."));
+                }
+
+                if (checkoutSession == null ||
+                    !string.Equals(checkoutSession.Id, reservation.StripeCheckoutSessionId, StringComparison.Ordinal) ||
+                    !ProviderOwnershipMatches(checkoutSession, reservation.ReservationId))
+                {
+                    return FinishReservationOnly(
+                        dbContext,
+                        reservation,
+                        PaymentAuthorizationReleaseState.ReviewRequired,
+                        PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                        checkoutSession?.Status,
+                        "Provider checkout session is missing, inconsistent, or not owned by the reservation.");
+                }
+
+                if (string.IsNullOrWhiteSpace(checkoutSession.PaymentIntentId))
+                {
+                    return FinishReservationOnly(
+                        dbContext,
+                        reservation,
+                        PaymentAuthorizationReleaseState.PermanentFailure,
+                        PaymentAuthorizationReleaseOutcome.PermanentFailure,
+                        checkoutSession.Status,
+                        "Authorization release retry budget exhausted before payment authorization linkage completed.");
+                }
+
+                reservation.StripePaymentIntentId = checkoutSession.PaymentIntentId;
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+            }
+
+            PaymentIntent paymentIntent;
+            try
+            {
+                paymentIntent = _paymentIntentService.Get(reservation.StripePaymentIntentId);
+            }
+            catch (StripeException ex)
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.PermanentFailure,
+                    PaymentAuthorizationReleaseOutcome.PermanentFailure,
+                    null,
+                    FormatProviderError(ex, "Final provider verification failed."));
+            }
+
+            if (paymentIntent == null ||
+                !string.Equals(paymentIntent.Id, reservation.StripePaymentIntentId, StringComparison.Ordinal) ||
+                !ProviderOwnershipMatches(paymentIntent, reservation.ReservationId))
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    paymentIntent?.Status,
+                    "Final provider verification returned missing, inconsistent, or unowned payment state.");
+            }
+
+            if (paymentIntent.AmountReceived > 0 ||
+                string.Equals(paymentIntent.Status, "succeeded", StringComparison.OrdinalIgnoreCase))
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    paymentIntent.Status,
+                    "Final provider verification found received or succeeded payment evidence.");
+            }
+
+            if (string.Equals(paymentIntent.Status, "canceled", StringComparison.OrdinalIgnoreCase))
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.Released,
+                    PaymentAuthorizationReleaseOutcome.AlreadyReleased,
+                    paymentIntent.Status,
+                    null);
+            }
+
+            return FinishReservationOnly(
+                dbContext,
+                reservation,
+                PaymentAuthorizationReleaseState.PermanentFailure,
+                PaymentAuthorizationReleaseOutcome.PermanentFailure,
+                paymentIntent.Status,
+                $"Authorization release retry budget exhausted with provider status '{Truncate(paymentIntent.Status, 50) ?? "missing"}'.");
+        }
+
+        private PaymentAuthorizationReleaseResult FinishReservationOnly(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            string state,
+            string outcome,
+            string providerStatus,
+            string message)
+        {
+            var now = _utcNow();
+            var sanitized = SanitizeProviderError(message);
+            reservation.AuthorizationReleaseState = state;
+            reservation.AuthorizationReleaseLastAttemptAtUtc = now;
+            reservation.AuthorizationReleaseNextAttemptAtUtc = null;
+            reservation.AuthorizationReleaseLastError = sanitized;
+            var latestAttempt = dbContext.PaymentAuthorizationReleaseAttempts
+                .FirstOrDefault(candidate =>
+                    candidate.ReservationId == reservation.ReservationId &&
+                    candidate.AttemptNumber == reservation.AuthorizationReleaseAttemptCount);
+            if (latestAttempt != null &&
+                (string.Equals(latestAttempt.Outcome, PaymentAuthorizationReleaseOutcome.InProgress, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(latestAttempt.Outcome, PaymentAuthorizationReleaseOutcome.RetryScheduled, StringComparison.OrdinalIgnoreCase)))
+            {
+                latestAttempt.FinishedAtUtc = now;
+                latestAttempt.ProviderStatus = Truncate(providerStatus, 50);
+                latestAttempt.Outcome = outcome;
+                latestAttempt.NextRetryAtUtc = null;
+                if (!string.IsNullOrWhiteSpace(sanitized))
+                {
+                    latestAttempt.ErrorMessage = sanitized;
+                }
+            }
+            if (string.Equals(state, PaymentAuthorizationReleaseState.Released, StringComparison.OrdinalIgnoreCase))
+            {
+                reservation.AuthorizationReleasedAtUtc = now;
+            }
+            dbContext.SaveChanges();
+
+            return new PaymentAuthorizationReleaseResult
+            {
+                Outcome = outcome,
+                ProviderStatus = Truncate(providerStatus, 50),
+                Error = sanitized
+            };
+        }
+
         private bool HasActiveTransaction(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
         {
             return dbContext.Transactions.Any(transaction =>
@@ -309,13 +666,27 @@ namespace OCPP.Core.Server.Payments
                 ((reservation.TransactionId.HasValue && transaction.TransactionId == reservation.TransactionId.Value) ||
                  (transaction.ChargePointId == reservation.ChargePointId &&
                   transaction.ConnectorId == reservation.ConnectorId &&
-                  transaction.StartTagId == reservation.ChargeTagId)));
+                  !string.IsNullOrWhiteSpace(transaction.StartTagId) &&
+                  (transaction.StartTagId == reservation.OcppIdTag ||
+                   transaction.StartTagId == reservation.ChargeTagId))));
         }
 
         private static bool ProviderOwnershipMatches(PaymentIntent paymentIntent, Guid reservationId)
         {
             if (paymentIntent?.Metadata == null ||
                 !paymentIntent.Metadata.TryGetValue("reservation_id", out var providerReservationId) ||
+                !Guid.TryParse(providerReservationId, out var parsedReservationId))
+            {
+                return false;
+            }
+
+            return parsedReservationId == reservationId;
+        }
+
+        private static bool ProviderOwnershipMatches(Session session, Guid reservationId)
+        {
+            if (session?.Metadata == null ||
+                !session.Metadata.TryGetValue("reservation_id", out var providerReservationId) ||
                 !Guid.TryParse(providerReservationId, out var parsedReservationId))
             {
                 return false;
@@ -340,6 +711,17 @@ namespace OCPP.Core.Server.Payments
             return TimeSpan.FromMinutes(Math.Min(24 * 60, baseMinutes * multiplier));
         }
 
+        private TimeSpan ResolveAuthorizationReleaseInProgressTimeout()
+        {
+            var configuredMinutes = _configuration?.GetValue<int?>("Maintenance:AuthorizationReleaseInProgressTimeoutMinutes") ??
+                                    DefaultAuthorizationReleaseInProgressTimeoutMinutes;
+            return TimeSpan.FromMinutes(Math.Clamp(configuredMinutes, 1, 60));
+        }
+
+        private static bool IsProviderSignalTrigger(string trigger) =>
+            string.Equals(trigger, PaymentAuthorizationReleaseTrigger.CheckoutCompletedWebhook, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trigger, PaymentAuthorizationReleaseTrigger.AmountCapturableWebhook, StringComparison.OrdinalIgnoreCase);
+
         private static bool IsTransientProviderFailure(StripeException exception)
         {
             if (exception == null) return false;
@@ -353,6 +735,13 @@ namespace OCPP.Core.Server.Payments
                    string.Equals(type, "api_connection_error", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(type, "api_error", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(type, "rate_limit_error", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FormatProviderError(StripeException exception, string fallback)
+        {
+            var code = exception?.StripeError?.Code ?? exception?.StripeError?.Type ?? "stripe_error";
+            var message = exception?.StripeError?.Message ?? exception?.Message ?? fallback;
+            return $"{Truncate(code, 100)}: {message}";
         }
 
         private static string SanitizeProviderError(string value)

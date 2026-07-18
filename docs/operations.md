@@ -59,7 +59,7 @@ Important configuration areas:
 | Database | `ConnectionStrings:SqlServer`, `ConnectionStrings:SQLite`, `AutoMigrateDB` |
 | Server API | `ApiKey`, `ServerApiUrl` in management |
 | OCPP | `MessageDumpDir`, `DbMessageLog`, `ShowIndexInfo`, `MaxMessageSize`, `ValidateMessages`, `DenyConcurrentTx`, `HeartBeatInterval` |
-| Maintenance | `Maintenance:PendingPaymentTimeoutMinutes`, `Maintenance:ReservationTimeoutMinutes`, `Maintenance:StatusReleaseMinutes`, `Maintenance:CleanupIntervalSeconds`, `Maintenance:IdleWarningSweepSeconds`, `Maintenance:AvailableStatusOpenTransactionGraceMinutes`, `Maintenance:AuthorizationReleaseMaxAttempts`, `Maintenance:AuthorizationReleaseRetryBaseMinutes` |
+| Maintenance | `Maintenance:PendingPaymentTimeoutMinutes`, `Maintenance:ReservationTimeoutMinutes`, `Maintenance:StatusReleaseMinutes`, `Maintenance:CleanupIntervalSeconds`, `Maintenance:IdleWarningSweepSeconds`, `Maintenance:AvailableStatusOpenTransactionGraceMinutes`, `Maintenance:AuthorizationReleaseMaxAttempts`, `Maintenance:AuthorizationReleaseRetryBaseMinutes`, `Maintenance:AuthorizationReleaseInProgressTimeoutMinutes` |
 | Payments | `Payments:RequirePreparingBeforeRemoteStart`, `Payments:RemoteStartIdTokenType`, `Payments:StartWindowMinutes`, `Payments:MinimumSessionFeeKwh`, `Payments:MinimumChargeAmountCents`, `Payments:IdleFeeExcludedWindow`, `Payments:IdleFeeExcludedTimeZoneId`, `Payments:IdleAutoStopMinutes`, `Payments:ChargerResponseTimeoutMs` |
 | Stripe | `Stripe:Enabled`, `Stripe:UseMockServices`, `Stripe:ApiKey`, `Stripe:WebhookSecret`, `Stripe:AllowInsecureWebhooks`, `Stripe:Currency`, `Stripe:ReturnBaseUrl`, `Stripe:ProductName`, `Stripe:MockCustomerEmail`, `Stripe:MockDiagnosticsDirectory` |
 | Notifications | `Notifications:EnableCustomerEmails`, `Notifications:IdleWarningLeadMinutes`, `Notifications:SinkDirectory`, `Notifications:FromAddress`, `Notifications:FromName`, `Notifications:ReplyToAddress`, `Notifications:BccAddress`, `Notifications:Smtp:*` |
@@ -90,7 +90,7 @@ SQL Server:
 - `make migrate` scaffolds a timestamped migration name.
 - Always run `make check-migration-metadata` after migration changes.
 
-Migration `AddPaymentAuthorizationReleaseReconciliation` adds nullable release-summary fields to `ChargePaymentReservation` and an append-only `PaymentAuthorizationReleaseAttempt` audit table. Nullable state is intentional: existing terminal reservations remain unarmed, so deploying the migration does not start historical cancellation or remediation.
+Migration `AddPaymentAuthorizationReleaseReconciliation` adds nullable release-state, timestamp, and error fields plus a zero-valued attempt counter to `ChargePaymentReservation`, together with an append-only `PaymentAuthorizationReleaseAttempt` audit table. Nullable state is intentional: existing terminal reservations remain unarmed, so deploying the migration does not start historical cancellation or remediation.
 
 SQLite:
 
@@ -153,7 +153,8 @@ Unknown / verify:
 - SQL Server migrations are not validated by SQLite E2E runs.
 - `Payments:MinimumSessionFeeKwh` defaults to `1.0`. Completed sessions with missing, inconsistent, or lower delivered-energy readings are no-charge: billable line amounts are zeroed, the uncaptured payment intent is cancelled, and invoice creation plus paid-completion emails are skipped.
 - `Payments:MinimumChargeAmountCents` defaults to `50`. Positive final amounts at or above the delivered-energy threshold but below the configured minimum cancel the uncaptured payment intent and skip invoice creation and paid-completion emails. Exactly the configured minimum remains capturable.
-- Authorization release retries default to four total attempts with a one-minute exponential base delay. Set `Maintenance:AuthorizationReleaseMaxAttempts` and `Maintenance:AuthorizationReleaseRetryBaseMinutes` to change those bounds. Provider state and reservation ownership are rechecked on every attempt; active, captured, invoiced, succeeded, or ambiguous cases are not cancelled automatically.
+- Authorization release retries default to four mutation attempts with a one-minute exponential base delay, followed by one final read-only provider verification after an indeterminate last attempt. Set `Maintenance:AuthorizationReleaseMaxAttempts` and `Maintenance:AuthorizationReleaseRetryBaseMinutes` to change those bounds. A five-minute in-progress lease prevents overlapping sweeps and is configurable with `Maintenance:AuthorizationReleaseInProgressTimeoutMinutes`. Provider state and reservation ownership are rechecked on every attempt; active, captured, invoiced, succeeded, received-funds, or ambiguous cases are not cancelled automatically.
+- If checkout completion linkage was missed or reordered, reconciliation retrieves the owned Checkout Session directly before reading its PaymentIntent. Missing or mismatched session/intent ownership, and inability to verify invoice state, stop automatic release and require review.
 - `payment_intent.amount_capturable_updated` must remain enabled on the Stripe webhook endpoint. It closes the race where a terminal reservation becomes capturable after checkout/cleanup ordering, while webhook-event deduplication prevents repeat cancellation.
 - Public payment behavior depends on server, management, database, Stripe/mock Stripe, and time-based cleanup settings.
 - OCPP schema validation is optional and logs/continues on validation errors.
