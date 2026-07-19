@@ -71,6 +71,8 @@ Important configuration areas:
 
 The checked `appsettings.json` files include development/sample values. Override secret-like values for any real run.
 
+`Payments:StartWindowMinutes` is applied when payment authorization succeeds and stored as an absolute UTC deadline on the reservation. Confirmation and webhook authorization paths use the same configured value. A reservation remains eligible before that stored deadline and expires at the deadline; later configuration changes do not rewrite already-persisted deadlines.
+
 ## Database Operations
 
 Confirmed company invoice buyer data is stored as nullable bounded columns on `ChargePaymentReservation`. Migration `AddInvoiceBuyerSnapshot` is non-destructive for existing reservations. New public sessions must confirm the complete buyer snapshot before Stripe Checkout is created. Existing legacy R1 reservations can still build from Stripe metadata, while newly confirmed requests use the durable reservation snapshot as the invoice source of truth. The legacy buyer-data endpoint remains available for compatibility, but the public status page no longer offers post-checkout buyer entry.

@@ -63,6 +63,8 @@ namespace OCPP.Core.Server.Payments
             }
         }
 
+        protected virtual DateTime UtcNow => DateTime.UtcNow;
+
         protected virtual async Task CleanupAsync(CancellationToken token)
         {
             using var scope = _scopeFactory.CreateScope();
@@ -74,7 +76,7 @@ namespace OCPP.Core.Server.Payments
                 _configuration.GetValue<int?>("Maintenance:ReservationTimeoutMinutes") ??
                 15;
 
-            var now = DateTime.UtcNow;
+            var now = UtcNow;
             var stale = Enumerable.Empty<ChargePaymentReservation>();
             if (pendingTimeoutMinutes > 0)
             {
@@ -92,7 +94,7 @@ namespace OCPP.Core.Server.Payments
                     (r.Status == PaymentReservationStatus.Authorized ||
                      r.Status == PaymentReservationStatus.StartRequested) &&
                     r.StartDeadlineAtUtc.HasValue &&
-                    r.StartDeadlineAtUtc < startDeadline &&
+                    r.StartDeadlineAtUtc <= startDeadline &&
                     r.TransactionId == null)
                 .ToListAsync(token);
 

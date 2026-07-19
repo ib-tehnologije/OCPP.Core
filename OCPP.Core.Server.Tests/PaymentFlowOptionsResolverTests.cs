@@ -25,6 +25,23 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Resolve_UsesConfiguredStartWindowMinutes()
+        {
+            using var context = CreateContext();
+
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Payments:StartWindowMinutes"] = "10"
+                })
+                .Build();
+
+            var resolved = PaymentFlowOptionsResolver.Resolve(configuration, context);
+
+            Assert.Equal(10, resolved.StartWindowMinutes);
+        }
+
+        [Fact]
         public void Resolve_DefaultsMinimumSessionFeeToOneKwh()
         {
             using var context = CreateContext();
