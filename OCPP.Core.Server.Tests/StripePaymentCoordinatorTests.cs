@@ -925,6 +925,114 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void ConfirmReservation_UsesConfiguredStartWindowFromAuthorizationTime()
+        {
+            var now = new DateTime(2026, 7, 19, 20, 0, 0, DateTimeKind.Utc);
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-CONFIRM-DEADLINE",
+                ConnectorId = 1,
+                StripeCheckoutSessionId = "sess_confirm_deadline",
+                Status = PaymentReservationStatus.Pending,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG-CONFIRM-DEADLINE",
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_confirm_deadline",
+                    PaymentIntentId = "pi_confirm_deadline",
+                    Status = "complete",
+                    PaymentStatus = "paid"
+                }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_confirm_deadline",
+                    Status = "requires_capture",
+                    Amount = 1000
+                }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                flowOptions: new PaymentFlowOptions { StartWindowMinutes = 10 },
+                now: () => now);
+
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_confirm_deadline");
+
+            Assert.True(result.Success);
+            Assert.Equal(now, result.Reservation.AuthorizedAtUtc);
+            Assert.Equal(now.AddMinutes(10), result.Reservation.StartDeadlineAtUtc);
+        }
+
+        [Fact]
+        public void ConfirmReservation_PreservesExistingAuthorizedDeadline()
+        {
+            var now = new DateTime(2026, 7, 19, 20, 0, 0, DateTimeKind.Utc);
+            var authorizedAt = now.AddMinutes(-2);
+            var existingDeadline = authorizedAt.AddMinutes(5);
+            using var context = CreateContext();
+            var reservationId = Guid.NewGuid();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-EXISTING-DEADLINE",
+                ConnectorId = 1,
+                StripeCheckoutSessionId = "sess_existing_deadline",
+                Status = PaymentReservationStatus.Authorized,
+                AuthorizedAtUtc = authorizedAt,
+                StartDeadlineAtUtc = existingDeadline,
+                MaxAmountCents = 1000,
+                ChargeTagId = "TAG-EXISTING-DEADLINE",
+                Currency = "eur"
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_existing_deadline",
+                    PaymentIntentId = "pi_existing_deadline",
+                    Status = "complete",
+                    PaymentStatus = "paid"
+                }
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = "pi_existing_deadline",
+                    Status = "requires_capture",
+                    Amount = 1000
+                }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                flowOptions: new PaymentFlowOptions { StartWindowMinutes = 10 },
+                now: () => now);
+
+            var result = coordinator.ConfirmReservation(context, reservationId, "sess_existing_deadline");
+
+            Assert.True(result.Success);
+            Assert.Equal(authorizedAt, result.Reservation.AuthorizedAtUtc);
+            Assert.Equal(existingDeadline, result.Reservation.StartDeadlineAtUtc);
+        }
+
+        [Fact]
         public void ConfirmReservation_DoesNotReauthorizeTerminalReservation()
         {
             using var context = CreateContext();
@@ -3059,8 +3167,9 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void HandleWebhookEvent_CheckoutCompletedMarksAuthorized()
+        public void HandleWebhookEvent_CheckoutCompletedMarksAuthorizedWithConfiguredDeadline()
         {
+            var now = new DateTime(2026, 7, 19, 20, 0, 0, DateTimeKind.Utc);
             using var context = CreateContext();
             var reservationId = Guid.NewGuid();
             context.ChargePaymentReservations.Add(new ChargePaymentReservation
@@ -3098,14 +3207,22 @@ namespace OCPP.Core.Server.Tests
             var eventFactory = new FakeEventFactory { EventToReturn = evt };
 
             var options = new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return", WebhookSecret = "whsec_test" };
-            var coordinator = CreateCoordinator(context, sessionService, intentService, stripeOptions: options, eventFactory: eventFactory);
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                intentService,
+                stripeOptions: options,
+                flowOptions: new PaymentFlowOptions { StartWindowMinutes = 10 },
+                now: () => now,
+                eventFactory: eventFactory);
 
             coordinator.HandleWebhookEvent(context, "payload", "sig");
 
             var reservation = context.ChargePaymentReservations.Single(r => r.StripeCheckoutSessionId == "sess_webhook");
             Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
             Assert.Equal("pi_webhook", reservation.StripePaymentIntentId);
-            Assert.NotNull(reservation.AuthorizedAtUtc);
+            Assert.Equal(now, reservation.AuthorizedAtUtc);
+            Assert.Equal(now.AddMinutes(10), reservation.StartDeadlineAtUtc);
             Assert.Null(reservation.LastError);
             Assert.Null(reservation.FailureCode);
             Assert.Null(reservation.FailureMessage);

@@ -368,6 +368,116 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task CleanupAsync_KeepsReservationValidAtNineMinutesFiftyNineSeconds()
+        {
+            var now = new DateTime(2026, 7, 19, 20, 0, 0, DateTimeKind.Utc);
+            var authorizedAt = now.AddMinutes(-9).AddSeconds(-59);
+            var existingDeadline = authorizedAt.AddMinutes(10);
+            var coordinator = new RecordingPaymentCoordinator();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30"
+                });
+
+            var reservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP-BEFORE-DEADLINE",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG-BEFORE-DEADLINE",
+                    StripePaymentIntentId = "pi_before_deadline",
+                    Status = PaymentReservationStatus.Authorized,
+                    AuthorizedAtUtc = authorizedAt,
+                    StartDeadlineAtUtc = existingDeadline,
+                    Currency = "eur",
+                    CreatedAtUtc = authorizedAt,
+                    UpdatedAtUtc = authorizedAt
+                });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>(),
+                utcNow: now);
+
+            await service.RunOnce();
+
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                var reservation = db.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+
+                Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
+                Assert.Equal(existingDeadline, reservation.StartDeadlineAtUtc);
+            }
+
+            Assert.Empty(coordinator.CancelCalls);
+        }
+
+        [Fact]
+        public async Task CleanupAsync_MarksStartTimeout_ExactlyAtDeadline_OnlyOnce()
+        {
+            var now = new DateTime(2026, 7, 19, 20, 0, 0, DateTimeKind.Utc);
+            var coordinator = new RecordingPaymentCoordinator();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30"
+                });
+
+            var reservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP-DEADLINE",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG-DEADLINE",
+                    StripePaymentIntentId = "pi_deadline",
+                    Status = PaymentReservationStatus.Authorized,
+                    AuthorizedAtUtc = now.AddMinutes(-10),
+                    StartDeadlineAtUtc = now,
+                    Currency = "eur",
+                    CreatedAtUtc = now.AddMinutes(-10),
+                    UpdatedAtUtc = now.AddMinutes(-10)
+                });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>(),
+                utcNow: now);
+
+            await service.RunOnce();
+            await service.RunOnce();
+
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                var reservation = db.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+
+                Assert.Equal(PaymentReservationStatus.StartTimeout, reservation.Status);
+                Assert.Equal("StartTimeout", reservation.FailureCode);
+            }
+
+            Assert.Single(coordinator.CancelCalls);
+            Assert.Equal(reservationId, coordinator.CancelCalls[0].ReservationId);
+        }
+
+        [Fact]
         public async Task CleanupAsync_ClosesChargingReservation_WhenConnectorPersistedAvailable()
         {
             var coordinator = new RecordingPaymentCoordinator();
@@ -726,19 +836,25 @@ namespace OCPP.Core.Server.Tests
 
     internal sealed class CleanupServiceHarness : PaymentReservationCleanupService
     {
+        private readonly DateTime? _utcNow;
+
         public CleanupServiceHarness(
             IServiceScopeFactory scopeFactory,
             IConfiguration configuration,
-            ILogger<PaymentReservationCleanupService>? logger = null)
+            ILogger<PaymentReservationCleanupService>? logger = null,
+            DateTime? utcNow = null)
             : base(
                 scopeFactory,
                 logger ?? NullLogger<PaymentReservationCleanupService>.Instance,
                 configuration,
                 Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 }))
         {
+            _utcNow = utcNow;
         }
 
         public Task RunOnce(CancellationToken token = default) => CleanupAsync(token);
+
+        protected override DateTime UtcNow => _utcNow ?? base.UtcNow;
     }
 
     internal sealed class RecordingLogger<T> : ILogger<T>

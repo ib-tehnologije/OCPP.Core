@@ -20,6 +20,18 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("invoice.customerBuyerDataLocked", view);
         }
 
+        [Fact]
+        public void PublicStatusView_UsesServerProvidedStartDeadlineForCountdown()
+        {
+            var view = ReadView();
+
+            Assert.Contains("data?.startDeadlineAtUtc", view);
+            Assert.Contains("deadline.getTime() - Date.now()", view);
+            Assert.Contains("status.hint.awaitingPlugTimed", view);
+            Assert.DoesNotContain("5 minutes", view, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("5-minute", view, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static string ReadView()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
