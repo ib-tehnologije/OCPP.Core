@@ -164,8 +164,9 @@ namespace OCPP.Core.Server.Tests
                 InvoiceBuyerCity = "Praha",
                 InvoiceBuyerEmail = "confirmed@example.cz",
                 InvoiceBuyerTaxIdentifier = "CZ 123-ABC",
+                InvoiceBuyerNormalizedVatIdentifier = "CZ12345678",
                 InvoiceBuyerRegistrationNumber = "C 12345",
-                InvoiceBuyerIdentifierIsVatRegistration = false,
+                InvoiceBuyerIdentifierIsVatRegistration = true,
                 InvoiceBuyerConfirmedAtUtc = DateTime.UtcNow
             };
             var transaction = new Transaction
@@ -195,9 +196,9 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("110 00", draft.BuyerPostalCode);
             Assert.Equal("Praha", draft.BuyerCity);
             Assert.Equal("confirmed@example.cz", draft.BuyerEmail);
-            Assert.Equal("CZ 123-ABC", draft.BuyerTaxIdentifier);
+            Assert.Equal("CZ12345678", draft.BuyerTaxIdentifier);
             Assert.Equal("C 12345", draft.BuyerRegistrationNumber);
-            Assert.False(draft.BuyerIdentifierIsVatRegistration);
+            Assert.True(draft.BuyerIdentifierIsVatRegistration);
         }
     }
 }

@@ -72,6 +72,12 @@ namespace OCPP.Core.Database
         public string InvoiceBuyerCity { get; set; }
         public string InvoiceBuyerEmail { get; set; }
         public string InvoiceBuyerTaxIdentifier { get; set; }
+        public string InvoiceBuyerOriginalTaxIdentifier { get; set; }
+        public string InvoiceBuyerNormalizedVatIdentifier { get; set; }
+        public string InvoiceBuyerVatValidationStatus { get; set; }
+        public string InvoiceBuyerVatVerificationStatus { get; set; }
+        public DateTime? InvoiceBuyerVatVerificationCheckedAtUtc { get; set; }
+        public string InvoiceBuyerVatVerificationReference { get; set; }
         public string InvoiceBuyerRegistrationNumber { get; set; }
         public bool? InvoiceBuyerIdentifierIsVatRegistration { get; set; }
         public DateTime? InvoiceBuyerConfirmedAtUtc { get; set; }

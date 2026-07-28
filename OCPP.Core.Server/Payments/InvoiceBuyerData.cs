@@ -15,6 +15,9 @@ namespace OCPP.Core.Server.Payments
         public string City { get; set; }
         public string Email { get; set; }
         public string TaxIdentifier { get; set; }
+        public string OriginalTaxIdentifier { get; set; }
+        public string NormalizedVatIdentifier { get; set; }
+        public string ViesCountryCode { get; set; }
         public string RegistrationNumber { get; set; }
         public bool IdentifierIsVatRegistration { get; set; }
     }
@@ -116,6 +119,24 @@ namespace OCPP.Core.Server.Payments
                 return Invalid("InvalidOib", "BuyerTaxIdentifier", "Valid OIB (11 digits) is required for a Croatian company invoice.");
             }
 
+            string normalizedVatIdentifier = null;
+            string viesCountryCode = null;
+            if (!string.Equals(country, "HR", StringComparison.OrdinalIgnoreCase) &&
+                request.BuyerIdentifierIsVatRegistration)
+            {
+                var vatValidation = ForeignVatNumberValidator.ValidateAndNormalize(country, taxIdentifier);
+                if (!vatValidation.Success)
+                {
+                    return Invalid(
+                        vatValidation.Status,
+                        "BuyerTaxIdentifier",
+                        GetVatValidationError(vatValidation.Status));
+                }
+
+                normalizedVatIdentifier = vatValidation.NormalizedVatIdentifier;
+                viesCountryCode = vatValidation.ViesCountryCode;
+            }
+
             return new InvoiceBuyerDataValidationResult
             {
                 Success = true,
@@ -128,7 +149,10 @@ namespace OCPP.Core.Server.Payments
                     PostalCode = fields.Single(field => field.Name == "BuyerPostalCode").Value,
                     City = fields.Single(field => field.Name == "BuyerCity").Value,
                     Email = email,
-                    TaxIdentifier = taxIdentifier,
+                    TaxIdentifier = normalizedVatIdentifier ?? taxIdentifier,
+                    OriginalTaxIdentifier = taxIdentifier,
+                    NormalizedVatIdentifier = normalizedVatIdentifier,
+                    ViesCountryCode = viesCountryCode,
                     RegistrationNumber = fields.Single(field => field.Name == "BuyerRegistrationNumber").Value,
                     IdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration
                 }
@@ -192,6 +216,17 @@ namespace OCPP.Core.Server.Payments
             var checkDigit = 11 - remainder;
             if (checkDigit == 10) checkDigit = 0;
             return checkDigit == value[10] - '0';
+        }
+
+        private static string GetVatValidationError(string status)
+        {
+            return status switch
+            {
+                "UnsupportedVatCountry" => "VAT validation is not available for the selected company country.",
+                "InvalidVatCountryPrefix" => "VAT number prefix does not match the selected company country.",
+                "InvalidVatCharacters" => "VAT number contains characters that are not valid for the selected company country.",
+                _ => "VAT number does not match the published format for the selected company country."
+            };
         }
 
         private static InvoiceBuyerDataValidationResult Invalid(string status, string field, string error) =>

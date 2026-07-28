@@ -75,8 +75,11 @@ namespace OCPP.Core.Server
             services.AddOCPPDbContext(Configuration);
             services.AddControllers();
             services.AddHttpClient();
+            services.AddHttpClient<Payments.IViesVerificationService, Payments.ViesVerificationService>(
+                client => client.BaseAddress = new Uri(Payments.ViesVerificationService.DefaultBaseAddress));
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             services.Configure<Payments.PaymentFlowOptions>(Configuration.GetSection("Payments"));
+            services.Configure<Payments.ViesOptions>(Configuration.GetSection("Payments:Vies"));
             services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
             services.Configure<InvoiceIntegrationOptions>(Configuration.GetSection("Invoices"));
             if (HasSqlServerHangfireStorage)
@@ -126,7 +129,8 @@ namespace OCPP.Core.Server
                 sp.GetRequiredService<Payments.StartChargingMediator>(),
                 sp.GetService<IBackgroundJobClient>(),
                 sp.GetService<Payments.Invoices.IInvoiceIntegrationService>(),
-                sp.GetRequiredService<IConfiguration>()));
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Payments.IViesVerificationService>()));
             services.AddHostedService<Payments.PaymentReservationCleanupService>();
             services.AddHostedService<Payments.IdleFeeWarningEmailService>();
         }

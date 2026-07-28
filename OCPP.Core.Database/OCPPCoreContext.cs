@@ -449,6 +449,11 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.InvoiceBuyerCity).HasMaxLength(100);
                 entity.Property(e => e.InvoiceBuyerEmail).HasMaxLength(254);
                 entity.Property(e => e.InvoiceBuyerTaxIdentifier).HasMaxLength(64);
+                entity.Property(e => e.InvoiceBuyerOriginalTaxIdentifier).HasMaxLength(64);
+                entity.Property(e => e.InvoiceBuyerNormalizedVatIdentifier).HasMaxLength(64);
+                entity.Property(e => e.InvoiceBuyerVatValidationStatus).HasMaxLength(50);
+                entity.Property(e => e.InvoiceBuyerVatVerificationStatus).HasMaxLength(50);
+                entity.Property(e => e.InvoiceBuyerVatVerificationReference).HasMaxLength(100);
                 entity.Property(e => e.InvoiceBuyerRegistrationNumber).HasMaxLength(64);
                 entity.Property(e => e.InvoiceBuyerIdentifierIsVatRegistration);
                 entity.Property(e => e.InvoiceBuyerConfirmedAtUtc)

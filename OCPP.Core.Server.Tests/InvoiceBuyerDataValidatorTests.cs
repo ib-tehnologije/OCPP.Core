@@ -25,6 +25,9 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("HR", result.Data.Country);
             Assert.Equal("Example d.o.o.", result.Data.CompanyName);
             Assert.Equal("12345678903", result.Data.TaxIdentifier);
+            Assert.Equal("12345678903", result.Data.OriginalTaxIdentifier);
+            Assert.Null(result.Data.NormalizedVatIdentifier);
+            Assert.Null(result.Data.ViesCountryCode);
             Assert.True(result.Data.IdentifierIsVatRegistration);
         }
 
@@ -78,34 +81,60 @@ namespace OCPP.Core.Server.Tests
 
             Assert.True(result.Success);
             Assert.Equal("CZ 123-ABC", result.Data.TaxIdentifier);
+            Assert.Equal("CZ 123-ABC", result.Data.OriginalTaxIdentifier);
+            Assert.Null(result.Data.NormalizedVatIdentifier);
+            Assert.Null(result.Data.ViesCountryCode);
             Assert.Equal("C 12345", result.Data.RegistrationNumber);
             Assert.False(result.Data.IdentifierIsVatRegistration);
         }
 
-        [Fact]
-        public void ValidateAndNormalize_PaymentSessionRequest_UsesForeignBuyerContract()
+        [Theory]
+        [InlineData("DE", " de 123.456.789 ", "DE123456789", "DE")]
+        [InlineData("CZ", "CZ-12345678", "CZ12345678", "CZ")]
+        [InlineData("SI", "si 12345678", "SI12345678", "SI")]
+        [InlineData("SK", "SK 1234567890", "SK1234567890", "SK")]
+        [InlineData("GR", "el 123456789", "EL123456789", "EL")]
+        [InlineData("GB", "xi 123456789", "XI123456789", "XI")]
+        public void ValidateAndNormalize_NormalizesForeignVatNumbers(
+            string country,
+            string input,
+            string expected,
+            string expectedViesCountryCode)
         {
-            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(new PaymentSessionRequest
-            {
-                RequestR1Invoice = true,
-                BuyerCountry = "cz",
-                BuyerCompanyName = " Example s.r.o. ",
-                BuyerStreet = " Pražská 1 ",
-                BuyerPostalCode = "110 00",
-                BuyerCity = "Praha",
-                BuyerEmail = "billing@example.cz",
-                BuyerTaxIdentifier = "CZ 123-ABC",
-                BuyerRegistrationNumber = "C 12345",
-                BuyerIdentifierIsVatRegistration = true,
-                BuyerDataConfirmed = true
-            });
+            var request = ValidForeignRequest(country, input, isVat: true);
+
+            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(request);
 
             Assert.True(result.Success);
-            Assert.Equal("CZ", result.Data.Country);
-            Assert.Equal("Example s.r.o.", result.Data.CompanyName);
-            Assert.Equal("Pražská 1", result.Data.Street);
-            Assert.Equal("CZ 123-ABC", result.Data.TaxIdentifier);
+            Assert.Equal(country, result.Data.Country);
+            Assert.Equal(input.Trim(), result.Data.OriginalTaxIdentifier);
+            Assert.Equal(expected, result.Data.NormalizedVatIdentifier);
+            Assert.Equal(expected, result.Data.TaxIdentifier);
+            Assert.Equal(expectedViesCountryCode, result.Data.ViesCountryCode);
             Assert.True(result.Data.IdentifierIsVatRegistration);
+        }
+
+        [Theory]
+        [InlineData("DE", "FR123456789", "InvalidVatCountryPrefix")]
+        [InlineData("GR", "GR123456789", "InvalidVatCountryPrefix")]
+        [InlineData("GB", "GB123456789", "InvalidVatCountryPrefix")]
+        [InlineData("DE", "DE12345678", "InvalidVatFormat")]
+        [InlineData("CZ", "CZ1234567", "InvalidVatFormat")]
+        [InlineData("SI", "SI123456789", "InvalidVatFormat")]
+        [InlineData("SK", "SK123456789", "InvalidVatFormat")]
+        [InlineData("DE", "DE123/456789", "InvalidVatCharacters")]
+        [InlineData("US", "US123456789", "UnsupportedVatCountry")]
+        public void ValidateAndNormalize_RejectsInvalidForeignVat(
+            string country,
+            string input,
+            string expectedStatus)
+        {
+            var result = InvoiceBuyerDataValidator.ValidateAndNormalize(
+                ValidForeignRequest(country, input, isVat: true));
+
+            Assert.False(result.Success);
+            Assert.Equal(expectedStatus, result.Status);
+            Assert.Equal("BuyerTaxIdentifier", result.Field);
         }
 
         [Theory]
@@ -128,7 +157,7 @@ namespace OCPP.Core.Server.Tests
         [Fact]
         public void ValidateAndNormalize_RejectsForeignIdentifierPastApplicationLimit()
         {
-            var request = ValidForeignRequest();
+            var request = ValidForeignRequest(isVat: false);
             request.BuyerTaxIdentifier = new string('X', 65);
 
             var result = InvoiceBuyerDataValidator.ValidateAndNormalize(request);
@@ -162,15 +191,19 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("InvalidOib", result.Status);
         }
 
-        private static PaymentR1InvoiceRequest ValidForeignRequest() => new PaymentR1InvoiceRequest
+        private static PaymentR1InvoiceRequest ValidForeignRequest(
+            string country = "CZ",
+            string taxIdentifier = "CZ12345678",
+            bool isVat = true) => new PaymentR1InvoiceRequest
         {
-            BuyerCountry = "CZ",
+            BuyerCountry = country,
             BuyerCompanyName = "Example s.r.o.",
             BuyerStreet = "Pražská 1",
             BuyerPostalCode = "110 00",
             BuyerCity = "Praha",
             BuyerEmail = "billing@example.cz",
-            BuyerTaxIdentifier = "CZ12345678",
+            BuyerTaxIdentifier = taxIdentifier,
+            BuyerIdentifierIsVatRegistration = isVat,
             BuyerDataConfirmed = true
         };
     }

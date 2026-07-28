@@ -2147,7 +2147,10 @@ namespace OCPP.Core.Server
 
             try
             {
-                var result = _paymentCoordinator.CreateCheckoutSession(dbContext, request);
+                var result = await _paymentCoordinator.CreateCheckoutSessionAsync(
+                    dbContext,
+                    request,
+                    context.RequestAborted);
                 var payload = new
                 {
                     status = "Redirect",
@@ -2715,6 +2718,10 @@ namespace OCPP.Core.Server
                 usageFeeAnchorMinutes = reservation.UsageFeeAnchorMinutes,
                 maxAmountCents = reservation.MaxAmountCents,
                 capturedAmountCents = reservation.CapturedAmountCents,
+                invoiceBuyerVatValidationStatus = reservation.InvoiceBuyerVatValidationStatus,
+                invoiceBuyerVatVerificationStatus = reservation.InvoiceBuyerVatVerificationStatus,
+                invoiceBuyerVatVerificationCheckedAtUtc =
+                    reservation.InvoiceBuyerVatVerificationCheckedAtUtc,
                 actualEnergyKwh = reservation.ActualEnergyKwh,
                 liveStatus,
                 liveOcppStatus,

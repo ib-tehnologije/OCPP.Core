@@ -32,6 +32,20 @@ namespace OCPP.Core.Server.Tests
             Assert.DoesNotContain("5-minute", view, StringComparison.OrdinalIgnoreCase);
         }
 
+        [Fact]
+        public void PublicStatusView_RendersNonBlockingViesOutcomes()
+        {
+            var view = ReadView();
+
+            Assert.Contains("id=\"vat-verification-alert\"", view);
+            Assert.Contains("id=\"vat-verification-alert-text\"", view);
+            Assert.Contains("data?.invoiceBuyerVatVerificationStatus", view);
+            Assert.Contains("status.vat.invalid", view);
+            Assert.Contains("status.vat.unavailable", view);
+            Assert.Contains("vatVerificationAlert.className = \"alert-box warning public-cap-alert\"", view);
+            Assert.Contains("vatVerificationAlert.className = \"alert-box info public-cap-alert\"", view);
+        }
+
         private static string ReadView()
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);

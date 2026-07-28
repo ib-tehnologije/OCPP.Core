@@ -40,7 +40,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 BuyerPostalCode = reservation.InvoiceBuyerPostalCode,
                 BuyerCity = reservation.InvoiceBuyerCity,
                 BuyerTaxIdentifier = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
-                    ? reservation.InvoiceBuyerTaxIdentifier
+                    ? reservation.InvoiceBuyerNormalizedVatIdentifier ?? reservation.InvoiceBuyerTaxIdentifier
                     : GetMetadataValue(checkoutSession, "buyer_tax_identifier") ?? GetMetadataValue(checkoutSession, "buyer_oib"),
                 BuyerRegistrationNumber = reservation.InvoiceBuyerRegistrationNumber,
                 BuyerIdentifierIsVatRegistration = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
