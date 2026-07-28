@@ -32,6 +32,8 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("const invalidateConfirmation", view);
             Assert.Contains("confirmation.checked = false", view);
             Assert.DoesNotContain("Buyer data is collected after checkout", view);
+            Assert.Contains("<option value=\"GB\">Northern Ireland (GB / XI VAT)</option>", view);
+            Assert.Contains("Foreign VAT numbers are format-checked and normalized before checkout.", view);
 
             var model = ReadProjectFile("OCPP.Core.Management", "Models", "PublicStartViewModel.cs");
             var controller = ReadProjectFile("OCPP.Core.Management", "Controllers", "PublicController.cs");
@@ -49,6 +51,12 @@ namespace OCPP.Core.Server.Tests
             Assert.DoesNotContain("submit company details now or later", script, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("start.rememberInvoiceBuyer", script, StringComparison.Ordinal);
             Assert.DoesNotContain("start.rememberInvoiceBuyerWarning", script, StringComparison.Ordinal);
+            Assert.Contains("\"status.vat.invalid\"", script, StringComparison.Ordinal);
+            Assert.Contains("\"status.vat.unavailable\"", script, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                "Foreign identifiers are issued exactly as entered and are not registry-verified.",
+                script,
+                StringComparison.Ordinal);
         }
 
         private static string ReadView()

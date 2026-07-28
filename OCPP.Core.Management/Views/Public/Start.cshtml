@@ -337,6 +337,7 @@
                                 <option value="DK">Denmark (DK)</option>
                                 <option value="EE">Estonia (EE)</option>
                                 <option value="GR">Greece (GR)</option>
+                                <option value="GB">Northern Ireland (GB / XI VAT)</option>
                                 <option value="ES">Spain (ES)</option>
                                 <option value="FI">Finland (FI)</option>
                                 <option value="FR">France (FR)</option>
@@ -373,7 +374,7 @@
 
                             <label for="buyerTaxIdentifier" class="field-label field-label--spaced" data-i18n="status.r1.taxIdentifier">OIB / VAT / tax identifier</label>
                             <input type="text" class="field-input" id="buyerTaxIdentifier" name="BuyerTaxIdentifier" value="@Model.BuyerTaxIdentifier" autocomplete="off" maxlength="64" required />
-                            <div class="field-help" data-i18n="status.r1.taxIdentifierHelp">Croatian OIB is checksum validated. Foreign identifiers are issued exactly as entered and are not registry-verified.</div>
+                            <div class="field-help" data-i18n="status.r1.taxIdentifierHelp">Croatian OIB is checksum validated. Foreign VAT numbers are format-checked and normalized before checkout. Other foreign tax identifiers remain as entered.</div>
 
                             <label for="buyerRegistrationNumber" class="field-label field-label--spaced" data-i18n="status.r1.registrationNumber">Legal registration number (optional)</label>
                             <input type="text" class="field-input" id="buyerRegistrationNumber" name="BuyerRegistrationNumber" value="@Model.BuyerRegistrationNumber" autocomplete="off" maxlength="64" />

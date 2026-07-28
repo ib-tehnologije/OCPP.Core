@@ -133,6 +133,11 @@ namespace OCPP.Core.Server.Tests
                         Status = PaymentReservationStatus.Completed,
                         MaxAmountCents = 1000,
                         CapturedAmountCents = 450,
+                        InvoiceBuyerVatValidationStatus = "Valid",
+                        InvoiceBuyerVatVerificationStatus = "Invalid",
+                        InvoiceBuyerVatVerificationCheckedAtUtc =
+                            new DateTime(2026, 7, 28, 12, 0, 0, DateTimeKind.Utc),
+                        InvoiceBuyerVatVerificationReference = "private-audit-reference",
                         CreatedAtUtc = DateTime.UtcNow.AddMinutes(-15),
                         UpdatedAtUtc = DateTime.UtcNow
                     });
@@ -173,6 +178,12 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal("Submitted", payload["invoice"]?["status"]?.Value<string>());
                 Assert.Equal("INV-2026-0077", payload["invoice"]?["externalInvoiceNumber"]?.Value<string>());
                 Assert.Equal("https://example.test/invoices/77.pdf", payload["invoice"]?["invoiceUrl"]?.Value<string>());
+                Assert.Equal("Valid", payload["invoiceBuyerVatValidationStatus"]?.Value<string>());
+                Assert.Equal("Invalid", payload["invoiceBuyerVatVerificationStatus"]?.Value<string>());
+                Assert.Equal(
+                    new DateTime(2026, 7, 28, 12, 0, 0, DateTimeKind.Utc),
+                    payload["invoiceBuyerVatVerificationCheckedAtUtc"]?.Value<DateTime>());
+                Assert.Null(payload["invoiceBuyerVatVerificationReference"]);
             }
             finally
             {

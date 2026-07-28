@@ -38,7 +38,8 @@ namespace OCPP.Core.Server.Tests
             Func<DateTime>? now = null,
             FakeEventFactory? eventFactory = null,
             IEmailNotificationService? emailService = null,
-            IInvoiceIntegrationService? invoiceIntegrationService = null)
+            IInvoiceIntegrationService? invoiceIntegrationService = null,
+            IViesVerificationService? viesVerificationService = null)
         {
             var options = Options.Create(stripeOptions ?? new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" });
             var paymentFlowOptions = Options.Create(flowOptions ?? new PaymentFlowOptions { StartWindowMinutes = 7 });
@@ -51,7 +52,8 @@ namespace OCPP.Core.Server.Tests
                 eventFactory ?? new FakeEventFactory(),
                 now ?? (() => DateTime.UtcNow),
                 emailService,
-                invoiceIntegrationService: invoiceIntegrationService);
+                invoiceIntegrationService: invoiceIntegrationService,
+                viesVerificationService: viesVerificationService);
         }
 
         private static TimeZoneInfo ResolveZagrebTimeZone()
@@ -509,8 +511,12 @@ namespace OCPP.Core.Server.Tests
             Assert.Empty(context.ChargePaymentReservations);
         }
 
-        [Fact]
-        public void CreateCheckoutSession_PersistsConfirmedForeignBuyerAndMarksStripeR1()
+        [Theory]
+        [InlineData(ViesVerificationStatus.Valid)]
+        [InlineData(ViesVerificationStatus.Invalid)]
+        [InlineData(ViesVerificationStatus.Unavailable)]
+        public async Task CreateCheckoutSession_PersistsNormalizedForeignVatAndNonBlockingViesResult(
+            string viesStatus)
         {
             using var context = CreateContext();
             context.ChargePoints.Add(new ChargePoint
@@ -525,13 +531,24 @@ namespace OCPP.Core.Server.Tests
             {
                 CreateResponse = new Session { Id = "sess_r1", Url = "https://checkout/r1", PaymentIntentId = "pi_r1" }
             };
+            var viesCheckedAt = new DateTime(2026, 7, 17, 8, 44, 30, DateTimeKind.Utc);
+            var viesService = new FakeViesVerificationService
+            {
+                Result = new ViesVerificationResult
+                {
+                    Status = viesStatus,
+                    CheckedAtUtc = viesCheckedAt,
+                    Reference = "vies-ref-123"
+                }
+            };
             var coordinator = CreateCoordinator(
                 context,
                 sessionService,
                 new FakePaymentIntentService(),
-                now: () => confirmedAt);
+                now: () => confirmedAt,
+                viesVerificationService: viesService);
 
-            var result = coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            var result = await coordinator.CreateCheckoutSessionAsync(context, new PaymentSessionRequest
             {
                 ChargePointId = "CP-R1",
                 ConnectorId = 1,
@@ -543,21 +560,126 @@ namespace OCPP.Core.Server.Tests
                 BuyerPostalCode = "110 00",
                 BuyerCity = "Praha",
                 BuyerEmail = "billing@example.cz",
-                BuyerTaxIdentifier = "CZ 123-ABC",
+                BuyerTaxIdentifier = " cz 1234-5678 ",
                 BuyerRegistrationNumber = "C 12345",
                 BuyerIdentifierIsVatRegistration = true,
                 BuyerDataConfirmed = true
-            });
+            }, CancellationToken.None);
 
+            Assert.True(viesService.Called);
+            Assert.Equal("CZ", viesService.CountryCode);
+            Assert.Equal("12345678", viesService.VatNumber);
             Assert.Equal(confirmedAt, result.Reservation.InvoiceBuyerConfirmedAtUtc);
             Assert.Equal("CZ", result.Reservation.InvoiceBuyerCountry);
             Assert.Equal("Example s.r.o.", result.Reservation.InvoiceBuyerCompanyName);
             Assert.Equal("Pražská 1", result.Reservation.InvoiceBuyerStreet);
-            Assert.Equal("CZ 123-ABC", result.Reservation.InvoiceBuyerTaxIdentifier);
+            Assert.Equal("cz 1234-5678", result.Reservation.InvoiceBuyerOriginalTaxIdentifier);
+            Assert.Equal("CZ12345678", result.Reservation.InvoiceBuyerNormalizedVatIdentifier);
+            Assert.Equal("CZ12345678", result.Reservation.InvoiceBuyerTaxIdentifier);
+            Assert.Equal("Valid", result.Reservation.InvoiceBuyerVatValidationStatus);
+            Assert.Equal(viesStatus, result.Reservation.InvoiceBuyerVatVerificationStatus);
+            Assert.Equal(viesCheckedAt, result.Reservation.InvoiceBuyerVatVerificationCheckedAtUtc);
+            Assert.Equal("vies-ref-123", result.Reservation.InvoiceBuyerVatVerificationReference);
             Assert.Equal("R1", sessionService.LastCreateOptions?.Metadata?["invoice_type"]);
             Assert.Equal("CZ", sessionService.LastCreateOptions?.Metadata?["buyer_country"]);
-            Assert.Equal("CZ 123-ABC", sessionService.LastCreateOptions?.PaymentIntentData?.Metadata?["buyer_tax_identifier"]);
+            Assert.Equal("CZ12345678", sessionService.LastCreateOptions?.PaymentIntentData?.Metadata?["buyer_tax_identifier"]);
             Assert.False(sessionService.LastCreateOptions?.Metadata?.ContainsKey("invoice_review_requested"));
+        }
+
+        [Fact]
+        public async Task CreateCheckoutSession_RejectsInvalidForeignVatBeforeViesAndStripe()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1-INVALID-VAT",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var sessionService = new FakeSessionService();
+            var viesService = new FakeViesVerificationService();
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                new FakePaymentIntentService(),
+                viesVerificationService: viesService);
+
+            var error = await Assert.ThrowsAsync<InvoiceBuyerValidationException>(() =>
+                coordinator.CreateCheckoutSessionAsync(context, new PaymentSessionRequest
+                {
+                    ChargePointId = "CP-R1-INVALID-VAT",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG-R1",
+                    RequestR1Invoice = true,
+                    BuyerCountry = "DE",
+                    BuyerCompanyName = "Example GmbH",
+                    BuyerStreet = "Street 1",
+                    BuyerPostalCode = "10115",
+                    BuyerCity = "Berlin",
+                    BuyerEmail = "billing@example.de",
+                    BuyerTaxIdentifier = "FR123456789",
+                    BuyerIdentifierIsVatRegistration = true,
+                    BuyerDataConfirmed = true
+                }, CancellationToken.None));
+
+            Assert.Equal("InvalidVatCountryPrefix", error.Status);
+            Assert.False(viesService.Called);
+            Assert.Null(sessionService.LastCreateOptions);
+            Assert.Empty(context.ChargePaymentReservations);
+        }
+
+        [Fact]
+        public async Task CreateCheckoutSession_DoesNotCallVies_ForGenericForeignIdentifier()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1-GENERIC-ID",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session
+                {
+                    Id = "sess_generic",
+                    Url = "https://checkout/generic",
+                    PaymentIntentId = "pi_generic"
+                }
+            };
+            var viesService = new FakeViesVerificationService();
+            var coordinator = CreateCoordinator(
+                context,
+                sessionService,
+                new FakePaymentIntentService(),
+                viesVerificationService: viesService);
+
+            var result = await coordinator.CreateCheckoutSessionAsync(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1-GENERIC-ID",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1",
+                RequestR1Invoice = true,
+                BuyerCountry = "CZ",
+                BuyerCompanyName = "Example s.r.o.",
+                BuyerStreet = "Pražská 1",
+                BuyerPostalCode = "110 00",
+                BuyerCity = "Praha",
+                BuyerEmail = "billing@example.cz",
+                BuyerTaxIdentifier = " CZ 123-ABC ",
+                BuyerIdentifierIsVatRegistration = false,
+                BuyerDataConfirmed = true
+            }, CancellationToken.None);
+
+            Assert.False(viesService.Called);
+            Assert.Equal("CZ 123-ABC", result.Reservation.InvoiceBuyerOriginalTaxIdentifier);
+            Assert.Null(result.Reservation.InvoiceBuyerNormalizedVatIdentifier);
+            Assert.Equal("CZ 123-ABC", result.Reservation.InvoiceBuyerTaxIdentifier);
+            Assert.Equal("NotApplicable", result.Reservation.InvoiceBuyerVatValidationStatus);
+            Assert.Equal(ViesVerificationStatus.NotChecked, result.Reservation.InvoiceBuyerVatVerificationStatus);
+            Assert.NotNull(sessionService.LastCreateOptions);
         }
 
         [Fact]
@@ -3910,6 +4032,31 @@ namespace OCPP.Core.Server.Tests
             LastUpdateRequestOptions = requestOptions;
             GetResponse.Metadata = options?.Metadata ?? GetResponse.Metadata;
             return GetResponse;
+        }
+    }
+
+    internal class FakeViesVerificationService : IViesVerificationService
+    {
+        public bool Called { get; private set; }
+        public string? CountryCode { get; private set; }
+        public string? VatNumber { get; private set; }
+        public ViesVerificationResult Result { get; set; } = new ViesVerificationResult
+        {
+            Status = ViesVerificationStatus.Unavailable,
+            CheckedAtUtc = new DateTime(2026, 7, 28, 12, 0, 0, DateTimeKind.Utc),
+            Reference = ViesVerificationService.ProviderReference
+        };
+
+        public Task<ViesVerificationResult> VerifyAsync(
+            string countryCode,
+            string vatNumber,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Called = true;
+            CountryCode = countryCode;
+            VatNumber = vatNumber;
+            return Task.FromResult(Result);
         }
     }
 

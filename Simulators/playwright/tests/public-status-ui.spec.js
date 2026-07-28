@@ -131,3 +131,43 @@ test("public status estimates live totals while persisted costs are still zero",
   await expect(page.locator("#bd-energy")).toHaveText("0.60 EUR");
   await expect(page.locator("#bd-session-fee")).toHaveText("0.50 EUR");
 });
+
+test("public status warns when VIES reports an invalid VAT registration", async ({ page }) => {
+  const reservationId = "44444444-4444-4444-4444-444444444444";
+  await mockStatusSequence(page, reservationId, [
+    buildStatusPayload({
+      reservationId,
+      invoiceBuyerVatVerificationStatus: "Invalid",
+      invoiceBuyerVatVerificationCheckedAtUtc: "2026-07-28T12:00:00",
+    }),
+  ]);
+
+  await page.goto(`/Payments/Status?reservationId=${reservationId}&origin=public&lang=en`);
+
+  const alert = page.locator("#vat-verification-alert");
+  await expect(alert).toBeVisible();
+  await expect(alert).toHaveClass(/warning/);
+  await expect(page.locator("#vat-verification-alert-text")).toHaveText(
+    "VIES could not confirm this VAT registration. Checkout was not blocked; review the VAT number before the invoice is issued.",
+  );
+});
+
+test("public status explains when VIES is unavailable", async ({ page }) => {
+  const reservationId = "55555555-5555-5555-5555-555555555555";
+  await mockStatusSequence(page, reservationId, [
+    buildStatusPayload({
+      reservationId,
+      invoiceBuyerVatVerificationStatus: "Unavailable",
+      invoiceBuyerVatVerificationCheckedAtUtc: "2026-07-28T12:00:00",
+    }),
+  ]);
+
+  await page.goto(`/Payments/Status?reservationId=${reservationId}&origin=public&lang=en`);
+
+  const alert = page.locator("#vat-verification-alert");
+  await expect(alert).toBeVisible();
+  await expect(alert).toHaveClass(/info/);
+  await expect(page.locator("#vat-verification-alert-text")).toHaveText(
+    "VIES was unavailable, so the VAT registration could not be checked. Checkout continued and the format-validated number was retained.",
+  );
+});

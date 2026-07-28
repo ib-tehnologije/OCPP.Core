@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using OCPP.Core.Database;
 
@@ -13,6 +14,11 @@ namespace OCPP.Core.Server.Payments
     {
         bool IsEnabled { get; }
         PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request);
+        Task<PaymentSessionResult> CreateCheckoutSessionAsync(
+            OCPPCoreContext dbContext,
+            PaymentSessionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(CreateCheckoutSession(dbContext, request));
         PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId);
         PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId);
         PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request);

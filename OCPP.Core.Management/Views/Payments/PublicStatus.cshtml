@@ -44,6 +44,11 @@
                 <span id="max-energy-alert-text"></span>
             </div>
 
+            <div class="alert-box info public-cap-alert" id="vat-verification-alert" role="status" aria-live="polite" hidden>
+                <span class="alert-icon">ℹ️</span>
+                <span id="vat-verification-alert-text"></span>
+            </div>
+
             <div id="view-waiting" class="session-view active">
                 <div class="info-section info-section--tight-bottom">
                     <div class="info-section-title" data-i18n="status.reservation">Reservation</div>
@@ -297,6 +302,8 @@
         const connectorCode = document.getElementById("status-connector-code");
         const maxEnergyAlert = document.getElementById("max-energy-alert");
         const maxEnergyAlertText = document.getElementById("max-energy-alert-text");
+        const vatVerificationAlert = document.getElementById("vat-verification-alert");
+        const vatVerificationAlertText = document.getElementById("vat-verification-alert-text");
 
         const viewWaiting = document.getElementById("view-waiting");
         const viewCharging = document.getElementById("view-charging");
@@ -639,10 +646,36 @@
                 : fillTemplate("status.hint.maxEnergyReached", { energy: fmtNumber(maxEnergyKwh, 1) });
         };
 
+        const renderVatVerificationNotice = (data) => {
+            if (!vatVerificationAlert || !vatVerificationAlertText) {
+                return;
+            }
+
+            const status = toLower(data?.invoiceBuyerVatVerificationStatus);
+            if (status === "invalid") {
+                vatVerificationAlert.hidden = false;
+                vatVerificationAlert.className = "alert-box warning public-cap-alert";
+                vatVerificationAlertText.textContent = t("status.vat.invalid");
+                return;
+            }
+
+            if (status === "unavailable") {
+                vatVerificationAlert.hidden = false;
+                vatVerificationAlert.className = "alert-box info public-cap-alert";
+                vatVerificationAlertText.textContent = t("status.vat.unavailable");
+                return;
+            }
+
+            vatVerificationAlert.hidden = true;
+            vatVerificationAlert.className = "alert-box info public-cap-alert";
+            vatVerificationAlertText.textContent = "";
+        };
+
         const render = (state, data) => {
             setActiveTab(state);
             setActiveView(state);
             setHeader(state, data);
+            renderVatVerificationNotice(data);
 
             const currency = data?.currency;
             const authorizedText = fmtMoney(data?.maxAmountCents, currency);
@@ -868,6 +901,7 @@
                 errorPaymentStatus.textContent = "-";
                 errorLastStatus.textContent = "-";
                 renderMaxEnergyNotice("error", null, NaN);
+                renderVatVerificationNotice(null);
                 renderInvoice(null);
             }
         }

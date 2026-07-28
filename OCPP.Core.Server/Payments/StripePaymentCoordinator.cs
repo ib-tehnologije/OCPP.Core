@@ -19,6 +19,7 @@ using OCPP.Core.Server.Extensions.Hangfire;
 using OCPP.Core.Server.Payments.Invoices;
 using Stripe;
 using Stripe.Checkout;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace OCPP.Core.Server.Payments
@@ -38,6 +39,7 @@ namespace OCPP.Core.Server.Payments
         private readonly StartChargingMediator _startMediator;
         private readonly IBackgroundJobClient _backgroundJobClient;
         private readonly IInvoiceIntegrationService _invoiceIntegrationService;
+        private readonly IViesVerificationService _viesVerificationService;
         private const string IdempotencyCheckoutCreate = "checkout_create";
         private const string IdempotencyCapture = "capture";
         private const string IdempotencyCancel = "cancel";
@@ -69,7 +71,8 @@ namespace OCPP.Core.Server.Payments
             StartChargingMediator startMediator = null,
             IBackgroundJobClient backgroundJobClient = null,
             IInvoiceIntegrationService invoiceIntegrationService = null,
-            IConfiguration configuration = null)
+            IConfiguration configuration = null,
+            IViesVerificationService viesVerificationService = null)
         {
             _options = options?.Value ?? new StripeOptions();
             _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
@@ -83,6 +86,8 @@ namespace OCPP.Core.Server.Payments
             _startMediator = startMediator;
             _backgroundJobClient = backgroundJobClient;
             _invoiceIntegrationService = invoiceIntegrationService;
+            _viesVerificationService = viesVerificationService ??
+                new UnavailableViesVerificationService(_utcNow);
 
             if (!string.IsNullOrWhiteSpace(_options.ApiKey))
             {
@@ -92,6 +97,16 @@ namespace OCPP.Core.Server.Payments
 
         public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request)
         {
+            return CreateCheckoutSessionAsync(dbContext, request, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+        }
+
+        public async Task<PaymentSessionResult> CreateCheckoutSessionAsync(
+            OCPPCoreContext dbContext,
+            PaymentSessionRequest request,
+            CancellationToken cancellationToken)
+        {
             if (!IsEnabled)
             {
                 throw new InvalidOperationException("Stripe integration is disabled.");
@@ -100,6 +115,7 @@ namespace OCPP.Core.Server.Payments
             if (request == null) throw new ArgumentNullException(nameof(request));
             if (string.IsNullOrWhiteSpace(request.ChargePointId)) throw new ArgumentException("ChargePointId is required.", nameof(request));
             if (string.IsNullOrWhiteSpace(request.ChargeTagId)) throw new ArgumentException("ChargeTagId is required.", nameof(request));
+            cancellationToken.ThrowIfCancellationRequested();
 
             InvoiceBuyerData invoiceBuyer = null;
             if (request.RequestR1Invoice)
@@ -152,6 +168,18 @@ namespace OCPP.Core.Server.Payments
                 throw new InvalidOperationException("Calculated maximum amount is zero. Check pricing configuration.");
             }
 
+            ViesVerificationResult viesVerification = null;
+            if (!string.IsNullOrWhiteSpace(invoiceBuyer?.NormalizedVatIdentifier) &&
+                !string.IsNullOrWhiteSpace(invoiceBuyer.ViesCountryCode))
+            {
+                var vatNumber = invoiceBuyer.NormalizedVatIdentifier.Substring(
+                    invoiceBuyer.ViesCountryCode.Length);
+                viesVerification = await _viesVerificationService.VerifyAsync(
+                    invoiceBuyer.ViesCountryCode,
+                    vatNumber,
+                    cancellationToken);
+            }
+
             var reservation = new ChargePaymentReservation
             {
                 ReservationId = Guid.NewGuid(),
@@ -177,7 +205,7 @@ namespace OCPP.Core.Server.Payments
 
             if (invoiceBuyer != null)
             {
-                ApplyConfirmedBuyer(reservation, invoiceBuyer, now);
+                ApplyConfirmedBuyer(reservation, invoiceBuyer, now, viesVerification);
             }
 
             _logger.LogInformation(
@@ -838,7 +866,11 @@ namespace OCPP.Core.Server.Payments
             }
         }
 
-        private static void ApplyConfirmedBuyer(ChargePaymentReservation reservation, InvoiceBuyerData buyer, DateTime confirmedAtUtc)
+        private static void ApplyConfirmedBuyer(
+            ChargePaymentReservation reservation,
+            InvoiceBuyerData buyer,
+            DateTime confirmedAtUtc,
+            ViesVerificationResult viesVerification = null)
         {
             reservation.InvoiceBuyerCountry = buyer.Country;
             reservation.InvoiceBuyerCompanyName = buyer.CompanyName;
@@ -847,6 +879,19 @@ namespace OCPP.Core.Server.Payments
             reservation.InvoiceBuyerCity = buyer.City;
             reservation.InvoiceBuyerEmail = buyer.Email;
             reservation.InvoiceBuyerTaxIdentifier = buyer.TaxIdentifier;
+            reservation.InvoiceBuyerOriginalTaxIdentifier =
+                buyer.OriginalTaxIdentifier ?? buyer.TaxIdentifier;
+            reservation.InvoiceBuyerNormalizedVatIdentifier = buyer.NormalizedVatIdentifier;
+            reservation.InvoiceBuyerVatValidationStatus =
+                string.IsNullOrWhiteSpace(buyer.NormalizedVatIdentifier)
+                    ? VatValidationStatus.NotApplicable
+                    : VatValidationStatus.Valid;
+            reservation.InvoiceBuyerVatVerificationStatus =
+                viesVerification?.Status ?? ViesVerificationStatus.NotChecked;
+            reservation.InvoiceBuyerVatVerificationCheckedAtUtc =
+                viesVerification?.CheckedAtUtc;
+            reservation.InvoiceBuyerVatVerificationReference =
+                viesVerification?.Reference;
             reservation.InvoiceBuyerRegistrationNumber = buyer.RegistrationNumber;
             reservation.InvoiceBuyerIdentifierIsVatRegistration = buyer.IdentifierIsVatRegistration;
             reservation.InvoiceBuyerConfirmedAtUtc = confirmedAtUtc;
@@ -861,6 +906,14 @@ namespace OCPP.Core.Server.Payments
                    string.Equals(reservation.InvoiceBuyerCity, buyer.City, StringComparison.Ordinal) &&
                    string.Equals(reservation.InvoiceBuyerEmail, buyer.Email, StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(reservation.InvoiceBuyerTaxIdentifier, buyer.TaxIdentifier, StringComparison.Ordinal) &&
+                   string.Equals(
+                       reservation.InvoiceBuyerOriginalTaxIdentifier ?? reservation.InvoiceBuyerTaxIdentifier,
+                       buyer.OriginalTaxIdentifier ?? buyer.TaxIdentifier,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       reservation.InvoiceBuyerNormalizedVatIdentifier,
+                       buyer.NormalizedVatIdentifier,
+                       StringComparison.Ordinal) &&
                    string.Equals(reservation.InvoiceBuyerRegistrationNumber, buyer.RegistrationNumber, StringComparison.Ordinal) &&
                    reservation.InvoiceBuyerIdentifierIsVatRegistration == buyer.IdentifierIsVatRegistration;
         }

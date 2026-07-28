@@ -1,6 +1,6 @@
 # Local Company Invoice Demo
 
-This walkthrough records the real local management and server applications while they collect synthetic Czech and Croatian company invoice details before Stripe checkout. It also explains Croatian OIB validation, confirms that reusable buyer data is not kept in browser storage, and shows the read-only invoice state after checkout. The runner uses a disposable SQLite database, a connected OCPP 1.6 fixture charger, visible cursor movement, human-paced field entry, and readable captions, then writes the recordings outside the repository. Accepted examples cross the real local `Payments/Create` boundary before the browser reaches Mock Stripe.
+This walkthrough records the real local management and server applications while they collect synthetic Czech and Croatian company invoice details before Stripe checkout. It also explains Croatian OIB validation and foreign VAT normalization, confirms that reusable buyer data is not kept in browser storage, and shows the read-only invoice state after checkout. The runner uses a disposable SQLite database, a connected OCPP 1.6 fixture charger, visible cursor movement, human-paced field entry, and readable captions, then writes the recordings outside the repository. Accepted examples cross the real local `Payments/Create` boundary before the browser reaches Mock Stripe.
 
 ## Prerequisites
 
@@ -57,6 +57,7 @@ The runner supplies an isolated `InvoiceDemo` environment to both applications, 
 - SQL Server is disabled with an empty `ConnectionStrings__SqlServer`; a new temporary SQLite file is used instead.
 - Invoice integration is disabled with `Invoices__Enabled=false`, and inherited `Invoices__ERacuni*` settings are removed.
 - Stripe uses the repository's mock services with `Stripe__UseMockServices=true`, a `mock_test_key`, synthetic `.example.test` email, local diagnostics, and a loopback return URL. Inherited Stripe settings are removed.
+- VIES stays disabled through its public-safe default, so the walkthrough never contacts the European Commission service. Dedicated automated tests fake every VIES outcome.
 - Sentry is disabled with empty `SENTRY_DSN` and `Sentry__Dsn` values after every inherited `SENTRY_DSN` and `Sentry__*` setting is removed.
 - Customer email is disabled with `Notifications__EnableCustomerEmails=false`; SMTP credentials and from, reply-to, and BCC addresses are cleared. Any notification sink is temporary.
 - Owner-report email and scheduling are disabled with `Email__EnableOwnerReportEmails=false` and `OwnerReportSchedule__Enabled=false`; their SMTP and recipient settings are cleared.
