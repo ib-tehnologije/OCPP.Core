@@ -34,7 +34,7 @@ Code location: `OCPP.Core.Server/OCPPMiddleware.cs`
 Known API areas:
 
 - `/API/Status`
-- `/API/Reset/{chargePointId}`
+- `GET /API/Reset/{chargePointId}/{mode?}`
 - `/API/UnlockConnector/{chargePointId}/{connectorId}`
 - `/API/SetChargingProfile/{chargePointId}/{connectorId}/{limit}`
 - `/API/ClearChargingProfile/{chargePointId}/{connectorId}`
@@ -49,6 +49,8 @@ Known behavior:
 - API routes require `X-API-Key` when `ApiKey` is configured.
 - Stripe webhook handling is the exception to server API key checking.
 - Remote commands are dispatched to protocol-specific methods based on the connected charge point protocol.
+- Reset accepts `Hard` and `Soft` modes (case-insensitive). An unsupported mode returns HTTP 400.
+- Omitting `mode` preserves the compatibility reset: OCPP 1.6 receives `Soft`; OCPP 2.x receives `OnIdle`. `Hard` selects a full reset and `Soft` selects the compatibility-safe reset for each protocol.
 
 Unknown / verify:
 
