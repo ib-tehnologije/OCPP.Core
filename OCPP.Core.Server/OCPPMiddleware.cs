@@ -1644,11 +1644,13 @@ namespace OCPP.Core.Server
                     }
                     else if (cmd == "Reset")
                     {
+                        string requestedResetMode = urlConnectorId;
+
                         if (!string.IsNullOrEmpty(urlChargePointId))
                         {
                             try
                             {
-                                if (!TryParseResetIntent(urlConnectorId, out var resetIntent))
+                                if (!TryParseResetIntent(requestedResetMode, out var resetIntent))
                                 {
                                     context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                                     context.Response.ContentType = "application/json";
@@ -1667,7 +1669,7 @@ namespace OCPP.Core.Server
                                             "OCPPMiddleware Reset dispatch ChargePointId={ChargePointId} Protocol={Protocol} RequestedMode={RequestedMode} EffectiveMode={EffectiveMode}",
                                             status.Id,
                                             status.Protocol,
-                                            urlConnectorId,
+                                            requestedResetMode,
                                             resetType);
                                         await Reset21(status, context, dbContext, resetType);
                                     }
@@ -1679,7 +1681,7 @@ namespace OCPP.Core.Server
                                             "OCPPMiddleware Reset dispatch ChargePointId={ChargePointId} Protocol={Protocol} RequestedMode={RequestedMode} EffectiveMode={EffectiveMode}",
                                             status.Id,
                                             status.Protocol,
-                                            urlConnectorId,
+                                            requestedResetMode,
                                             resetType);
                                         await Reset20(status, context, dbContext, resetType);
                                     }
@@ -1691,7 +1693,7 @@ namespace OCPP.Core.Server
                                             "OCPPMiddleware Reset dispatch ChargePointId={ChargePointId} Protocol={Protocol} RequestedMode={RequestedMode} EffectiveMode={EffectiveMode}",
                                             status.Id,
                                             status.Protocol,
-                                            urlConnectorId,
+                                            requestedResetMode,
                                             resetType);
                                         await Reset16(status, context, dbContext, resetType);
                                     }
@@ -1704,13 +1706,13 @@ namespace OCPP.Core.Server
                             }
                             catch (Exception exp)
                             {
-                                _logger.LogError(exp, "OCPPMiddleware SoftReset => Error: {0}", exp.Message);
+                                _logger.LogError(exp, "OCPPMiddleware Reset => Error: {0}", exp.Message);
                                 context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
                             }
                         }
                         else
                         {
-                            _logger.LogError("OCPPMiddleware SoftReset => Missing chargepoint ID");
+                            _logger.LogError("OCPPMiddleware Reset => Missing chargepoint ID");
                             context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                         }
                     }

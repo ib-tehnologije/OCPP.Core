@@ -2438,10 +2438,21 @@ namespace OCPP.Core.Server.Tests
         [InlineData("ocpp1.6", "/API/Reset/CP-RESET", "Soft")]
         [InlineData("ocpp1.6", "/API/Reset/CP-RESET/Soft", "Soft")]
         [InlineData("ocpp1.6", "/API/Reset/CP-RESET/Hard", "Hard")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/soft", "Soft")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/hArD", "Hard")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/   ", "Soft")]
         [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET", "OnIdle")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/Soft", "OnIdle")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/sOfT", "OnIdle")]
         [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/Hard", "Immediate")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/haRD", "Immediate")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/   ", "OnIdle")]
         [InlineData("ocpp2.1", "/API/Reset/CP-RESET", "OnIdle")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/Soft", "OnIdle")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/soFT", "OnIdle")]
         [InlineData("ocpp2.1", "/API/Reset/CP-RESET/Hard", "Immediate")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/HarD", "Immediate")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/   ", "OnIdle")]
         public async Task Invoke_ResetApi_MapsRequestedModeToProtocolPayload(
             string protocol,
             string requestPath,

@@ -148,7 +148,7 @@ namespace OCPP.Core.Server
         }
 
         /// <summary>
-        /// Sends a (Soft-)Reset to the chargepoint
+        /// Sends a Reset request to the chargepoint
         /// </summary>
         private async Task Reset21(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, Messages_OCPP21.ResetEnumType resetType)
         {

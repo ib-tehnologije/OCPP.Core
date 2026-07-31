@@ -320,8 +320,12 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("The reservation could not be cancelled.", objectResult.Value);
         }
 
-        [Fact]
-        public async Task Reset_RequestsExplicitHardMode()
+        [Theory]
+        [InlineData("Accepted", "The charging station is being restarted.")]
+        [InlineData("Rejected", "The charging station has rejected the request.")]
+        [InlineData("Scheduled", "The charging station has scheduled the restart.")]
+        [InlineData("Timeout", "A timeout has occured")]
+        public async Task Reset_RequestsExplicitHardMode(string backendStatus, string expectedResult)
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"reset-hard-{Guid.NewGuid():N}.sqlite");
 
@@ -343,7 +347,7 @@ namespace OCPP.Core.Server.Tests
                     Assert.Equal("/Reset/CP-RESET/Hard", request.Path);
                     Assert.Equal("test-api-key", request.Headers["x-api-key"]);
 
-                    return TestHttpResponse.Json("{\"status\":\"Accepted\"}");
+                    return TestHttpResponse.Json($"{{\"status\":\"{backendStatus}\"}}");
                 });
 
                 using var actionContext = CreateContext(databasePath);
@@ -359,7 +363,7 @@ namespace OCPP.Core.Server.Tests
                 var objectResult = Assert.IsType<ObjectResult>(result);
 
                 Assert.Equal(StatusCodes.Status200OK, objectResult.StatusCode);
-                Assert.Equal("The charging station is being restarted.", objectResult.Value);
+                Assert.Equal(expectedResult, objectResult.Value);
             }
             finally
             {
@@ -618,6 +622,9 @@ namespace OCPP.Core.Server.Tests
                     ["CancelReservationError"] = "The reservation could not be cancelled.",
                     ["StopTransactionError"] = "The charging transaction could not be stopped.",
                     ["ResetAccepted"] = "The charging station is being restarted.",
+                    ["ResetRejected"] = "The charging station has rejected the request.",
+                    ["ResetScheduled"] = "The charging station has scheduled the restart.",
+                    ["Timeout"] = "A timeout has occured",
                     ["UnknownChargepoint"] = "Unknown charge point"
                 }),
                 NullLoggerFactory.Instance,

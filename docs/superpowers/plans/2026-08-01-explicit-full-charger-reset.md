@@ -56,7 +56,7 @@ Run:
 
 ```bash
 LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DOTNET_ROLL_FORWARD=Major \
-  /Users/igbenic/.dotnet/dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
+  dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
   --configuration Release --no-restore \
   --filter FullyQualifiedName~ManagementControllerBehaviorTests.Reset_RequestsExplicitHardMode
 ```
@@ -73,13 +73,13 @@ uri = new Uri(uri, $"Reset/{Uri.EscapeDataString(Id)}/Hard");
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
-Run the Step 2 command again. Expected: PASS with one test and no warnings/errors from the action.
+Run the Step 2 command again. Expected: PASS for all parameterized result rows with no warnings/errors from the action.
 
 - [ ] **Step 5: Re-run existing management-controller behavior tests**
 
 ```bash
 LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DOTNET_ROLL_FORWARD=Major \
-  /Users/igbenic/.dotnet/dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
+  dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
   --configuration Release --no-restore \
   --filter FullyQualifiedName~ManagementControllerBehaviorTests
 ```
@@ -132,7 +132,7 @@ Each expected payload is a hand-derived literal. The production mutations caught
 
 ```bash
 LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DOTNET_ROLL_FORWARD=Major \
-  /Users/igbenic/.dotnet/dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
+  dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
   --configuration Release --no-restore \
   --filter FullyQualifiedName~OCPPMiddlewareTests.Invoke_ResetApi
 ```
@@ -225,7 +225,7 @@ Add a compact protocol matrix and state that the management action requests `Har
 
 ```bash
 LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DOTNET_ROLL_FORWARD=Major \
-  /Users/igbenic/.dotnet/dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
+  dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
   --configuration Release --no-restore \
   --filter 'FullyQualifiedName~OCPPMiddlewareTests.Invoke_ResetApi|FullyQualifiedName~ManagementControllerBehaviorTests.Reset_RequestsExplicitHardMode'
 ```
@@ -233,10 +233,10 @@ LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DOTNET_ROLL_FORWARD=Major \
 - [ ] **Step 4: Run full Release verification**
 
 ```bash
-/Users/igbenic/.dotnet/dotnet restore OCPP.Core.sln
-/Users/igbenic/.dotnet/dotnet build OCPP.Core.sln --configuration Release --no-restore
+dotnet restore OCPP.Core.sln
+dotnet build OCPP.Core.sln --configuration Release --no-restore
 LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DOTNET_ROLL_FORWARD=Major \
-  /Users/igbenic/.dotnet/dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
+  dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
   --configuration Release --no-build --no-restore
 git diff --check
 ```
