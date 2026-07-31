@@ -48,6 +48,13 @@ namespace OCPP.Core.Server
         private const string Protocol_OCPP21 = "ocpp2.1";
         private static readonly string[] SupportedProtocols = { Protocol_OCPP16, Protocol_OCPP201, Protocol_OCPP21 };
 
+        private enum ResetIntent
+        {
+            CompatibilityDefault,
+            Full,
+            Soft
+        }
+
         // RegExp for splitting ocpp message parts
         // ^\[\s*(\d)\s*,\s*\"([^"]*)\"\s*,(?:\s*\"(\w*)\"\s*,)?\s*(.*)\s*\]$
         // Third block is optional, because responses don't have an action
@@ -113,6 +120,51 @@ namespace OCPP.Core.Server
             // Default to "true" because several stations (e.g., Huawei) may ACK RemoteStart
             // without starting if the cable is not connected yet.
             return _configuration.GetValue<bool?>("Payments:RequirePreparingBeforeRemoteStart") ?? true;
+        }
+
+        private static bool TryParseResetIntent(string requestedMode, out ResetIntent intent)
+        {
+            if (string.IsNullOrWhiteSpace(requestedMode))
+            {
+                intent = ResetIntent.CompatibilityDefault;
+                return true;
+            }
+
+            if (string.Equals(requestedMode.Trim(), "Hard", StringComparison.OrdinalIgnoreCase))
+            {
+                intent = ResetIntent.Full;
+                return true;
+            }
+
+            if (string.Equals(requestedMode.Trim(), "Soft", StringComparison.OrdinalIgnoreCase))
+            {
+                intent = ResetIntent.Soft;
+                return true;
+            }
+
+            intent = default;
+            return false;
+        }
+
+        private static Messages_OCPP16.ResetRequestType ResolveReset16Type(ResetIntent intent)
+        {
+            return intent == ResetIntent.Full
+                ? Messages_OCPP16.ResetRequestType.Hard
+                : Messages_OCPP16.ResetRequestType.Soft;
+        }
+
+        private static Messages_OCPP20.ResetEnumType ResolveReset20Type(ResetIntent intent)
+        {
+            return intent == ResetIntent.Full
+                ? Messages_OCPP20.ResetEnumType.Immediate
+                : Messages_OCPP20.ResetEnumType.OnIdle;
+        }
+
+        private static Messages_OCPP21.ResetEnumType ResolveReset21Type(ResetIntent intent)
+        {
+            return intent == ResetIntent.Full
+                ? Messages_OCPP21.ResetEnumType.Immediate
+                : Messages_OCPP21.ResetEnumType.OnIdle;
         }
 
         private bool TryResolveLiveChargePointStatus(
@@ -1596,23 +1648,52 @@ namespace OCPP.Core.Server
                         {
                             try
                             {
+                                if (!TryParseResetIntent(urlConnectorId, out var resetIntent))
+                                {
+                                    context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                                    context.Response.ContentType = "application/json";
+                                    await context.Response.WriteAsync("{\"status\":\"InvalidResetMode\"}");
+                                    return;
+                                }
+
                                 if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware Reset", out var status))
                                 {
                                     // Send message to chargepoint
                                     if (status.Protocol == Protocol_OCPP21)
                                     {
                                         // OCPP V2.1
-                                        await Reset21(status, context, dbContext);
+                                        var resetType = ResolveReset21Type(resetIntent);
+                                        _logger.LogInformation(
+                                            "OCPPMiddleware Reset dispatch ChargePointId={ChargePointId} Protocol={Protocol} RequestedMode={RequestedMode} EffectiveMode={EffectiveMode}",
+                                            status.Id,
+                                            status.Protocol,
+                                            urlConnectorId,
+                                            resetType);
+                                        await Reset21(status, context, dbContext, resetType);
                                     }
                                     else if (status.Protocol == Protocol_OCPP201)
                                     {
                                         // OCPP V2.0
-                                        await Reset20(status, context, dbContext);
+                                        var resetType = ResolveReset20Type(resetIntent);
+                                        _logger.LogInformation(
+                                            "OCPPMiddleware Reset dispatch ChargePointId={ChargePointId} Protocol={Protocol} RequestedMode={RequestedMode} EffectiveMode={EffectiveMode}",
+                                            status.Id,
+                                            status.Protocol,
+                                            urlConnectorId,
+                                            resetType);
+                                        await Reset20(status, context, dbContext, resetType);
                                     }
                                     else
                                     {
                                         // OCPP V1.6
-                                        await Reset16(status, context, dbContext, urlConnectorId);
+                                        var resetType = ResolveReset16Type(resetIntent);
+                                        _logger.LogInformation(
+                                            "OCPPMiddleware Reset dispatch ChargePointId={ChargePointId} Protocol={Protocol} RequestedMode={RequestedMode} EffectiveMode={EffectiveMode}",
+                                            status.Id,
+                                            status.Protocol,
+                                            urlConnectorId,
+                                            resetType);
+                                        await Reset16(status, context, dbContext, resetType);
                                     }
                                 }
                                 else
