@@ -148,15 +148,15 @@ namespace OCPP.Core.Server
         }
 
         /// <summary>
-        /// Sends a (Soft-)Reset to the chargepoint
+        /// Sends a Reset request to the chargepoint
         /// </summary>
-        private async Task Reset21(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext)
+        private async Task Reset21(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, Messages_OCPP21.ResetEnumType resetType)
         {
             ILogger logger = _logFactory.CreateLogger("OCPPMiddleware.OCPP21");
             ControllerOCPP21 controller21 = new ControllerOCPP21(_configuration, _logFactory, chargePointStatus, dbContext);
 
             Messages_OCPP21.ResetRequest resetRequest = new Messages_OCPP21.ResetRequest();
-            resetRequest.Type = Messages_OCPP21.ResetEnumType.OnIdle;
+            resetRequest.Type = resetType;
             resetRequest.CustomData = new CustomDataType();
             resetRequest.CustomData.VendorId = ControllerOCPP21.VendorId;
 

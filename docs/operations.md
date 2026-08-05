@@ -73,6 +73,18 @@ The checked `appsettings.json` files include development/sample values. Override
 
 `Payments:StartWindowMinutes` is applied when payment authorization succeeds and stored as an absolute UTC deadline on the reservation. Confirmation and webhook authorization paths use the same configured value. A reservation remains eligible before that stored deadline and expires at the deadline; later configuration changes do not rewrite already-persisted deadlines.
 
+## Charger Reset Operations
+
+The server reset endpoint is `GET /API/Reset/{chargePointId}/{mode?}`. It accepts `Hard` and `Soft` modes; an unsupported mode returns HTTP 400. When mode is omitted, the compatibility default is retained.
+
+| Requested mode | OCPP 1.6 | OCPP 2.0.1 / 2.1 |
+| --- | --- | --- |
+| omitted | `Soft` | `OnIdle` |
+| `Soft` | `Soft` | `OnIdle` |
+| `Hard` | `Hard` | `Immediate` |
+
+The management reset action requests `Hard`, which maps to OCPP 2.x `Immediate`. This adds no configuration key or deployment step.
+
 ## Database Operations
 
 Confirmed company invoice buyer data is stored as nullable bounded columns on `ChargePaymentReservation`. Migration `AddInvoiceBuyerSnapshot` is non-destructive for existing reservations. Migration `AddInvoiceBuyerVatValidation` adds the original identifier, canonical VAT identifier, local validation status, VIES status, checked time, and bounded reference; its nullable columns do not rewrite historical rows. New public sessions must confirm the complete buyer snapshot before Stripe Checkout is created. Existing legacy R1 reservations can still build from Stripe metadata, while newly confirmed requests use the durable reservation snapshot as the invoice source of truth. The legacy buyer-data endpoint remains available for compatibility, but the public status page no longer offers post-checkout buyer entry.

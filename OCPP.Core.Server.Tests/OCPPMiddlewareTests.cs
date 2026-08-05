@@ -2434,10 +2434,32 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
-        [Fact]
-        public async Task Invoke_ResetApi_WithHardParameter_SendsOcpp16HardReset()
+        [Theory]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET", "Soft")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/Soft", "Soft")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/Hard", "Hard")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/soft", "Soft")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/hArD", "Hard")]
+        [InlineData("ocpp1.6", "/API/Reset/CP-RESET/   ", "Soft")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET", "OnIdle")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/Soft", "OnIdle")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/sOfT", "OnIdle")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/Hard", "Immediate")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/haRD", "Immediate")]
+        [InlineData("ocpp2.0.1", "/API/Reset/CP-RESET/   ", "OnIdle")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET", "OnIdle")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/Soft", "OnIdle")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/soFT", "OnIdle")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/Hard", "Immediate")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/HarD", "Immediate")]
+        [InlineData("ocpp2.1", "/API/Reset/CP-RESET/   ", "OnIdle")]
+        public async Task Invoke_ResetApi_MapsRequestedModeToProtocolPayload(
+            string protocol,
+            string requestPath,
+            string expectedResetType)
         {
-            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-reset-api-hard-{Guid.NewGuid():N}.sqlite");
+            // Production mutation caught: wrong protocol enum, lost no-mode default, or lost explicit Soft handling.
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-reset-api-mode-{Guid.NewGuid():N}.sqlite");
 
             try
             {
@@ -2454,10 +2476,10 @@ namespace OCPP.Core.Server.Tests
 
                 var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
                 {
-                    ["CP-HARD-RESET"] = new ChargePointStatus
+                    ["CP-RESET"] = new ChargePointStatus
                     {
-                        Id = "CP-HARD-RESET",
-                        Protocol = "ocpp1.6",
+                        Id = "CP-RESET",
+                        Protocol = protocol,
                         WebSocket = fakeSocket
                     }
                 });
@@ -2466,7 +2488,7 @@ namespace OCPP.Core.Server.Tests
                 {
                     var httpContext = new DefaultHttpContext();
                     httpContext.Request.Method = "GET";
-                    httpContext.Request.Path = "/API/Reset/CP-HARD-RESET/Hard";
+                    httpContext.Request.Path = requestPath;
                     httpContext.Response.Body = new MemoryStream();
 
                     using (var actionContext = CreateContext(databasePath))
@@ -2480,7 +2502,68 @@ namespace OCPP.Core.Server.Tests
 
                     Assert.Equal("Accepted", payload["status"]?.Value<string>());
                     Assert.NotNull(resetPayload);
-                    Assert.Equal("Hard", JObject.Parse(resetPayload!)["type"]?.Value<string>());
+                    Assert.Equal(expectedResetType, JObject.Parse(resetPayload!)["type"]?.Value<string>());
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_ResetApi_WithMalformedMode_ReturnsBadRequestWithoutSending()
+        {
+            // Production mutation caught: accepting an unknown reset mode or queueing after validation fails.
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-reset-api-invalid-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var middleware = CreateMiddleware();
+                int sendCount = 0;
+                var fakeSocket = new FakeOpenWebSocket(() =>
+                {
+                    Interlocked.Increment(ref sendCount);
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.NotNull(queuedMessage.TaskCompletionSource);
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    return Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-RESET"] = new ChargePointStatus
+                    {
+                        Id = "CP-RESET",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "GET";
+                    httpContext.Request.Path = "/API/Reset/CP-RESET/RestartNow";
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    var responseBody = await reader.ReadToEndAsync();
+
+                    Assert.Equal(StatusCodes.Status400BadRequest, httpContext.Response.StatusCode);
+                    Assert.Equal("{\"status\":\"InvalidResetMode\"}", responseBody);
+                    Assert.Equal(0, sendCount);
+                    Assert.Equal(0, GetQueuedRequestCount(middleware));
                 }
                 finally
                 {
@@ -2814,6 +2897,17 @@ namespace OCPP.Core.Server.Tests
             var queue = Assert.IsAssignableFrom<System.Collections.IDictionary>(field.GetValue(middleware));
             var message = queue.Values.Cast<object>().OfType<OCPPMessage>().FirstOrDefault();
             return Assert.IsType<OCPPMessage>(message);
+        }
+
+        private static int GetQueuedRequestCount(OCPPMiddleware middleware)
+        {
+            var field = typeof(OCPPMiddleware)
+                .GetField("_requestQueue", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(field);
+
+            var queue = Assert.IsAssignableFrom<System.Collections.IDictionary>(field.GetValue(middleware));
+            return queue.Count;
         }
 
         private static object InvokeGetConnectorStartability(

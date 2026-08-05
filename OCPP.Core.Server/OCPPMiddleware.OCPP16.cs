@@ -192,7 +192,7 @@ namespace OCPP.Core.Server
         /// <summary>
         /// Waits for new OCPP V1.6 messages on the open websocket connection and delegates processing to a controller
         /// </summary>
-        private async Task Reset16(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, string resetType = null)
+        private async Task Reset16(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, Messages_OCPP16.ResetRequestType resetType)
         {
             ILogger logger = _logFactory.CreateLogger("OCPPMiddleware.OCPP16");
             ControllerOCPP16 controller16 = new ControllerOCPP16(_configuration, _logFactory, chargePointStatus, dbContext);
@@ -200,9 +200,7 @@ namespace OCPP.Core.Server
             logger.LogTrace("OCPPMiddleware.OCPP16 => Reset16: ChargePoint='{0}' ResetType='{1}'", chargePointStatus.Id, resetType);
 
             Messages_OCPP16.ResetRequest resetRequest = new Messages_OCPP16.ResetRequest();
-            resetRequest.Type = string.Equals(resetType, "Hard", StringComparison.OrdinalIgnoreCase)
-                ? Messages_OCPP16.ResetRequestType.Hard
-                : Messages_OCPP16.ResetRequestType.Soft;
+            resetRequest.Type = resetType;
             string jsonResetRequest = JsonConvert.SerializeObject(resetRequest);
 
             OCPPMessage msgOut = new OCPPMessage();

@@ -320,6 +320,57 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("The reservation could not be cancelled.", objectResult.Value);
         }
 
+        [Theory]
+        [InlineData("Accepted", "The charging station is being restarted.")]
+        [InlineData("Rejected", "The charging station has rejected the request.")]
+        [InlineData("Scheduled", "The charging station has scheduled the restart.")]
+        [InlineData("Timeout", "A timeout has occured")]
+        public async Task Reset_RequestsExplicitHardMode(string backendStatus, string expectedResult)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"reset-hard-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = "CP-RESET",
+                        Name = "Reset test"
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var server = TestHttpServer.Start(request =>
+                {
+                    Assert.Equal("GET", request.Method);
+                    Assert.Equal("/Reset/CP-RESET/Hard", request.Path);
+                    Assert.Equal("test-api-key", request.Headers["x-api-key"]);
+
+                    return TestHttpResponse.Json($"{{\"status\":\"{backendStatus}\"}}");
+                });
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateApiController(
+                    actionContext,
+                    new Dictionary<string, string?>
+                    {
+                        ["ServerApiUrl"] = server.BaseUri.ToString(),
+                        ["ApiKey"] = "test-api-key"
+                    });
+
+                var result = await controller.Reset("CP-RESET");
+                var objectResult = Assert.IsType<ObjectResult>(result);
+
+                Assert.Equal(StatusCodes.Status200OK, objectResult.StatusCode);
+                Assert.Equal(expectedResult, objectResult.Value);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         [Fact]
         public async Task StopTransaction_ReturnsVisibleError_WhenBackendReturnsHtmlLoginPage()
         {
@@ -570,6 +621,10 @@ namespace OCPP.Core.Server.Tests
                     ["CancelReservationStatus"] = "Reservation status is now '{0}'.",
                     ["CancelReservationError"] = "The reservation could not be cancelled.",
                     ["StopTransactionError"] = "The charging transaction could not be stopped.",
+                    ["ResetAccepted"] = "The charging station is being restarted.",
+                    ["ResetRejected"] = "The charging station has rejected the request.",
+                    ["ResetScheduled"] = "The charging station has scheduled the restart.",
+                    ["Timeout"] = "A timeout has occured",
                     ["UnknownChargepoint"] = "Unknown charge point"
                 }),
                 NullLoggerFactory.Instance,
