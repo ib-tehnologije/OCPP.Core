@@ -74,6 +74,7 @@ namespace OCPP.Core.Server
         private readonly IPaymentCoordinator _paymentCoordinator;
         private readonly StartChargingMediator _startMediator;
         private readonly ReservationLinkService _reservationLinkService;
+        private readonly OcppMessageDumpService _messageDumpService;
         private readonly Func<DateTime> _utcNow;
         private const string ConnectorBusyStatus = "ConnectorBusy";
         // Reservation profile disabled: Remove charger-side ReserveNow/CancelReservation to avoid flaky stations.
@@ -88,7 +89,7 @@ namespace OCPP.Core.Server
         // Dictionary for processing asynchronous API calls
         private readonly ConcurrentDictionary<string, OCPPMessage> _requestQueue = new ConcurrentDictionary<string, OCPPMessage>();
 
-        public OCPPMiddleware(RequestDelegate next, ILoggerFactory logFactory, IConfiguration configuration, IServiceScopeFactory scopeFactory, IPaymentCoordinator paymentCoordinator, StartChargingMediator startMediator, ReservationLinkService reservationLinkService)
+        public OCPPMiddleware(RequestDelegate next, ILoggerFactory logFactory, IConfiguration configuration, IServiceScopeFactory scopeFactory, IPaymentCoordinator paymentCoordinator, StartChargingMediator startMediator, ReservationLinkService reservationLinkService, OcppMessageDumpService messageDumpService)
         {
             _next = next;
             _logFactory = logFactory;
@@ -97,6 +98,7 @@ namespace OCPP.Core.Server
             _paymentCoordinator = paymentCoordinator;
             _startMediator = startMediator;
             _reservationLinkService = reservationLinkService;
+            _messageDumpService = messageDumpService;
             _utcNow = () => DateTime.UtcNow;
 
             _logger = logFactory.CreateLogger("OCPPMiddleware");
@@ -3490,22 +3492,7 @@ namespace OCPP.Core.Server
         /// </summary>
         private void DumpMessage(string nameSuffix, string message)
         {
-            string dumpDir = _configuration.GetValue<string>("MessageDumpDir");
-            if (!string.IsNullOrWhiteSpace(dumpDir))
-            {
-                var fullDumpDir = Path.GetFullPath(dumpDir);
-                Directory.CreateDirectory(fullDumpDir);
-                string path = Path.Combine(fullDumpDir, string.Format("{0}_{1}.txt", DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss-ffff"), nameSuffix));
-                try
-                {
-                    // Write incoming message into dump directory
-                    File.WriteAllText(path, message);
-                }
-                catch (Exception exp)
-                {
-                    _logger.LogError(exp, "OCPPMiddleware.DumpMessage => Error dumping message '{0}' to path: '{1}'", nameSuffix, path);
-                }
-            }
+            _messageDumpService.DumpMessage(nameSuffix, message);
         }
     }
 

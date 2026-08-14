@@ -184,15 +184,19 @@ namespace OCPP.Core.Server.Tests
         {
             var services = new ServiceCollection().BuildServiceProvider();
             var mediator = new StartChargingMediator();
+            IConfiguration configuration = new ConfigurationBuilder().Build();
 
             return new OCPPMiddleware(
                 _ => Task.CompletedTask,
                 NullLoggerFactory.Instance,
-                new ConfigurationBuilder().Build(),
+                configuration,
                 services.GetRequiredService<IServiceScopeFactory>(),
                 new NoopPaymentCoordinator(),
                 mediator,
-                new ReservationLinkService(mediator));
+                new ReservationLinkService(mediator),
+                new OcppMessageDumpService(
+                    configuration,
+                    NullLogger<OcppMessageDumpService>.Instance));
         }
 
         private static bool InvokeIsConnectorBusy(

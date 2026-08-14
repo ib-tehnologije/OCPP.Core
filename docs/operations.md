@@ -58,7 +58,7 @@ Important configuration areas:
 | --- | --- |
 | Database | `ConnectionStrings:SqlServer`, `ConnectionStrings:SQLite`, `AutoMigrateDB` |
 | Server API | `ApiKey`, `ServerApiUrl` in management |
-| OCPP | `MessageDumpDir`, `DbMessageLog`, `ShowIndexInfo`, `MaxMessageSize`, `ValidateMessages`, `DenyConcurrentTx`, `HeartBeatInterval` |
+| OCPP | `MessageDumpDir`, `MessageDumpRetentionHours`, `MessageDumpCleanupIntervalMinutes`, `DbMessageLog`, `ShowIndexInfo`, `MaxMessageSize`, `ValidateMessages`, `DenyConcurrentTx`, `HeartBeatInterval` |
 | Maintenance | `Maintenance:PendingPaymentTimeoutMinutes`, `Maintenance:ReservationTimeoutMinutes`, `Maintenance:StatusReleaseMinutes`, `Maintenance:CleanupIntervalSeconds`, `Maintenance:IdleWarningSweepSeconds`, `Maintenance:AvailableStatusOpenTransactionGraceMinutes`, `Maintenance:AuthorizationReleaseMaxAttempts`, `Maintenance:AuthorizationReleaseRetryBaseMinutes`, `Maintenance:AuthorizationReleaseInProgressTimeoutMinutes` |
 | Payments | `Payments:RequirePreparingBeforeRemoteStart`, `Payments:RemoteStartIdTokenType`, `Payments:StartWindowMinutes`, `Payments:MinimumSessionFeeKwh`, `Payments:MinimumChargeAmountCents`, `Payments:IdleFeeExcludedWindow`, `Payments:IdleFeeExcludedTimeZoneId`, `Payments:IdleAutoStopMinutes`, `Payments:ChargerResponseTimeoutMs`, `Payments:Vies:Enabled`, `Payments:Vies:TimeoutSeconds` |
 | Stripe | `Stripe:Enabled`, `Stripe:UseMockServices`, `Stripe:ApiKey`, `Stripe:WebhookSecret`, `Stripe:AllowInsecureWebhooks`, `Stripe:Currency`, `Stripe:ReturnBaseUrl`, `Stripe:ProductName`, `Stripe:MockCustomerEmail`, `Stripe:MockDiagnosticsDirectory` |
@@ -139,6 +139,7 @@ Observed:
 
 - File logging through `Karambolo.Extensions.Logging.File`.
 - Log files are configured under `Logs` by each app.
+- Raw OCPP filesystem dumps are disabled when `MessageDumpDir` is empty, which is the default. To diagnose message exchange temporarily, point `MessageDumpDir` at a dedicated directory. Files older than `MessageDumpRetentionHours` (default 24) are removed every `MessageDumpCleanupIntervalMinutes` (default 15); non-positive retention or interval values disable cleanup.
 - Sentry is enabled only when a DSN is present in configuration.
 - Hangfire dashboards can be enabled with `Hangfire:EnableDashboard` and `Hangfire:DashboardPath`.
 
