@@ -18,7 +18,7 @@ Known behavior:
 - Maintains live charge point status in memory.
 - Handles incoming boot, heartbeat, authorize, status, meter, transaction, data transfer, firmware/log status, charging-limit/profile, reset, unlock, and reservation-adjacent messages depending on protocol.
 - Can optionally validate incoming messages against bundled JSON schemas when `ValidateMessages` is enabled.
-- Can dump raw OCPP messages to `MessageDumpDir`.
+- Can dump raw OCPP messages when `MessageDumpDir` explicitly names a dedicated directory; dumps are disabled by default and expire according to `MessageDumpRetentionHours`.
 
 Important edge cases:
 

@@ -99,6 +99,8 @@ namespace OCPP.Core.Server
             }
             services.AddSingleton<Payments.StartChargingMediator>();
             services.AddSingleton<Payments.ReservationLinkService>();
+            services.AddSingleton<OcppMessageDumpService>();
+            services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<OcppMessageDumpService>());
             services.AddSingleton<Payments.IEmailNotificationService, Payments.EmailNotificationService>();
             services.AddSingleton<IInvoiceDraftBuilder, InvoiceDraftBuilder>();
             services.AddSingleton<IERacuniInvoiceRequestFactory, ERacuniInvoiceRequestFactory>();

@@ -2718,7 +2718,10 @@ namespace OCPP.Core.Server.Tests
                 services.GetRequiredService<IServiceScopeFactory>(),
                 paymentCoordinator ?? new NoopPaymentCoordinator(),
                 mediator,
-                new ReservationLinkService(mediator));
+                new ReservationLinkService(mediator),
+                new OcppMessageDumpService(
+                    configuration,
+                    NullLogger<OcppMessageDumpService>.Instance));
         }
 
         private static IServiceProvider CreateServiceProvider(string databasePath)
