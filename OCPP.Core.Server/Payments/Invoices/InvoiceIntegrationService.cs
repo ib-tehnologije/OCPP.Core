@@ -49,7 +49,7 @@ namespace OCPP.Core.Server.Payments.Invoices
             var mode = (_options.Mode ?? "LogOnly").Trim();
             var provider = (_options.Provider ?? "ERacuni").Trim();
             var auditLog = CreateAuditLog(draft, reservation, provider, mode);
-            PersistAuditLog(dbContext, auditLog);
+            var providerCallStarted = false;
 
             _logger.LogInformation(
                 "Invoice/Integration => Prepared draft provider={Provider} mode={Mode} reservation={ReservationId} transaction={TransactionId} kind={InvoiceKind} total={TotalAmount} currency={Currency} lines={LineCount}",
@@ -86,6 +86,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 var request = _eracuniRequestFactory.BuildCreateSalesInvoiceRequest(draft);
                 auditLog.ProviderOperation = request.Method;
                 auditLog.ApiTransactionId = TryGetApiTransactionId(request);
+                auditLog.SubmissionKey = BuildSubmissionKey(provider, auditLog.ApiTransactionId);
 
                 var logPayload = _eracuniRequestFactory.BuildSanitizedLogPayload(request);
                 auditLog.RequestPayloadJson = SerializeLogPayload(logPayload);
@@ -103,9 +104,48 @@ namespace OCPP.Core.Server.Payments.Invoices
                     return;
                 }
 
+                var existing = dbContext?.InvoiceSubmissionLogs
+                    .OrderByDescending(log => log.CreatedAtUtc)
+                    .FirstOrDefault(log => log.SubmissionKey == auditLog.SubmissionKey);
+                if (existing != null)
+                {
+                    auditLog = existing;
+                    if (string.Equals(auditLog.Status, "Submitted", StringComparison.OrdinalIgnoreCase) ||
+                        !string.IsNullOrWhiteSpace(auditLog.ExternalDocumentId) ||
+                        !string.IsNullOrWhiteSpace(auditLog.ExternalInvoiceNumber))
+                    {
+                        return;
+                    }
+
+                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
+                        BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
+                    {
+                        ApplyProviderResult(auditLog, lookup.ProviderResult);
+                        auditLog.Status = "Submitted";
+                        auditLog.CompletedAtUtc = DateTime.UtcNow;
+                        auditLog.Error = null;
+                        PersistAuditLog(dbContext, auditLog);
+                        return;
+                    }
+
+                    if (lookup.Outcome != ERacuniInvoiceLookupOutcome.NotFound)
+                    {
+                        auditLog.Status = "ProviderUnknown";
+                        auditLog.CompletedAtUtc = DateTime.UtcNow;
+                        auditLog.Error = Truncate(lookup.Error, 4000);
+                        PersistAuditLog(dbContext, auditLog);
+                        throw new InvalidOperationException(
+                            "Invoice provider state is unknown; create was not attempted.");
+                    }
+                }
+
                 auditLog.Status = "Submitting";
+                auditLog.CompletedAtUtc = null;
+                auditLog.Error = null;
                 PersistAuditLog(dbContext, auditLog);
 
+                providerCallStarted = true;
                 var result = _eracuniApiClient.CreateSalesInvoice(request);
                 ApplyProviderResult(auditLog, result);
 
@@ -130,7 +170,17 @@ namespace OCPP.Core.Server.Payments.Invoices
             }
             catch (Exception ex)
             {
-                auditLog.Status = "Failed";
+                if (providerCallStarted &&
+                    !string.Equals(auditLog.Status, "Failed", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(auditLog.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+                {
+                    auditLog.Status = "ProviderUnknown";
+                }
+                else if (!string.Equals(auditLog.Status, "ProviderUnknown", StringComparison.OrdinalIgnoreCase))
+                {
+                    auditLog.Status = "Failed";
+                }
+
                 auditLog.CompletedAtUtc ??= DateTime.UtcNow;
                 auditLog.Error = Truncate(ex.ToString(), 4000);
                 PersistAuditLog(dbContext, auditLog);
@@ -220,6 +270,33 @@ namespace OCPP.Core.Server.Payments.Invoices
             }
 
             return null;
+        }
+
+        private static string BuildSubmissionKey(string provider, string apiTransactionId)
+        {
+            if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(apiTransactionId))
+            {
+                throw new InvalidOperationException("Invoice submission requires a deterministic provider reference.");
+            }
+
+            return $"{provider.Trim()}:{apiTransactionId.Trim()}";
+        }
+
+        private static ERacuniApiRequestEnvelope BuildLookupRequest(
+            ERacuniApiRequestEnvelope createRequest,
+            string apiTransactionId)
+        {
+            return new ERacuniApiRequestEnvelope
+            {
+                Username = createRequest.Username,
+                SecretKey = createRequest.SecretKey,
+                Token = createRequest.Token,
+                Method = "SalesInvoiceList",
+                Parameters = new ERacuniSalesInvoiceLookupParameters
+                {
+                    ApiTransactionId = apiTransactionId
+                }
+            };
         }
 
         private static string SerializeLogPayload(object payload)

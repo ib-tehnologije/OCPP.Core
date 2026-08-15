@@ -17,6 +17,7 @@ namespace OCPP.Core.Database
         public string InvoiceKind { get; set; }
         public string ProviderOperation { get; set; }
         public string ApiTransactionId { get; set; }
+        public string SubmissionKey { get; set; }
         public string StripeCheckoutSessionId { get; set; }
         public string StripePaymentIntentId { get; set; }
         public int? HttpStatusCode { get; set; }

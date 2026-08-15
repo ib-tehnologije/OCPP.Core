@@ -108,6 +108,8 @@ SQL Server:
 
 Migration `AddPaymentAuthorizationReleaseReconciliation` adds nullable release-state, timestamp, and error fields plus a zero-valued attempt counter to `ChargePaymentReservation`, together with an append-only `PaymentAuthorizationReleaseAttempt` audit table. Nullable state is intentional: existing terminal reservations remain unarmed, so deploying the migration does not start historical cancellation or remediation.
 
+Migration `AddInvoiceSubmissionIdempotency` adds nullable `InvoiceSubmissionLog.SubmissionKey` plus a filtered unique index. Historical rows remain null and are not backfilled. New submit-mode attempts use the provider plus deterministic API transaction reference as their durable lineage. A repeated or restarted attempt checks submitted/external local evidence first and performs an exact provider lookup before another create. Transport errors, unrecognized schemas, and multiple exact provider matches remain `ProviderUnknown` and fail closed.
+
 SQLite:
 
 - Used for local/test runs.
@@ -132,6 +134,19 @@ Management app:
 
 - Hangfire server starts only when SQL Server connection string is configured.
 - `OwnerReportService.ScheduleRecurringReport` registers `owner-report-recurring` when `OwnerReportSchedule:Enabled` is true.
+
+## Explicit financial recovery
+
+The `OCPP.Core.Recovery` command is not a background job and never scans for candidates. Store the real manifest outside the repository; each entry names exactly one reservation and one of `recover-settlement`, `release-authorization`, or `recover-invoice`.
+
+1. Confirm the database migration is applied through the ordinary deployment process. The command does not migrate a database.
+2. Run without `--execute`. A dry-run performs local evidence checks only and prints a SHA-256 digest plus redacted reservation identifiers.
+3. Review every decision. Settlement requires exact linked terminal transaction, ordered timestamps, valid meter delta, non-negative pricing snapshots, and a positive derived billable amount. Authorization release requires a terminal unused reservation without transaction, energy, captured funds, or invoice evidence. Invoice recovery requires a completed captured reservation and linked transaction.
+4. Obtain separate operator approval for the exact manifest digest.
+5. Run with `--execute --confirm-sha256 <digest>`. Every row is reloaded and rechecked immediately before its operation. Authorization release delegates to the existing provider ownership and `requires_capture` reconciler. Settlement capture suppresses invoice/customer-notification side effects so invoice recovery stays separately allowlisted. Invoice recovery uses local uniqueness and provider lookup before create.
+6. Retain the sanitized report with the operator record. Never store the real manifest, provider response, credentials, customer data, or private handoff evidence in this public repository.
+
+Any changed manifest, missing evidence, provider ambiguity, duplicate provider match, or unavailable dependency stops the affected item. Do not bypass the digest, edit database fields manually, substitute estimated energy or fees, or turn the command into a scheduled task.
 
 ## Logging and Monitoring
 

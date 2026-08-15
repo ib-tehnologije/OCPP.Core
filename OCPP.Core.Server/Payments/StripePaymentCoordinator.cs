@@ -1022,13 +1022,40 @@ namespace OCPP.Core.Server.Payments
 
         public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
         {
+            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: false, suppressCustomerSideEffects: false);
+        }
+
+        public void RecoverTerminalSettlement(OCPPCoreContext dbContext, Transaction transaction)
+        {
+            if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
+            if (transaction == null) throw new ArgumentNullException(nameof(transaction));
+
+            var reservation = FindReservationForTransaction(dbContext, transaction);
+            var assessment = Recovery.FinancialRecoverySettlementAssessor.Assess(reservation, transaction);
+            if (!assessment.Eligible || assessment.TotalCents <= 0)
+            {
+                throw new InvalidOperationException(
+                    assessment.Eligible
+                        ? "Recovery settlement has no positive billable amount."
+                        : assessment.Reason);
+            }
+
+            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: true, suppressCustomerSideEffects: true);
+        }
+
+        private void CompleteReservationCore(
+            OCPPCoreContext dbContext,
+            Transaction transaction,
+            bool allowTerminalReplay,
+            bool suppressCustomerSideEffects)
+        {
             if (!IsEnabled) return;
             if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
             if (transaction == null) throw new ArgumentNullException(nameof(transaction));
 
             var reservation = FindReservationForTransaction(dbContext, transaction);
             if (reservation == null) return;
-            if (reservation.Status == PaymentReservationStatus.Completed ||
+            if ((!allowTerminalReplay && reservation.Status == PaymentReservationStatus.Completed) ||
                 reservation.Status == PaymentReservationStatus.Cancelled)
             {
                 return;
@@ -1310,8 +1337,11 @@ namespace OCPP.Core.Server.Payments
                 if (string.Equals(reservation.Status, PaymentReservationStatus.Completed, StringComparison.OrdinalIgnoreCase) &&
                     amountToCapture > 0)
                 {
-                    TryHandleInvoiceIntegration(dbContext, reservation, transaction);
-                    TrySendCompletionNotifications(dbContext, reservation, transaction);
+                    if (!suppressCustomerSideEffects)
+                    {
+                        TryHandleInvoiceIntegration(dbContext, reservation, transaction);
+                        TrySendCompletionNotifications(dbContext, reservation, transaction);
+                    }
                 }
             }
             catch (StripeException sex)

@@ -38,6 +38,12 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         public bool GeneratePublicUrl { get; set; }
     }
 
+    public class ERacuniSalesInvoiceLookupParameters
+    {
+        [JsonProperty("apiTransactionId")]
+        public string ApiTransactionId { get; set; }
+    }
+
     public class ERacuniSalesInvoice
     {
         [JsonProperty("status")]
@@ -169,5 +175,38 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         public HttpStatusCode StatusCode { get; set; }
         public string Body { get; set; }
         public JToken ParsedBody { get; set; }
+    }
+
+    public enum ERacuniInvoiceLookupOutcome
+    {
+        Found,
+        NotFound,
+        Unknown
+    }
+
+    public sealed class ERacuniInvoiceLookupResult
+    {
+        private ERacuniInvoiceLookupResult(
+            ERacuniInvoiceLookupOutcome outcome,
+            ERacuniApiResult providerResult,
+            string error)
+        {
+            Outcome = outcome;
+            ProviderResult = providerResult;
+            Error = error;
+        }
+
+        public ERacuniInvoiceLookupOutcome Outcome { get; }
+        public ERacuniApiResult ProviderResult { get; }
+        public string Error { get; }
+
+        public static ERacuniInvoiceLookupResult Found(ERacuniApiResult result) =>
+            new(ERacuniInvoiceLookupOutcome.Found, result, null);
+
+        public static ERacuniInvoiceLookupResult NotFound() =>
+            new(ERacuniInvoiceLookupOutcome.NotFound, null, null);
+
+        public static ERacuniInvoiceLookupResult Unknown(string error) =>
+            new(ERacuniInvoiceLookupOutcome.Unknown, null, error);
     }
 }

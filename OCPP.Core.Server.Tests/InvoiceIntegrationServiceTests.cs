@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -67,6 +68,97 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("https://example.test/pdf/42", audit.ExternalPdfUrl);
             Assert.Equal("ok", audit.ProviderResponseStatus);
             Assert.Equal("{\"status\":\"ok\",\"result\":{\"documentId\":\"doc-42\",\"number\":\"INV-2026-0042\",\"publicURL\":\"https://example.test/public/42\",\"pdfURL\":\"https://example.test/pdf/42\"}}", audit.ResponseBody);
+            Assert.Equal($"ERacuni:{draft.ReservationId:N}", audit.SubmissionKey);
+        }
+
+        [Fact]
+        public void HandleCompletedReservation_DoesNotCreateAgain_WhenLocalSubmissionAlreadySucceeded()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient();
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            var reservation = new ChargePaymentReservation();
+            var transaction = new Transaction();
+            var session = new Session();
+
+            service.HandleCompletedReservation(dbContext, reservation, transaction, session);
+            service.HandleCompletedReservation(dbContext, reservation, transaction, session);
+
+            Assert.Equal(1, apiClient.CreateCount);
+            Assert.Single(dbContext.InvoiceSubmissionLogs);
+            Assert.Equal("Submitted", dbContext.InvoiceSubmissionLogs.Single().Status);
+        }
+
+        [Fact]
+        public void HandleCompletedReservation_UsesProviderLookupBeforeRetryingUnknownAttempt()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient
+            {
+                LookupResultToReturn = ERacuniInvoiceLookupResult.Found(new ERacuniApiResult
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Body = "{\"documentId\":\"recovered-doc\",\"number\":\"INV-RECOVERED\"}",
+                    ParsedBody = Newtonsoft.Json.Linq.JToken.Parse("{\"documentId\":\"recovered-doc\",\"number\":\"INV-RECOVERED\"}")
+                })
+            };
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            dbContext.InvoiceSubmissionLogs.Add(new InvoiceSubmissionLog
+            {
+                ReservationId = draft.ReservationId,
+                TransactionId = draft.TransactionId,
+                Provider = "ERacuni",
+                Mode = "Submit",
+                Status = "ProviderUnknown",
+                SubmissionKey = $"ERacuni:{draft.ReservationId:N}",
+                ApiTransactionId = draft.ReservationId.ToString("N"),
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            dbContext.SaveChanges();
+
+            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session());
+
+            Assert.Equal(1, apiClient.LookupCount);
+            Assert.Equal(0, apiClient.CreateCount);
+            var audit = Assert.Single(dbContext.InvoiceSubmissionLogs);
+            Assert.Equal("Submitted", audit.Status);
+            Assert.Equal("recovered-doc", audit.ExternalDocumentId);
+            Assert.Equal("INV-RECOVERED", audit.ExternalInvoiceNumber);
+        }
+
+        [Fact]
+        public void HandleCompletedReservation_MarksProviderUnknown_WhenCreateThrows()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient
+            {
+                CreateException = new HttpRequestException("synthetic timeout")
+            };
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            Assert.Throws<HttpRequestException>(() =>
+                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session()));
+
+            var audit = Assert.Single(dbContext.InvoiceSubmissionLogs);
+            Assert.Equal("ProviderUnknown", audit.Status);
+            Assert.Contains("synthetic timeout", audit.Error);
         }
 
         [Fact]
@@ -247,17 +339,31 @@ namespace OCPP.Core.Server.Tests
         private sealed class StubERacuniApiClient : IERacuniApiClient
         {
             public int CreateCount { get; private set; }
+            public int LookupCount { get; private set; }
             public ERacuniApiResult? ResultToReturn { get; set; }
+            public ERacuniInvoiceLookupResult? LookupResultToReturn { get; set; }
+            public Exception? CreateException { get; set; }
 
             public ERacuniApiResult CreateSalesInvoice(ERacuniApiRequestEnvelope request)
             {
                 CreateCount++;
+                if (CreateException != null)
+                {
+                    throw CreateException;
+                }
+
                 return ResultToReturn ?? new ERacuniApiResult
                 {
                     StatusCode = HttpStatusCode.OK,
                     Body = "{\"status\":\"ok\",\"result\":{\"documentId\":\"doc-42\",\"number\":\"INV-2026-0042\",\"publicURL\":\"https://example.test/public/42\",\"pdfURL\":\"https://example.test/pdf/42\"}}",
                     ParsedBody = Newtonsoft.Json.Linq.JToken.Parse("{\"status\":\"ok\",\"result\":{\"documentId\":\"doc-42\",\"number\":\"INV-2026-0042\",\"publicURL\":\"https://example.test/public/42\",\"pdfURL\":\"https://example.test/pdf/42\"}}")
                 };
+            }
+
+            public ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request)
+            {
+                LookupCount++;
+                return LookupResultToReturn ?? ERacuniInvoiceLookupResult.Unknown("Synthetic lookup was not configured.");
             }
         }
     }

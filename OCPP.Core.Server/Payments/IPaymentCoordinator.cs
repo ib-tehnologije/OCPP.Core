@@ -34,6 +34,8 @@ namespace OCPP.Core.Server.Payments
             };
         void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId);
         void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction);
+        void RecoverTerminalSettlement(OCPPCoreContext dbContext, Transaction transaction) =>
+            CompleteReservation(dbContext, transaction);
         void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc);
         void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader);
     }

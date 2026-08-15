@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,8 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
     public interface IERacuniApiClient
     {
         ERacuniApiResult CreateSalesInvoice(ERacuniApiRequestEnvelope request);
+        ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request) =>
+            ERacuniInvoiceLookupResult.Unknown("Provider lookup is not implemented.");
     }
 
     public class ERacuniApiClient : IERacuniApiClient
@@ -33,6 +36,79 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         }
 
         public ERacuniApiResult CreateSalesInvoice(ERacuniApiRequestEnvelope request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+
+            return Send(request);
+        }
+
+        public ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (request.Parameters is not ERacuniSalesInvoiceLookupParameters parameters ||
+                string.IsNullOrWhiteSpace(parameters.ApiTransactionId))
+            {
+                return ERacuniInvoiceLookupResult.Unknown("Exact provider transaction reference is missing.");
+            }
+
+            ERacuniApiResult response;
+            try
+            {
+                response = Send(request);
+            }
+            catch (Exception ex)
+            {
+                return ERacuniInvoiceLookupResult.Unknown(ex.Message);
+            }
+
+            var status = (int)response.StatusCode;
+            if (status < 200 || status > 299 || response.ParsedBody == null)
+            {
+                return ERacuniInvoiceLookupResult.Unknown(
+                    $"Provider lookup returned HTTP {status} or a non-JSON response.");
+            }
+
+            var exactMatches = response.ParsedBody
+                .SelectTokens("$..apiTransactionId")
+                .Select(token => token.Parent?.Parent)
+                .OfType<JObject>()
+                .Where(candidate => string.Equals(
+                    candidate.GetValue("apiTransactionId", StringComparison.OrdinalIgnoreCase)?.ToString(),
+                    parameters.ApiTransactionId,
+                    StringComparison.Ordinal))
+                .ToList();
+
+            if (exactMatches.Count > 1)
+            {
+                return ERacuniInvoiceLookupResult.Unknown("Provider lookup returned duplicate exact matches.");
+            }
+
+            if (exactMatches.Count == 1)
+            {
+                var match = exactMatches[0];
+                var metadata = ERacuniApiResponseMetadataReader.Read(match);
+                if (string.IsNullOrWhiteSpace(metadata.DocumentId) &&
+                    string.IsNullOrWhiteSpace(metadata.InvoiceNumber))
+                {
+                    return ERacuniInvoiceLookupResult.Unknown("Provider lookup match has no durable document identifier.");
+                }
+
+                return ERacuniInvoiceLookupResult.Found(new ERacuniApiResult
+                {
+                    StatusCode = response.StatusCode,
+                    Body = match.ToString(Formatting.None),
+                    ParsedBody = match
+                });
+            }
+
+            var isRecognizedEmptyResult = response.ParsedBody.Type == JTokenType.Array ||
+                response.ParsedBody["result"] != null;
+            return isRecognizedEmptyResult
+                ? ERacuniInvoiceLookupResult.NotFound()
+                : ERacuniInvoiceLookupResult.Unknown("Provider lookup response schema is unrecognized.");
+        }
+
+        private ERacuniApiResult Send(ERacuniApiRequestEnvelope request)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
