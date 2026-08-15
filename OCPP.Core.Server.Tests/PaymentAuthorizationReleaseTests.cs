@@ -188,6 +188,38 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0, intents.CancelCalls);
         }
 
+        [Theory]
+        [InlineData("missing-charge-point")]
+        [InlineData("missing-connector")]
+        [InlineData("missing-tag")]
+        [InlineData("missing-window-start")]
+        [InlineData("missing-window-end")]
+        [InlineData("invalid-window-order")]
+        public void Reconcile_RequiresReviewWhenTransactionLinkageCannotBeEvaluated(
+            string missingEvidence)
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            RemoveTransactionLinkageEvidence(reservation, missingEvidence);
+            context.SaveChanges();
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var coordinator = CreateCoordinator(intents);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.ReviewRequired, reservation.AuthorizationReleaseState);
+            Assert.Contains("transaction linkage", reservation.AuthorizationReleaseLastError, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, intents.GetCalls);
+            Assert.Equal(0, intents.CancelCalls);
+            Assert.Equal(
+                PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                context.PaymentAuthorizationReleaseAttempts.Single().Outcome);
+        }
+
         [Fact]
         public void Reconcile_ExcludesCapturedOrInvoicedReservationBeforeProviderRead()
         {
@@ -729,16 +761,50 @@ namespace OCPP.Core.Server.Tests
                 ChargePointId = "CP1",
                 ConnectorId = 1,
                 ChargeTagId = "TAG1",
+                OcppIdTag = "TAG1",
                 StripePaymentIntentId = "pi_test",
                 Status = status,
                 Currency = "eur",
                 CreatedAtUtc = Now.AddHours(-1),
+                AuthorizedAtUtc = Now.AddHours(-1),
+                StartDeadlineAtUtc = Now.AddMinutes(10),
                 UpdatedAtUtc = Now.AddMinutes(-10),
                 AuthorizationReleaseState = armed ? PaymentAuthorizationReleaseState.Pending : null
             };
             context.ChargePaymentReservations.Add(reservation);
             context.SaveChanges();
             return reservation;
+        }
+
+        private static void RemoveTransactionLinkageEvidence(
+            ChargePaymentReservation reservation,
+            string missingEvidence)
+        {
+            switch (missingEvidence)
+            {
+                case "missing-charge-point":
+                    reservation.ChargePointId = " ";
+                    break;
+                case "missing-connector":
+                    reservation.ConnectorId = 0;
+                    break;
+                case "missing-tag":
+                    reservation.ChargeTagId = " ";
+                    reservation.OcppIdTag = " ";
+                    break;
+                case "missing-window-start":
+                    reservation.AuthorizedAtUtc = null;
+                    reservation.CreatedAtUtc = default;
+                    break;
+                case "missing-window-end":
+                    reservation.StartDeadlineAtUtc = null;
+                    break;
+                case "invalid-window-order":
+                    reservation.StartDeadlineAtUtc = reservation.AuthorizedAtUtc.GetValueOrDefault().AddMinutes(-1);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(missingEvidence), missingEvidence, null);
+            }
         }
 
         private static ReleasePaymentIntentService OwnedIntentService(

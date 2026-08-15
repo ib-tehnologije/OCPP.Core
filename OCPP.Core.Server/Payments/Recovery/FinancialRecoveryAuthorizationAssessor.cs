@@ -7,38 +7,67 @@ namespace OCPP.Core.Server.Payments.Recovery
 {
     public static class FinancialRecoveryAuthorizationAssessor
     {
-        public static bool HasAuthoritativeTransactionEvidence(
+        public static FinancialRecoveryTransactionEvidenceDecision EvaluateTransactionEvidence(
             OCPPCoreContext dbContext,
             ChargePaymentReservation reservation)
         {
             if (reservation == null)
             {
-                return false;
+                return IndeterminateTransactionEvidence("Reservation evidence is missing.");
             }
 
             if (reservation.TransactionId.HasValue || reservation.StartTransactionId.HasValue)
             {
-                return true;
+                return EvaluatedTransactionEvidence(hasTransaction: true);
             }
 
-            if (dbContext == null ||
-                string.IsNullOrWhiteSpace(reservation.ChargePointId) ||
-                reservation.ConnectorId <= 0 ||
-                (string.IsNullOrWhiteSpace(reservation.OcppIdTag) &&
-                 string.IsNullOrWhiteSpace(reservation.ChargeTagId)))
+            if (dbContext == null)
             {
-                return false;
+                return IndeterminateTransactionEvidence("Database evidence is unavailable.");
+            }
+
+            if (string.IsNullOrWhiteSpace(reservation.ChargePointId))
+            {
+                return IndeterminateTransactionEvidence("Charge point identity is missing.");
+            }
+
+            if (reservation.ConnectorId <= 0)
+            {
+                return IndeterminateTransactionEvidence("Connector identity is missing or invalid.");
+            }
+
+            var hasOcppIdTag = !string.IsNullOrWhiteSpace(reservation.OcppIdTag);
+            var hasChargeTagId = !string.IsNullOrWhiteSpace(reservation.ChargeTagId);
+            if (!hasOcppIdTag && !hasChargeTagId)
+            {
+                return IndeterminateTransactionEvidence("Charge tag identity is missing.");
             }
 
             var windowStartUtc = reservation.AuthorizedAtUtc ?? reservation.CreatedAtUtc;
-            var windowEndUtc = reservation.StartDeadlineAtUtc;
-            return dbContext.Transactions.AsNoTracking().Any(transaction =>
+            if (windowStartUtc == default)
+            {
+                return IndeterminateTransactionEvidence("Transaction linkage window start is missing.");
+            }
+
+            if (!reservation.StartDeadlineAtUtc.HasValue)
+            {
+                return IndeterminateTransactionEvidence("Transaction linkage window end is missing.");
+            }
+
+            var windowEndUtc = reservation.StartDeadlineAtUtc.Value;
+            if (windowEndUtc <= windowStartUtc)
+            {
+                return IndeterminateTransactionEvidence("Transaction linkage time window is invalid.");
+            }
+
+            var hasTransaction = dbContext.Transactions.AsNoTracking().Any(transaction =>
                 transaction.ChargePointId == reservation.ChargePointId &&
                 transaction.ConnectorId == reservation.ConnectorId &&
-                (transaction.StartTagId == reservation.OcppIdTag ||
-                 transaction.StartTagId == reservation.ChargeTagId) &&
+                ((hasOcppIdTag && transaction.StartTagId == reservation.OcppIdTag) ||
+                 (hasChargeTagId && transaction.StartTagId == reservation.ChargeTagId)) &&
                 transaction.StartTime >= windowStartUtc &&
-                (!windowEndUtc.HasValue || transaction.StartTime <= windowEndUtc.Value));
+                transaction.StartTime <= windowEndUtc);
+            return EvaluatedTransactionEvidence(hasTransaction);
         }
 
         public static FinancialRecoveryAuthorizationDecision Assess(
@@ -95,6 +124,28 @@ namespace OCPP.Core.Server.Payments.Recovery
             Eligible = false,
             Reason = reason
         };
+
+        private static FinancialRecoveryTransactionEvidenceDecision EvaluatedTransactionEvidence(
+            bool hasTransaction) => new()
+        {
+            CanEvaluate = true,
+            HasTransaction = hasTransaction
+        };
+
+        private static FinancialRecoveryTransactionEvidenceDecision IndeterminateTransactionEvidence(
+            string reason) => new()
+        {
+            CanEvaluate = false,
+            HasTransaction = false,
+            Reason = $"Authoritative transaction linkage cannot be evaluated: {reason}"
+        };
+    }
+
+    public sealed class FinancialRecoveryTransactionEvidenceDecision
+    {
+        public bool CanEvaluate { get; set; }
+        public bool HasTransaction { get; set; }
+        public string Reason { get; set; }
     }
 
     public sealed class FinancialRecoveryAuthorizationDecision

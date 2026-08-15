@@ -273,17 +273,8 @@ namespace OCPP.Core.Server.Tests
         public void Run_DryRunDoesNotArmAuthorizationRelease()
         {
             using var dbContext = CreateContext();
-            var reservation = new ChargePaymentReservation
-            {
-                ReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555"),
-                ChargePointId = "CP-SYNTHETIC",
-                ChargeTagId = "TAG-SYNTHETIC",
-                Currency = "EUR",
-                Status = PaymentReservationStatus.Abandoned,
-                StripePaymentIntentId = "pi_synthetic",
-                CapturedAmountCents = 0,
-                ActualEnergyKwh = 0
-            };
+            var reservation = CreateAuthorizationReservation(
+                Guid.Parse("55555555-5555-5555-5555-555555555555"));
             dbContext.ChargePaymentReservations.Add(reservation);
             dbContext.SaveChanges();
             var manifest = FinancialRecoveryManifest.Parse("""
@@ -300,6 +291,56 @@ namespace OCPP.Core.Server.Tests
 
             Assert.True(Assert.Single(report.Items).Eligible);
             Assert.Null(reservation.AuthorizationReleaseState);
+            Assert.Empty(dbContext.PaymentAuthorizationReleaseAttempts);
+        }
+
+        [Theory]
+        [InlineData("missing-charge-point", false)]
+        [InlineData("missing-charge-point", true)]
+        [InlineData("missing-connector", false)]
+        [InlineData("missing-connector", true)]
+        [InlineData("missing-tag", false)]
+        [InlineData("missing-tag", true)]
+        [InlineData("missing-window-start", false)]
+        [InlineData("missing-window-start", true)]
+        [InlineData("missing-window-end", false)]
+        [InlineData("missing-window-end", true)]
+        [InlineData("invalid-window-order", false)]
+        [InlineData("invalid-window-order", true)]
+        public void Run_RejectsIncompleteTransactionLinkageBeforeProviderCall(
+            string missingEvidence,
+            bool execute)
+        {
+            using var dbContext = CreateContext();
+            var reservation = CreateAuthorizationReservation(
+                Guid.Parse("54545454-5454-5454-5454-545454545454"));
+            RemoveTransactionLinkageEvidence(reservation, missingEvidence);
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.SaveChanges();
+            var manifest = FinancialRecoveryManifest.Parse("""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "release-authorization", "reservationId": "54545454-5454-5454-5454-545454545454" }
+                  ]
+                }
+                """);
+            var coordinator = new RecordingPaymentCoordinator();
+            var service = new FinancialRecoveryService(coordinator, invoiceIntegrationService: null);
+
+            var report = service.Run(
+                dbContext,
+                manifest,
+                execute,
+                execute ? manifest.Sha256 : null);
+
+            var item = Assert.Single(report.Items);
+            Assert.False(item.Eligible);
+            Assert.Contains("transaction linkage", item.Outcome, StringComparison.OrdinalIgnoreCase);
+            Assert.False(report.Succeeded);
+            Assert.Empty(coordinator.ReconcileCalls);
+            dbContext.ChangeTracker.Clear();
+            Assert.Null(dbContext.ChargePaymentReservations.Single().AuthorizationReleaseState);
             Assert.Empty(dbContext.PaymentAuthorizationReleaseAttempts);
         }
 
@@ -361,17 +402,8 @@ namespace OCPP.Core.Server.Tests
         public void Run_ExecuteRestoresUnarmedStateWhenCoordinatorSkipsAuthorizationRelease()
         {
             using var dbContext = CreateContext();
-            var reservation = new ChargePaymentReservation
-            {
-                ReservationId = Guid.Parse("56565656-5656-5656-5656-565656565656"),
-                ChargePointId = "CP-SYNTHETIC",
-                ChargeTagId = "TAG-SYNTHETIC",
-                Currency = "EUR",
-                Status = PaymentReservationStatus.Abandoned,
-                StripePaymentIntentId = "pi_synthetic",
-                CapturedAmountCents = 0,
-                ActualEnergyKwh = 0
-            };
+            var reservation = CreateAuthorizationReservation(
+                Guid.Parse("56565656-5656-5656-5656-565656565656"));
             dbContext.ChargePaymentReservations.Add(reservation);
             dbContext.SaveChanges();
             var manifest = FinancialRecoveryManifest.Parse("""
@@ -399,17 +431,8 @@ namespace OCPP.Core.Server.Tests
         public void Run_ExecuteReportsRetryScheduledAuthorizationReleaseAsFailure()
         {
             using var dbContext = CreateContext();
-            var reservation = new ChargePaymentReservation
-            {
-                ReservationId = Guid.Parse("58585858-5858-5858-5858-585858585858"),
-                ChargePointId = "CP-SYNTHETIC",
-                ChargeTagId = "TAG-SYNTHETIC",
-                Currency = "EUR",
-                Status = PaymentReservationStatus.Abandoned,
-                StripePaymentIntentId = "pi_synthetic",
-                CapturedAmountCents = 0,
-                ActualEnergyKwh = 0
-            };
+            var reservation = CreateAuthorizationReservation(
+                Guid.Parse("58585858-5858-5858-5858-585858585858"));
             dbContext.ChargePaymentReservations.Add(reservation);
             dbContext.SaveChanges();
             var manifest = FinancialRecoveryManifest.Parse("""
@@ -439,17 +462,8 @@ namespace OCPP.Core.Server.Tests
         public void Run_ExecuteRejectsReleasedOutcomeWithoutPersistedReleasedAfterState()
         {
             using var dbContext = CreateContext();
-            var reservation = new ChargePaymentReservation
-            {
-                ReservationId = Guid.Parse("59595959-5959-5959-5959-595959595959"),
-                ChargePointId = "CP-SYNTHETIC",
-                ChargeTagId = "TAG-SYNTHETIC",
-                Currency = "EUR",
-                Status = PaymentReservationStatus.Abandoned,
-                StripePaymentIntentId = "pi_synthetic",
-                CapturedAmountCents = 0,
-                ActualEnergyKwh = 0
-            };
+            var reservation = CreateAuthorizationReservation(
+                Guid.Parse("59595959-5959-5959-5959-595959595959"));
             dbContext.ChargePaymentReservations.Add(reservation);
             dbContext.SaveChanges();
             var manifest = FinancialRecoveryManifest.Parse("""
@@ -473,6 +487,59 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("ReleasedOutcomeMissingPersistedAfterState", item.Outcome);
             Assert.False(report.Succeeded);
             Assert.Single(coordinator.ReconcileCalls);
+        }
+
+        private static ChargePaymentReservation CreateAuthorizationReservation(Guid reservationId)
+        {
+            var authorizedAt = new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc);
+            return new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP-SYNTHETIC",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-SYNTHETIC",
+                OcppIdTag = "TAG-SYNTHETIC",
+                Currency = "EUR",
+                Status = PaymentReservationStatus.Abandoned,
+                StripePaymentIntentId = "pi_synthetic",
+                CapturedAmountCents = 0,
+                ActualEnergyKwh = 0,
+                CreatedAtUtc = authorizedAt.AddMinutes(-1),
+                AuthorizedAtUtc = authorizedAt,
+                StartDeadlineAtUtc = authorizedAt.AddMinutes(10),
+                UpdatedAtUtc = authorizedAt.AddMinutes(20)
+            };
+        }
+
+        private static void RemoveTransactionLinkageEvidence(
+            ChargePaymentReservation reservation,
+            string missingEvidence)
+        {
+            switch (missingEvidence)
+            {
+                case "missing-charge-point":
+                    reservation.ChargePointId = " ";
+                    break;
+                case "missing-connector":
+                    reservation.ConnectorId = 0;
+                    break;
+                case "missing-tag":
+                    reservation.ChargeTagId = " ";
+                    reservation.OcppIdTag = " ";
+                    break;
+                case "missing-window-start":
+                    reservation.AuthorizedAtUtc = null;
+                    reservation.CreatedAtUtc = default;
+                    break;
+                case "missing-window-end":
+                    reservation.StartDeadlineAtUtc = null;
+                    break;
+                case "invalid-window-order":
+                    reservation.StartDeadlineAtUtc = reservation.AuthorizedAtUtc.GetValueOrDefault().AddMinutes(-1);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(missingEvidence), missingEvidence, null);
+            }
         }
 
         private static OCPPCoreContext CreateContext()

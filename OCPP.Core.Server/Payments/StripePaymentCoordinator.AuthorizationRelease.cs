@@ -82,7 +82,15 @@ namespace OCPP.Core.Server.Payments
                 return FinishReviewRequired(dbContext, reservation, attempt, "Captured payment evidence exists.");
             }
 
-            if (Recovery.FinancialRecoveryAuthorizationAssessor.HasAuthoritativeTransactionEvidence(dbContext, reservation))
+            var transactionEvidence = Recovery.FinancialRecoveryAuthorizationAssessor.EvaluateTransactionEvidence(
+                dbContext,
+                reservation);
+            if (!transactionEvidence.CanEvaluate)
+            {
+                return FinishReviewRequired(dbContext, reservation, attempt, transactionEvidence.Reason);
+            }
+
+            if (transactionEvidence.HasTransaction)
             {
                 return FinishReviewRequired(dbContext, reservation, attempt, "Reservation has active transaction or stopped matching transaction evidence.");
             }
@@ -457,7 +465,21 @@ namespace OCPP.Core.Server.Payments
                     "Captured payment evidence exists.");
             }
 
-            if (Recovery.FinancialRecoveryAuthorizationAssessor.HasAuthoritativeTransactionEvidence(dbContext, reservation))
+            var transactionEvidence = Recovery.FinancialRecoveryAuthorizationAssessor.EvaluateTransactionEvidence(
+                dbContext,
+                reservation);
+            if (!transactionEvidence.CanEvaluate)
+            {
+                return FinishReservationOnly(
+                    dbContext,
+                    reservation,
+                    PaymentAuthorizationReleaseState.ReviewRequired,
+                    PaymentAuthorizationReleaseOutcome.ReviewRequired,
+                    null,
+                    transactionEvidence.Reason);
+            }
+
+            if (transactionEvidence.HasTransaction)
             {
                 return FinishReservationOnly(
                     dbContext,

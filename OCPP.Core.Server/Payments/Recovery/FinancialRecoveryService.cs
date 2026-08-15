@@ -114,9 +114,14 @@ namespace OCPP.Core.Server.Payments.Recovery
             ChargePaymentReservation reservation,
             bool execute)
         {
-            var hasTransaction = FinancialRecoveryAuthorizationAssessor.HasAuthoritativeTransactionEvidence(
+            var transactionEvidence = FinancialRecoveryAuthorizationAssessor.EvaluateTransactionEvidence(
                 dbContext,
                 reservation);
+            if (!transactionEvidence.CanEvaluate)
+            {
+                return Blocked(entry, transactionEvidence.Reason);
+            }
+
             var hasInvoiceEvidence = dbContext.InvoiceSubmissionLogs.AsNoTracking().Any(log =>
                 log.ReservationId == reservation.ReservationId &&
                 (log.Status == "Submitted" ||
@@ -126,7 +131,7 @@ namespace OCPP.Core.Server.Payments.Recovery
                  log.ExternalPdfUrl != null));
             var assessment = FinancialRecoveryAuthorizationAssessor.Assess(
                 reservation,
-                hasTransaction,
+                transactionEvidence.HasTransaction,
                 hasInvoiceEvidence);
             if (!assessment.Eligible)
             {
