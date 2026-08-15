@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using OCPP.Core.Server.Maintenance;
 using Xunit;
@@ -72,6 +73,42 @@ namespace OCPP.Core.Server.Tests
             Assert.DoesNotContain(services, descriptor =>
                 descriptor.ServiceType.FullName != null &&
                 descriptor.ServiceType.FullName.Contains("HangfireServer", System.StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task RunOnceSafelyAsync_LogsBoundedContextWithoutExceptionDetails()
+        {
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Maintenance:MessageLogRetention:Enabled"] = "true",
+                    ["Maintenance:MessageLogRetention:DryRun"] = "false",
+                    ["Maintenance:MessageLogRetention:RetentionDays"] = "30",
+                    ["Maintenance:MessageLogRetention:BatchSize"] = "10"
+                })
+                .Build();
+            using var provider = new ServiceCollection().BuildServiceProvider();
+            var logger = new RecordingLogger<MessageLogRetentionService>();
+            var runner = new MessageLogRetentionRunner(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<MessageLogRetentionRunner>.Instance);
+            var service = new MessageLogRetentionService(runner, logger, configuration);
+
+            MessageLogRetentionSweepResult? result = await service.RunOnceSafelyAsync(
+                new System.DateTime(2026, 8, 15, 12, 0, 0, System.DateTimeKind.Utc),
+                default);
+
+            Assert.Null(result);
+            var warning = Assert.Single(logger.Entries.Where(entry =>
+                entry.Level == LogLevel.Warning));
+            Assert.Contains("cutoff=2026-07-16", warning.Message);
+            Assert.Contains("dryRun=False", warning.Message);
+            Assert.Contains("batchSize=10", warning.Message);
+            Assert.Contains("completedBatches=0", warning.Message);
+            Assert.Contains("deleted=0", warning.Message);
+            Assert.Contains("InvalidOperationException", warning.Message);
+            Assert.DoesNotContain("No service for type", warning.Message);
+            Assert.Null(warning.Exception);
         }
 
         private static MessageLogRetentionService CreateService(

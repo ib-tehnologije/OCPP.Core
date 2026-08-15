@@ -53,7 +53,10 @@ to retention logs.
    the settings are loaded.
 5. Review at least one complete dry-run record: cutoff, candidate count,
    oldest/newest timestamps, estimated batches, duration, and sanitized error
-   type if a sweep failed.
+   type if a sweep failed. The assessment is emitted before destructive
+   selection begins. Failure records also include the fixed cutoff, mode,
+   bounded batch size, completed batches, and deleted count; they omit
+   exception messages, SQL, connection details, and row payloads.
 6. Confirm independently that recent rows and required operational evidence
    fall outside the candidate window.
 7. Obtain the environment's normal approval for destructive maintenance.

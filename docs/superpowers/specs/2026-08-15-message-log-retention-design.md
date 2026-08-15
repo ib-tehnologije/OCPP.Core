@@ -55,9 +55,10 @@ It exposes a validation result instead of silently clamping unsafe values.
 computes one UTC cutoff at sweep start and uses the strict predicate
 `LogTime < cutoff`; rows exactly at the cutoff and newer rows are preserved.
 
-The runner first reports candidate count, oldest and newest candidate
-timestamps, configured batch size, estimated batch count, cutoff, dry-run
-state, and elapsed duration. Empty candidate sets report zero cleanly.
+The runner emits the candidate count, oldest and newest candidate timestamps,
+configured batch size, estimated batch count, cutoff, dry-run state, and
+elapsed duration before any deletion query can run. Empty candidate sets
+report zero cleanly.
 
 For an executing sweep, every batch:
 
@@ -78,8 +79,10 @@ and batch.
 `MessageLogRetentionService` schedules the runner with the validated interval.
 It waits one interval before the first automatic sweep so application startup
 is not coupled to maintenance duration. A failed sweep logs only the exception
-type plus bounded context and continues on the next interval; it never logs
-row payloads or connection details.
+type plus the fixed cutoff, mode, batch size, candidate count when known,
+completed batch count, deleted count, and elapsed duration. It continues on the
+next interval and never logs exception messages, row payloads, SQL, or
+connection details.
 
 The service is registered unconditionally, but disabled or invalid
 configuration exits without database access.
@@ -101,13 +104,14 @@ Tests use temporary SQLite databases and real EF Core queries. They cover:
 
 - disabled and dry-run modes;
 - missing defaults and malformed/out-of-range configuration;
-- the strict 30-day boundary;
+- the strict 30-day boundary in both dry-run and destructive modes;
 - deterministic ordering for equal timestamps;
 - multiple bounded batches;
 - concurrent insertion while a sweep is running;
 - cancellation between batches and restart/resume;
 - already-clean and repeated sweeps;
 - candidate count and timestamp accounting; and
+- pre-delete assessment ordering and sanitized failure progress; and
 - service registration without Hangfire.
 
 Focused tests must demonstrate red before implementation and green after it.

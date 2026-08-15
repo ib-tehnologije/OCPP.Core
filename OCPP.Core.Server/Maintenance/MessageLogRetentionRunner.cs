@@ -101,6 +101,39 @@ namespace OCPP.Core.Server.Maintenance
         internal TimeSpan Elapsed { get; }
     }
 
+    internal sealed class MessageLogRetentionSweepException : Exception
+    {
+        internal MessageLogRetentionSweepException(
+            DateTime cutoffUtc,
+            bool dryRun,
+            int batchSize,
+            int? candidateCount,
+            int completedBatchCount,
+            int deletedCount,
+            TimeSpan elapsed,
+            Exception innerException)
+            : base("MessageLog retention sweep failed.", innerException)
+        {
+            CutoffUtc = cutoffUtc;
+            DryRun = dryRun;
+            BatchSize = batchSize;
+            CandidateCount = candidateCount;
+            CompletedBatchCount = completedBatchCount;
+            DeletedCount = deletedCount;
+            Elapsed = elapsed;
+            ErrorType = innerException.GetType().Name;
+        }
+
+        internal DateTime CutoffUtc { get; }
+        internal bool DryRun { get; }
+        internal int BatchSize { get; }
+        internal int? CandidateCount { get; }
+        internal int CompletedBatchCount { get; }
+        internal int DeletedCount { get; }
+        internal TimeSpan Elapsed { get; }
+        internal string ErrorType { get; }
+    }
+
     internal class MessageLogRetentionRunner
     {
         private readonly IServiceScopeFactory _scopeFactory;
@@ -128,111 +161,142 @@ namespace OCPP.Core.Server.Maintenance
             token.ThrowIfCancellationRequested();
             var stopwatch = Stopwatch.StartNew();
             DateTime cutoffUtc = utcNow.AddDays(-options.RetentionDays);
-
-            int candidateCount;
+            int? candidateCount = null;
             DateTime? oldestCandidateUtc = null;
             DateTime? newestCandidateUtc = null;
-            using (IServiceScope scope = _scopeFactory.CreateScope())
+            int batchCount = 0;
+            int deletedCount = 0;
+            try
             {
-                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
-                IQueryable<MessageLog> eligible = db.MessageLogs
-                    .AsNoTracking()
-                    .Where(log => log.LogTime < cutoffUtc);
-
-                candidateCount = await eligible.CountAsync(token);
-                if (candidateCount > 0)
+                using (IServiceScope scope = _scopeFactory.CreateScope())
                 {
-                    oldestCandidateUtc = await eligible.MinAsync(
-                        log => (DateTime?)log.LogTime,
-                        token);
-                    newestCandidateUtc = await eligible.MaxAsync(
-                        log => (DateTime?)log.LogTime,
-                        token);
-                }
-            }
+                    var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                    IQueryable<MessageLog> eligible = db.MessageLogs
+                        .AsNoTracking()
+                        .Where(log => log.LogTime < cutoffUtc);
 
-            int estimatedBatchCount = candidateCount == 0
-                ? 0
-                : (candidateCount + options.BatchSize - 1) / options.BatchSize;
-            if (options.DryRun)
-            {
+                    candidateCount = await eligible.CountAsync(token);
+                    if (candidateCount > 0)
+                    {
+                        oldestCandidateUtc = await eligible.MinAsync(
+                            log => (DateTime?)log.LogTime,
+                            token);
+                        newestCandidateUtc = await eligible.MaxAsync(
+                            log => (DateTime?)log.LogTime,
+                            token);
+                    }
+                }
+
+                int estimatedBatchCount = candidateCount == 0
+                    ? 0
+                    : (candidateCount.Value + options.BatchSize - 1) / options.BatchSize;
+                _logger.LogInformation(
+                    "MessageLog retention assessment: cutoff={Cutoff:u} dryRun={DryRun} batchSize={BatchSize} candidates={CandidateCount} estimatedBatches={EstimatedBatchCount} oldest={Oldest:u} newest={Newest:u} durationMs={DurationMs}",
+                    cutoffUtc,
+                    options.DryRun,
+                    options.BatchSize,
+                    candidateCount,
+                    estimatedBatchCount,
+                    oldestCandidateUtc,
+                    newestCandidateUtc,
+                    stopwatch.Elapsed.TotalMilliseconds);
+
+                if (options.DryRun)
+                {
+                    stopwatch.Stop();
+                    return new MessageLogRetentionSweepResult(
+                        MessageLogRetentionSweepStatus.DryRun,
+                        cutoffUtc,
+                        candidateCount.Value,
+                        0,
+                        0,
+                        estimatedBatchCount,
+                        oldestCandidateUtc,
+                        newestCandidateUtc,
+                        stopwatch.Elapsed);
+                }
+
+                while (true)
+                {
+                    token.ThrowIfCancellationRequested();
+                    MessageLogRetentionBatchResult batch;
+                    using (IServiceScope scope = _scopeFactory.CreateScope())
+                    {
+                        var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                        var batchStopwatch = Stopwatch.StartNew();
+                        List<MessageLogRetentionCandidate> candidates = await db.MessageLogs
+                            .AsNoTracking()
+                            .Where(log => log.LogTime < cutoffUtc)
+                            .OrderBy(log => log.LogTime)
+                            .ThenBy(log => log.LogId)
+                            .Select(log => new MessageLogRetentionCandidate
+                            {
+                                LogId = log.LogId,
+                                LogTime = log.LogTime
+                            })
+                            .Take(options.BatchSize)
+                            .ToListAsync(token);
+
+                        if (candidates.Count == 0)
+                        {
+                            batchStopwatch.Stop();
+                            break;
+                        }
+
+                        List<int> identifiers = candidates
+                            .Select(candidate => candidate.LogId)
+                            .ToList();
+                        int batchDeletedCount = await db.MessageLogs
+                            .Where(log => identifiers.Contains(log.LogId))
+                            .ExecuteDeleteAsync(token);
+                        batchStopwatch.Stop();
+
+                        batchCount++;
+                        deletedCount += batchDeletedCount;
+                        batch = new MessageLogRetentionBatchResult(
+                            batchCount,
+                            candidates.Count,
+                            batchDeletedCount,
+                            candidates[0].LogId,
+                            candidates[candidates.Count - 1].LogId,
+                            candidates[0].LogTime,
+                            candidates[candidates.Count - 1].LogTime,
+                            batchStopwatch.Elapsed);
+                    }
+
+                    await OnBatchCompletedAsync(batch, token);
+                    token.ThrowIfCancellationRequested();
+                }
+
                 stopwatch.Stop();
                 return new MessageLogRetentionSweepResult(
-                    MessageLogRetentionSweepStatus.DryRun,
+                    MessageLogRetentionSweepStatus.Completed,
                     cutoffUtc,
-                    candidateCount,
-                    0,
-                    0,
+                    candidateCount.Value,
+                    deletedCount,
+                    batchCount,
                     estimatedBatchCount,
                     oldestCandidateUtc,
                     newestCandidateUtc,
                     stopwatch.Elapsed);
             }
-
-            int batchCount = 0;
-            int deletedCount = 0;
-            while (true)
+            catch (OperationCanceledException)
             {
-                token.ThrowIfCancellationRequested();
-                MessageLogRetentionBatchResult batch;
-                using (IServiceScope scope = _scopeFactory.CreateScope())
-                {
-                    var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
-                    List<MessageLogRetentionCandidate> candidates = await db.MessageLogs
-                        .AsNoTracking()
-                        .Where(log => log.LogTime < cutoffUtc)
-                        .OrderBy(log => log.LogTime)
-                        .ThenBy(log => log.LogId)
-                        .Select(log => new MessageLogRetentionCandidate
-                        {
-                            LogId = log.LogId,
-                            LogTime = log.LogTime
-                        })
-                        .Take(options.BatchSize)
-                        .ToListAsync(token);
-
-                    if (candidates.Count == 0)
-                    {
-                        break;
-                    }
-
-                    var batchStopwatch = Stopwatch.StartNew();
-                    List<int> identifiers = candidates
-                        .Select(candidate => candidate.LogId)
-                        .ToList();
-                    int batchDeletedCount = await db.MessageLogs
-                        .Where(log => identifiers.Contains(log.LogId))
-                        .ExecuteDeleteAsync(token);
-                    batchStopwatch.Stop();
-
-                    batchCount++;
-                    deletedCount += batchDeletedCount;
-                    batch = new MessageLogRetentionBatchResult(
-                        batchCount,
-                        candidates.Count,
-                        batchDeletedCount,
-                        candidates[0].LogId,
-                        candidates[candidates.Count - 1].LogId,
-                        candidates[0].LogTime,
-                        candidates[candidates.Count - 1].LogTime,
-                        batchStopwatch.Elapsed);
-                }
-
-                await OnBatchCompletedAsync(batch, token);
-                token.ThrowIfCancellationRequested();
+                throw;
             }
-
-            stopwatch.Stop();
-            return new MessageLogRetentionSweepResult(
-                MessageLogRetentionSweepStatus.Completed,
-                cutoffUtc,
-                candidateCount,
-                deletedCount,
-                batchCount,
-                estimatedBatchCount,
-                oldestCandidateUtc,
-                newestCandidateUtc,
-                stopwatch.Elapsed);
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                throw new MessageLogRetentionSweepException(
+                    cutoffUtc,
+                    options.DryRun,
+                    options.BatchSize,
+                    candidateCount,
+                    batchCount,
+                    deletedCount,
+                    stopwatch.Elapsed,
+                    ex);
+            }
         }
 
         protected virtual Task OnBatchCompletedAsync(

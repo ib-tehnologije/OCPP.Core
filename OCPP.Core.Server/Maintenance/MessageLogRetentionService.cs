@@ -68,6 +68,48 @@ namespace OCPP.Core.Server.Maintenance
             return result;
         }
 
+        internal async Task<MessageLogRetentionSweepResult> RunOnceSafelyAsync(
+            DateTime utcNow,
+            CancellationToken token)
+        {
+            try
+            {
+                return await RunOnceAsync(utcNow, token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (MessageLogRetentionSweepException ex)
+            {
+                _logger.LogWarning(
+                    "MessageLog retention sweep failed: cutoff={Cutoff:u} dryRun={DryRun} batchSize={BatchSize} candidates={CandidateCount} completedBatches={CompletedBatchCount} deleted={DeletedCount} durationMs={DurationMs} errorType={ErrorType}",
+                    ex.CutoffUtc,
+                    ex.DryRun,
+                    ex.BatchSize,
+                    ex.CandidateCount,
+                    ex.CompletedBatchCount,
+                    ex.DeletedCount,
+                    ex.Elapsed.TotalMilliseconds,
+                    ex.ErrorType);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    "MessageLog retention sweep failed: cutoff={Cutoff:u} dryRun={DryRun} batchSize={BatchSize} candidates={CandidateCount} completedBatches={CompletedBatchCount} deleted={DeletedCount} durationMs={DurationMs} errorType={ErrorType}",
+                    utcNow.AddDays(-_options.RetentionDays),
+                    _options.DryRun,
+                    _options.BatchSize,
+                    null,
+                    0,
+                    0,
+                    0,
+                    ex.GetType().Name);
+                return null;
+            }
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             if (!_configurationIsValid)
@@ -86,17 +128,11 @@ namespace OCPP.Core.Server.Maintenance
                 try
                 {
                     await Task.Delay(_options.CleanupInterval, stoppingToken);
-                    await RunOnceAsync(DateTime.UtcNow, stoppingToken);
+                    await RunOnceSafelyAsync(DateTime.UtcNow, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     return;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        "MessageLog retention sweep failed with {ErrorType}",
-                        ex.GetType().Name);
                 }
             }
         }

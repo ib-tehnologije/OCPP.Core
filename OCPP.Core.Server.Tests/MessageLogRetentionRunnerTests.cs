@@ -45,6 +45,35 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task RunAsync_ExecutionDeletesOnlyStrictlyOlderRowsAndReportsBounds()
+        {
+            using var database = new RetentionDatabase();
+            DateTime oldestEligible = Now.AddDays(-60);
+            DateTime newestEligible = Now.AddDays(-30).AddTicks(-1);
+            DateTime exactCutoff = Now.AddDays(-30);
+            DateTime newer = exactCutoff.AddTicks(1);
+            await database.SeedAsync(
+                NewLog(oldestEligible),
+                NewLog(newestEligible),
+                NewLog(exactCutoff),
+                NewLog(newer));
+
+            var result = await database.CreateRunner().RunAsync(
+                EnabledOptions(dryRun: false, batchSize: 10),
+                Now,
+                default);
+
+            Assert.Equal(MessageLogRetentionSweepStatus.Completed, result.Status);
+            Assert.Equal(2, result.CandidateCount);
+            Assert.Equal(2, result.DeletedCount);
+            Assert.Equal(oldestEligible, result.OldestCandidateUtc);
+            Assert.Equal(newestEligible, result.NewestCandidateUtc);
+            Assert.Equal(
+                new[] { exactCutoff, newer },
+                (await database.ReadAllAsync()).Select(log => log.LogTime));
+        }
+
+        [Fact]
         public async Task RunAsync_DeletesEligibleRowsInBoundedStableBatches()
         {
             using var database = new RetentionDatabase();
@@ -142,6 +171,50 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0, repeated.BatchCount);
         }
 
+        [Fact]
+        public async Task RunAsync_LogsAssessmentBeforeDestructiveBatches()
+        {
+            using var database = new RetentionDatabase();
+            await database.SeedAsync(NewLog(Now.AddDays(-45)));
+            var logger = new RecordingLogger<MessageLogRetentionRunner>();
+
+            await database.CreateRunner(logger).RunAsync(
+                EnabledOptions(dryRun: false, batchSize: 10),
+                Now,
+                default);
+
+            Assert.True(logger.Entries.Count >= 2);
+            Assert.Contains("assessment", logger.Entries[0].Message);
+            Assert.Contains("dryRun=False", logger.Entries[0].Message);
+            Assert.Contains("candidates=1", logger.Entries[0].Message);
+            Assert.Contains("batch 1", logger.Entries[1].Message);
+        }
+
+        [Fact]
+        public async Task RunAsync_FailureCarriesSanitizedCompletedBatchProgress()
+        {
+            using var database = new RetentionDatabase();
+            await database.SeedAsync(Enumerable.Range(0, 3)
+                .Select(offset => NewLog(Now.AddDays(-45).AddMinutes(offset)))
+                .ToArray());
+            var runner = database.CreateRecordingRunner(throwAfterBatch: 1);
+
+            var exception = await Assert.ThrowsAsync<MessageLogRetentionSweepException>(
+                () => runner.RunAsync(
+                    EnabledOptions(dryRun: false, batchSize: 2),
+                    Now,
+                    default));
+
+            Assert.Equal(Now.AddDays(-30), exception.CutoffUtc);
+            Assert.False(exception.DryRun);
+            Assert.Equal(2, exception.BatchSize);
+            Assert.Equal(3, exception.CandidateCount);
+            Assert.Equal(1, exception.CompletedBatchCount);
+            Assert.Equal(2, exception.DeletedCount);
+            Assert.Equal(nameof(InvalidOperationException), exception.ErrorType);
+            Assert.DoesNotContain("private failure marker", exception.Message);
+        }
+
         private static MessageLogRetentionOptions EnabledOptions(
             bool dryRun,
             int batchSize)
@@ -198,24 +271,27 @@ namespace OCPP.Core.Server.Tests
                     .EnsureCreated();
             }
 
-            internal MessageLogRetentionRunner CreateRunner()
+            internal MessageLogRetentionRunner CreateRunner(
+                Microsoft.Extensions.Logging.ILogger<MessageLogRetentionRunner>? logger = null)
             {
                 return new MessageLogRetentionRunner(
                     _provider.GetRequiredService<IServiceScopeFactory>(),
-                    NullLogger<MessageLogRetentionRunner>.Instance);
+                    logger ?? NullLogger<MessageLogRetentionRunner>.Instance);
             }
 
             internal RecordingRunner CreateRecordingRunner(
                 int? cancelAfterBatch = null,
                 CancellationTokenSource? cancellation = null,
-                MessageLog? rowToInsertAfterFirstBatch = null)
+                MessageLog? rowToInsertAfterFirstBatch = null,
+                int? throwAfterBatch = null)
             {
                 return new RecordingRunner(
                     _provider.GetRequiredService<IServiceScopeFactory>(),
                     this,
                     cancelAfterBatch,
                     cancellation,
-                    rowToInsertAfterFirstBatch);
+                    rowToInsertAfterFirstBatch,
+                    throwAfterBatch);
             }
 
             internal async Task SeedAsync(params MessageLog[] logs)
@@ -270,6 +346,7 @@ namespace OCPP.Core.Server.Tests
             private readonly int? _cancelAfterBatch;
             private readonly CancellationTokenSource? _cancellation;
             private readonly MessageLog? _rowToInsertAfterFirstBatch;
+            private readonly int? _throwAfterBatch;
             private bool _inserted;
 
             internal RecordingRunner(
@@ -277,13 +354,15 @@ namespace OCPP.Core.Server.Tests
                 RetentionDatabase database,
                 int? cancelAfterBatch,
                 CancellationTokenSource? cancellation,
-                MessageLog? rowToInsertAfterFirstBatch)
+                MessageLog? rowToInsertAfterFirstBatch,
+                int? throwAfterBatch)
                 : base(scopeFactory, NullLogger<MessageLogRetentionRunner>.Instance)
             {
                 _database = database;
                 _cancelAfterBatch = cancelAfterBatch;
                 _cancellation = cancellation;
                 _rowToInsertAfterFirstBatch = rowToInsertAfterFirstBatch;
+                _throwAfterBatch = throwAfterBatch;
             }
 
             internal List<int> BatchSelectedCounts { get; } = new List<int>();
@@ -296,6 +375,11 @@ namespace OCPP.Core.Server.Tests
             {
                 BatchSelectedCounts.Add(batch.SelectedCount);
                 BatchIdBounds.Add((batch.FirstLogId, batch.LastLogId));
+
+                if (_throwAfterBatch == BatchSelectedCounts.Count)
+                {
+                    throw new InvalidOperationException("private failure marker");
+                }
 
                 if (!_inserted && _rowToInsertAfterFirstBatch != null)
                 {
