@@ -304,6 +304,60 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Run_DryRunRejectsStoppedUnlinkedTransactionWithinAuthorizationWindow()
+        {
+            using var dbContext = CreateContext();
+            var authorizedAt = new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.Parse("57575757-5757-5757-5757-575757575757"),
+                ChargePointId = "CP-SYNTHETIC",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-SYNTHETIC",
+                OcppIdTag = "TAG-SYNTHETIC",
+                Currency = "EUR",
+                Status = PaymentReservationStatus.Abandoned,
+                StripePaymentIntentId = "pi_synthetic",
+                CapturedAmountCents = 0,
+                ActualEnergyKwh = 0,
+                CreatedAtUtc = authorizedAt.AddMinutes(-1),
+                AuthorizedAtUtc = authorizedAt,
+                StartDeadlineAtUtc = authorizedAt.AddMinutes(10),
+                UpdatedAtUtc = authorizedAt.AddMinutes(20)
+            };
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.Transactions.Add(new Transaction
+            {
+                TransactionId = 5757,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.OcppIdTag,
+                StartTime = authorizedAt.AddMinutes(5),
+                StopTime = authorizedAt.AddMinutes(15),
+                MeterStart = 100,
+                MeterStop = 101
+            });
+            dbContext.SaveChanges();
+            var manifest = FinancialRecoveryManifest.Parse("""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "release-authorization", "reservationId": "57575757-5757-5757-5757-575757575757" }
+                  ]
+                }
+                """);
+            var service = new FinancialRecoveryService(paymentCoordinator: null, invoiceIntegrationService: null);
+
+            var report = service.Run(dbContext, manifest, execute: false, confirmationSha256: null);
+
+            var item = Assert.Single(report.Items);
+            Assert.False(item.Eligible);
+            Assert.Contains("transaction", item.Outcome, StringComparison.OrdinalIgnoreCase);
+            Assert.Null(reservation.AuthorizationReleaseState);
+            Assert.Empty(dbContext.PaymentAuthorizationReleaseAttempts);
+        }
+
+        [Fact]
         public void Run_ExecuteRestoresUnarmedStateWhenCoordinatorSkipsAuthorizationRelease()
         {
             using var dbContext = CreateContext();
@@ -338,6 +392,86 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(PaymentAuthorizationReleaseOutcome.SkippedNotEligible, item.Outcome);
             dbContext.ChangeTracker.Clear();
             Assert.Null(dbContext.ChargePaymentReservations.Single().AuthorizationReleaseState);
+            Assert.Single(coordinator.ReconcileCalls);
+        }
+
+        [Fact]
+        public void Run_ExecuteReportsRetryScheduledAuthorizationReleaseAsFailure()
+        {
+            using var dbContext = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.Parse("58585858-5858-5858-5858-585858585858"),
+                ChargePointId = "CP-SYNTHETIC",
+                ChargeTagId = "TAG-SYNTHETIC",
+                Currency = "EUR",
+                Status = PaymentReservationStatus.Abandoned,
+                StripePaymentIntentId = "pi_synthetic",
+                CapturedAmountCents = 0,
+                ActualEnergyKwh = 0
+            };
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.SaveChanges();
+            var manifest = FinancialRecoveryManifest.Parse("""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "release-authorization", "reservationId": "58585858-5858-5858-5858-585858585858" }
+                  ]
+                }
+                """);
+            var coordinator = new RecordingPaymentCoordinator
+            {
+                ReconcileOutcome = PaymentAuthorizationReleaseOutcome.RetryScheduled
+            };
+            var service = new FinancialRecoveryService(coordinator, invoiceIntegrationService: null);
+
+            var report = service.Run(dbContext, manifest, execute: true, manifest.Sha256);
+
+            var item = Assert.Single(report.Items);
+            Assert.False(item.Eligible);
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.RetryScheduled, item.Outcome);
+            Assert.False(report.Succeeded);
+            Assert.Single(coordinator.ReconcileCalls);
+        }
+
+        [Fact]
+        public void Run_ExecuteRejectsReleasedOutcomeWithoutPersistedReleasedAfterState()
+        {
+            using var dbContext = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.Parse("59595959-5959-5959-5959-595959595959"),
+                ChargePointId = "CP-SYNTHETIC",
+                ChargeTagId = "TAG-SYNTHETIC",
+                Currency = "EUR",
+                Status = PaymentReservationStatus.Abandoned,
+                StripePaymentIntentId = "pi_synthetic",
+                CapturedAmountCents = 0,
+                ActualEnergyKwh = 0
+            };
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.SaveChanges();
+            var manifest = FinancialRecoveryManifest.Parse("""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "release-authorization", "reservationId": "59595959-5959-5959-5959-595959595959" }
+                  ]
+                }
+                """);
+            var coordinator = new RecordingPaymentCoordinator
+            {
+                ReconcileOutcome = PaymentAuthorizationReleaseOutcome.Released
+            };
+            var service = new FinancialRecoveryService(coordinator, invoiceIntegrationService: null);
+
+            var report = service.Run(dbContext, manifest, execute: true, manifest.Sha256);
+
+            var item = Assert.Single(report.Items);
+            Assert.False(item.Eligible);
+            Assert.Equal("ReleasedOutcomeMissingPersistedAfterState", item.Outcome);
+            Assert.False(report.Succeeded);
             Assert.Single(coordinator.ReconcileCalls);
         }
 

@@ -82,9 +82,9 @@ namespace OCPP.Core.Server.Payments
                 return FinishReviewRequired(dbContext, reservation, attempt, "Captured payment evidence exists.");
             }
 
-            if (HasActiveTransaction(dbContext, reservation))
+            if (Recovery.FinancialRecoveryAuthorizationAssessor.HasAuthoritativeTransactionEvidence(dbContext, reservation))
             {
-                return FinishReviewRequired(dbContext, reservation, attempt, "An active transaction still exists for this reservation.");
+                return FinishReviewRequired(dbContext, reservation, attempt, "Reservation has active transaction or stopped matching transaction evidence.");
             }
 
             if (!InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
@@ -457,7 +457,7 @@ namespace OCPP.Core.Server.Payments
                     "Captured payment evidence exists.");
             }
 
-            if (HasActiveTransaction(dbContext, reservation))
+            if (Recovery.FinancialRecoveryAuthorizationAssessor.HasAuthoritativeTransactionEvidence(dbContext, reservation))
             {
                 return FinishReservationOnly(
                     dbContext,
@@ -465,7 +465,7 @@ namespace OCPP.Core.Server.Payments
                     PaymentAuthorizationReleaseState.ReviewRequired,
                     PaymentAuthorizationReleaseOutcome.ReviewRequired,
                     null,
-                    "An active transaction still exists for this reservation.");
+                    "Reservation has active transaction or stopped matching transaction evidence.");
             }
 
             if (!InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
@@ -657,18 +657,6 @@ namespace OCPP.Core.Server.Payments
                 ProviderStatus = Truncate(providerStatus, 50),
                 Error = sanitized
             };
-        }
-
-        private bool HasActiveTransaction(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
-        {
-            return dbContext.Transactions.Any(transaction =>
-                !transaction.StopTime.HasValue &&
-                ((reservation.TransactionId.HasValue && transaction.TransactionId == reservation.TransactionId.Value) ||
-                 (transaction.ChargePointId == reservation.ChargePointId &&
-                  transaction.ConnectorId == reservation.ConnectorId &&
-                  !string.IsNullOrWhiteSpace(transaction.StartTagId) &&
-                  (transaction.StartTagId == reservation.OcppIdTag ||
-                   transaction.StartTagId == reservation.ChargeTagId))));
         }
 
         private static bool ProviderOwnershipMatches(PaymentIntent paymentIntent, Guid reservationId)

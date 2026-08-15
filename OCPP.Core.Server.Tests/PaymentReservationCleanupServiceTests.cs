@@ -891,6 +891,7 @@ namespace OCPP.Core.Server.Tests
         public List<(Guid ReservationId, string Trigger)> ReconcileCalls { get; } = new();
         public List<int> CompleteCalls { get; } = new();
         public string? ReconcileErrorToRecord { get; set; }
+        public string ReconcileOutcome { get; set; } = PaymentAuthorizationReleaseOutcome.SkippedNotEligible;
 
         public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) =>
             throw new NotImplementedException();
@@ -925,7 +926,7 @@ namespace OCPP.Core.Server.Tests
             }
             return new PaymentAuthorizationReleaseResult
             {
-                Outcome = PaymentAuthorizationReleaseOutcome.SkippedNotEligible
+                Outcome = ReconcileOutcome
             };
         }
 

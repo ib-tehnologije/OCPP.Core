@@ -1798,13 +1798,21 @@ namespace OCPP.Core.Server.Tests
                 MinimumSessionFeeKwh = 1.0m,
                 MinimumChargeAmountCents = 50
             };
+            var assessment = FinancialRecoverySettlementAssessor.Assess(reservation, transaction, flowOptions);
+            Assert.True(assessment.Eligible, assessment.Reason);
             var intentService = new FakePaymentIntentService
             {
                 GetResponse = new PaymentIntent
                 {
                     Id = reservation.StripePaymentIntentId,
                     Status = "requires_capture",
-                    Amount = 10_000
+                    Currency = reservation.Currency,
+                    Amount = assessment.TotalCents,
+                    AmountCapturable = assessment.TotalCents,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["reservation_id"] = reservation.ReservationId.ToString()
+                    }
                 }
             };
             var coordinator = CreateCoordinator(
@@ -1813,7 +1821,6 @@ namespace OCPP.Core.Server.Tests
                 intentService,
                 flowOptions: flowOptions,
                 now: () => stoppedAt.AddMinutes(10));
-            var assessment = FinancialRecoverySettlementAssessor.Assess(reservation, transaction, flowOptions);
 
             coordinator.RecoverTerminalSettlement(context, reservation, transaction);
 
@@ -1821,6 +1828,96 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(assessment.TotalCents, intentService.LastCaptureOptions?.AmountToCapture);
             Assert.Equal(assessment.EnergyKwh, transaction.EnergyKwh);
             Assert.Equal(assessment.UsageFeeMinutes, transaction.UsageFeeMinutes);
+        }
+
+        [Theory]
+        [InlineData(false, true, true, true, true, true)]
+        [InlineData(true, false, true, true, true, true)]
+        [InlineData(true, true, false, true, true, true)]
+        [InlineData(true, true, true, false, true, true)]
+        [InlineData(true, true, true, true, false, true)]
+        [InlineData(true, true, true, true, true, false)]
+        public void RecoverTerminalSettlement_RejectsProviderMismatchBeforeAnyMutation(
+            bool matchingId,
+            bool matchingOwner,
+            bool matchingCurrency,
+            bool requiresCapture,
+            bool matchingAuthorizedAmount,
+            bool matchingCapturableAmount)
+        {
+            using var context = CreateContext();
+            var stoppedAt = new DateTime(2025, 1, 1, 11, 0, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-RECOVERY-PREFLIGHT",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-RECOVERY-PREFLIGHT",
+                StripePaymentIntentId = "pi_recovery_preflight",
+                Status = PaymentReservationStatus.Failed,
+                TransactionId = 423,
+                StopTransactionAtUtc = stoppedAt,
+                DisconnectedAtUtc = stoppedAt.AddMinutes(2),
+                PricePerKwh = 1m,
+                Currency = "eur"
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 423,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = stoppedAt.AddHours(-1),
+                StopTime = stoppedAt,
+                MeterStart = 100,
+                MeterStop = 101
+            };
+            context.AddRange(reservation, transaction);
+            context.SaveChanges();
+
+            var flowOptions = new PaymentFlowOptions
+            {
+                MinimumSessionFeeKwh = 1.0m,
+                MinimumChargeAmountCents = 50
+            };
+            var assessment = FinancialRecoverySettlementAssessor.Assess(reservation, transaction, flowOptions);
+            Assert.True(assessment.Eligible, assessment.Reason);
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = matchingId ? reservation.StripePaymentIntentId : "pi_unowned_preflight",
+                    Status = requiresCapture ? "requires_capture" : "requires_confirmation",
+                    Currency = matchingCurrency ? reservation.Currency : "usd",
+                    Amount = matchingAuthorizedAmount ? assessment.TotalCents : assessment.TotalCents + 1,
+                    AmountCapturable = matchingCapturableAmount ? assessment.TotalCents : assessment.TotalCents - 1,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["reservation_id"] = matchingOwner
+                            ? reservation.ReservationId.ToString()
+                            : Guid.NewGuid().ToString()
+                    }
+                }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                flowOptions: flowOptions,
+                now: () => stoppedAt.AddMinutes(2));
+
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                coordinator.RecoverTerminalSettlement(context, reservation, transaction));
+
+            Assert.Contains("provider", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+            Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
+            Assert.Null(reservation.CapturedAtUtc);
+            Assert.Null(reservation.CapturedAmountCents);
+            Assert.Null(reservation.ActualEnergyKwh);
+            Assert.Equal(0, transaction.EnergyKwh);
+            Assert.Equal(0, transaction.EnergyCost);
         }
 
         [Fact]
@@ -1858,6 +1955,12 @@ namespace OCPP.Core.Server.Tests
             var allowlistedReservation = CreateReservation("pi_allowlisted_scope");
             context.AddRange(competingReservation, allowlistedReservation, transaction);
             context.SaveChanges();
+            var flowOptions = new PaymentFlowOptions { StartWindowMinutes = 7 };
+            var assessment = FinancialRecoverySettlementAssessor.Assess(
+                allowlistedReservation,
+                transaction,
+                flowOptions);
+            Assert.True(assessment.Eligible, assessment.Reason);
 
             var intentService = new FakePaymentIntentService
             {
@@ -1865,13 +1968,20 @@ namespace OCPP.Core.Server.Tests
                 {
                     Id = allowlistedReservation.StripePaymentIntentId,
                     Status = "requires_capture",
-                    Amount = 10_000
+                    Currency = allowlistedReservation.Currency,
+                    Amount = assessment.TotalCents,
+                    AmountCapturable = assessment.TotalCents,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["reservation_id"] = allowlistedReservation.ReservationId.ToString()
+                    }
                 }
             };
             var coordinator = CreateCoordinator(
                 context,
                 new FakeSessionService(),
                 intentService,
+                flowOptions: flowOptions,
                 now: () => stoppedAt.AddMinutes(2));
 
             coordinator.RecoverTerminalSettlement(context, allowlistedReservation, transaction);
@@ -1931,7 +2041,7 @@ namespace OCPP.Core.Server.Tests
             var error = Assert.Throws<InvalidOperationException>(() =>
                 coordinator.RecoverTerminalSettlement(context, reservation, transaction));
 
-            Assert.Contains("contradicts", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("provider", error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
             Assert.Null(reservation.CapturedAtUtc);
             Assert.Null(reservation.CapturedAmountCents);

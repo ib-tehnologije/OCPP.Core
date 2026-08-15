@@ -1022,7 +1022,7 @@ namespace OCPP.Core.Server.Payments
 
         public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
         {
-            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: false, suppressCustomerSideEffects: false, recoveryAssessment: null, recoveryReservation: null);
+            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: false, suppressCustomerSideEffects: false, recoveryAssessment: null, recoveryReservation: null, recoveryPaymentIntent: null);
         }
 
         public void RecoverTerminalSettlement(
@@ -1043,7 +1043,21 @@ namespace OCPP.Core.Server.Payments
                         : assessment.Reason);
             }
 
-            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: true, suppressCustomerSideEffects: true, recoveryAssessment: assessment, recoveryReservation: reservation);
+            var paymentIntent = _paymentIntentService.Get(reservation.StripePaymentIntentId);
+            if (paymentIntent == null ||
+                !string.Equals(paymentIntent.Id, reservation.StripePaymentIntentId, StringComparison.Ordinal) ||
+                !ProviderOwnershipMatches(paymentIntent, reservation.ReservationId) ||
+                string.IsNullOrWhiteSpace(paymentIntent.Currency) ||
+                !string.Equals(paymentIntent.Currency, reservation.Currency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(paymentIntent.Status, "requires_capture", StringComparison.OrdinalIgnoreCase) ||
+                paymentIntent.Amount != assessment.TotalCents ||
+                paymentIntent.AmountCapturable != assessment.TotalCents)
+            {
+                throw new InvalidOperationException(
+                    "Provider payment authorization does not exactly match the reviewed recovery settlement.");
+            }
+
+            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: true, suppressCustomerSideEffects: true, recoveryAssessment: assessment, recoveryReservation: reservation, recoveryPaymentIntent: paymentIntent);
         }
 
         public Recovery.FinancialRecoverySettlementDecision AssessTerminalSettlement(
@@ -1079,7 +1093,8 @@ namespace OCPP.Core.Server.Payments
             bool allowTerminalReplay,
             bool suppressCustomerSideEffects,
             Recovery.FinancialRecoverySettlementDecision recoveryAssessment,
-            ChargePaymentReservation recoveryReservation)
+            ChargePaymentReservation recoveryReservation,
+            PaymentIntent recoveryPaymentIntent)
         {
             if (!IsEnabled) return;
             if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
@@ -1242,15 +1257,15 @@ namespace OCPP.Core.Server.Payments
 
             try
             {
-                var paymentIntent = _paymentIntentService.Get(reservation.StripePaymentIntentId);
+                var paymentIntent = recoveryPaymentIntent ?? _paymentIntentService.Get(reservation.StripePaymentIntentId);
 
                 if (paymentIntent.Status == "requires_capture")
                 {
                     if (amountToCapture > 0)
                     {
-                        var paymentIntentAmount = (long?)paymentIntent.Amount;
-                        var maxCaptureAmount = paymentIntentAmount ?? amountToCapture;
-                        var finalCaptureAmount = Math.Min(amountToCapture, maxCaptureAmount);
+                        var finalCaptureAmount = recoveryAssessment == null
+                            ? Math.Min(amountToCapture, paymentIntent.Amount)
+                            : amountToCapture;
                         if (finalCaptureAmount > 0 &&
                             minimumChargeAmountCents > 0 &&
                             finalCaptureAmount < minimumChargeAmountCents)

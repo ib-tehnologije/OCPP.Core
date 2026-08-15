@@ -114,8 +114,9 @@ namespace OCPP.Core.Server.Payments.Recovery
             ChargePaymentReservation reservation,
             bool execute)
         {
-            var hasTransaction = reservation.TransactionId.HasValue &&
-                dbContext.Transactions.Any(candidate => candidate.TransactionId == reservation.TransactionId.Value);
+            var hasTransaction = FinancialRecoveryAuthorizationAssessor.HasAuthoritativeTransactionEvidence(
+                dbContext,
+                reservation);
             var hasInvoiceEvidence = dbContext.InvoiceSubmissionLogs.AsNoTracking().Any(log =>
                 log.ReservationId == reservation.ReservationId &&
                 (log.Status == "Submitted" ||
@@ -164,13 +165,24 @@ namespace OCPP.Core.Server.Payments.Recovery
                     dbContext.SaveChanges();
                 }
 
+                dbContext.Entry(reservation).Reload();
+                var releasedOutcome =
+                    string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.Released, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.AlreadyReleased, StringComparison.OrdinalIgnoreCase);
+                var releasedAfterState =
+                    string.Equals(reservation.AuthorizationReleaseState, PaymentAuthorizationReleaseState.Released, StringComparison.OrdinalIgnoreCase) &&
+                    reservation.AuthorizationReleasedAtUtc.HasValue;
+                var outcome = string.IsNullOrWhiteSpace(result.Outcome)
+                    ? "MissingAuthorizationReleaseOutcome"
+                    : releasedOutcome && !releasedAfterState
+                        ? "ReleasedOutcomeMissingPersistedAfterState"
+                        : result.Outcome;
+
                 return new FinancialRecoveryReportItem(
                     entry.Operation,
                     entry.ReservationId,
-                    !string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.ReviewRequired, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.PermanentFailure, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.SkippedNotEligible, StringComparison.OrdinalIgnoreCase),
-                    result.Outcome);
+                    releasedOutcome && releasedAfterState,
+                    outcome);
             }
 
             return Eligible(entry, "DryRunEligibleProviderRecheckRequired");
