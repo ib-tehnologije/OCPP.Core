@@ -60,6 +60,7 @@ Important configuration areas:
 | Server API | `ApiKey`, `ServerApiUrl` in management |
 | OCPP | `MessageDumpDir`, `MessageDumpRetentionHours`, `MessageDumpCleanupIntervalMinutes`, `DbMessageLog`, `ShowIndexInfo`, `MaxMessageSize`, `ValidateMessages`, `DenyConcurrentTx`, `HeartBeatInterval` |
 | Maintenance | `Maintenance:PendingPaymentTimeoutMinutes`, `Maintenance:ReservationTimeoutMinutes`, `Maintenance:StatusReleaseMinutes`, `Maintenance:CleanupIntervalSeconds`, `Maintenance:IdleWarningSweepSeconds`, `Maintenance:AvailableStatusOpenTransactionGraceMinutes`, `Maintenance:AuthorizationReleaseMaxAttempts`, `Maintenance:AuthorizationReleaseRetryBaseMinutes`, `Maintenance:AuthorizationReleaseInProgressTimeoutMinutes` |
+| Message retention | `Maintenance:MessageLogRetention:Enabled`, `Maintenance:MessageLogRetention:DryRun`, `Maintenance:MessageLogRetention:RetentionDays`, `Maintenance:MessageLogRetention:BatchSize`, `Maintenance:MessageLogRetention:CleanupIntervalMinutes` |
 | Payments | `Payments:RequirePreparingBeforeRemoteStart`, `Payments:RemoteStartIdTokenType`, `Payments:StartWindowMinutes`, `Payments:MinimumSessionFeeKwh`, `Payments:MinimumChargeAmountCents`, `Payments:IdleFeeExcludedWindow`, `Payments:IdleFeeExcludedTimeZoneId`, `Payments:IdleAutoStopMinutes`, `Payments:ChargerResponseTimeoutMs`, `Payments:Vies:Enabled`, `Payments:Vies:TimeoutSeconds` |
 | Stripe | `Stripe:Enabled`, `Stripe:UseMockServices`, `Stripe:ApiKey`, `Stripe:WebhookSecret`, `Stripe:AllowInsecureWebhooks`, `Stripe:Currency`, `Stripe:ReturnBaseUrl`, `Stripe:ProductName`, `Stripe:MockCustomerEmail`, `Stripe:MockDiagnosticsDirectory` |
 | Notifications | `Notifications:EnableCustomerEmails`, `Notifications:IdleWarningLeadMinutes`, `Notifications:SinkDirectory`, `Notifications:FromAddress`, `Notifications:FromName`, `Notifications:ReplyToAddress`, `Notifications:BccAddress`, `Notifications:Smtp:*` |
@@ -128,6 +129,10 @@ Server app:
 - `StartupMaintenance.Run` executes on startup to repair reservation active keys, abandon stale pending reservations, and release stale connector statuses.
 - `PaymentReservationCleanupService` runs periodically to abandon stale pending reservations, time out starts, recover open transactions on available connectors, complete waiting-for-disconnect reservations, and retry due authorization releases that were explicitly armed by the application.
 - `IdleFeeWarningEmailService` periodically sends customer idle-fee warning emails when notifications and Stripe are configured.
+- `MessageLogRetentionService` is disabled by default. When explicitly enabled,
+  it assesses rows older than the configured cutoff and either reports them in
+  dry-run mode or removes selected identifiers in bounded batches. See
+  [MessageLog online retention](message-log-retention.md).
 - Hangfire server starts only when SQL Server connection string is configured. The server uses a configurable queue, defaulting to `payments`.
 
 Management app:
@@ -156,6 +161,10 @@ Observed:
 - File logging through `Karambolo.Extensions.Logging.File`.
 - Log files are configured under `Logs` by each app.
 - Raw OCPP filesystem dumps are disabled when `MessageDumpDir` is empty, which is the default. To diagnose message exchange temporarily, point `MessageDumpDir` at a dedicated directory. Files older than `MessageDumpRetentionHours` (default 24) are removed every `MessageDumpCleanupIntervalMinutes` (default 15); non-positive retention or interval values disable cleanup.
+- Database `MessageLog` retention reports cutoff, counts, timestamp bounds,
+  batches, duration, and sanitized error types without logging message payloads.
+  Follow the dry-run-first activation and rollback sequence in
+  [MessageLog online retention](message-log-retention.md).
 - Sentry is enabled only when a DSN is present in configuration.
 - Hangfire dashboards can be enabled with `Hangfire:EnableDashboard` and `Hangfire:DashboardPath`.
 

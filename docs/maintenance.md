@@ -34,6 +34,14 @@ dotnet build OCPP.Core.sln
 dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj --no-build
 ```
 
+Focused database-log retention validation:
+
+```sh
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DOTNET_ROLL_FORWARD=Major \
+  dotnet test OCPP.Core.Server.Tests/OCPP.Core.Server.Tests.csproj \
+  --filter 'FullyQualifiedName~MessageLogRetention'
+```
+
 For payment/public portal changes:
 
 ```sh
