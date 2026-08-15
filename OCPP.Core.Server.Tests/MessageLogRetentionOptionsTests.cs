@@ -36,7 +36,7 @@ namespace OCPP.Core.Server.Tests
                 ["Maintenance:MessageLogRetention:Enabled"] = "true",
                 ["Maintenance:MessageLogRetention:DryRun"] = "false",
                 ["Maintenance:MessageLogRetention:RetentionDays"] = "45",
-                ["Maintenance:MessageLogRetention:BatchSize"] = "2500",
+                ["Maintenance:MessageLogRetention:BatchSize"] = "500",
                 ["Maintenance:MessageLogRetention:CleanupIntervalMinutes"] = "15"
             });
 
@@ -49,7 +49,7 @@ namespace OCPP.Core.Server.Tests
             Assert.True(options.Enabled);
             Assert.False(options.DryRun);
             Assert.Equal(45, options.RetentionDays);
-            Assert.Equal(2500, options.BatchSize);
+            Assert.Equal(500, options.BatchSize);
             Assert.Equal(TimeSpan.FromMinutes(15), options.CleanupInterval);
         }
 
@@ -57,7 +57,7 @@ namespace OCPP.Core.Server.Tests
         [InlineData("RetentionDays", "0")]
         [InlineData("RetentionDays", "abc")]
         [InlineData("BatchSize", "0")]
-        [InlineData("BatchSize", "10001")]
+        [InlineData("BatchSize", "1001")]
         [InlineData("CleanupIntervalMinutes", "0")]
         [InlineData("Enabled", "not-bool")]
         [InlineData("DryRun", "not-bool")]

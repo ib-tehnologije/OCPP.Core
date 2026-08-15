@@ -6,7 +6,7 @@ namespace OCPP.Core.Server.Maintenance
     internal sealed class MessageLogRetentionOptions
     {
         internal const string SectionName = "Maintenance:MessageLogRetention";
-        internal const int MaximumBatchSize = 10000;
+        internal const int MaximumBatchSize = 1000;
 
         private MessageLogRetentionOptions(
             bool enabled,

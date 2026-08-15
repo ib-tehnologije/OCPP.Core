@@ -13,7 +13,8 @@
 - `Maintenance:MessageLogRetention:Enabled` defaults to `false`.
 - `Maintenance:MessageLogRetention:DryRun` defaults to `true`.
 - Retention defaults to exactly `30` days; only `LogTime < cutoff` is eligible.
-- Batch size defaults to `1000` and must remain between `1` and `10000`.
+- Batch size defaults to `1000` and must remain between `1` and `1000` so the
+  selected-identifier delete remains below SQL Server's parameter limit.
 - Cleanup interval defaults to `60` minutes and must be positive.
 - Explicit invalid configuration fails closed without database access.
 - Every deletion batch commits independently and is ordered by `LogTime`, then `LogId`.
@@ -65,7 +66,7 @@ public void TryRead_UsesDisabledDryRunThirtyDayDefaults()
 [InlineData("RetentionDays", "0")]
 [InlineData("RetentionDays", "abc")]
 [InlineData("BatchSize", "0")]
-[InlineData("BatchSize", "10001")]
+[InlineData("BatchSize", "1001")]
 [InlineData("CleanupIntervalMinutes", "0")]
 [InlineData("Enabled", "not-bool")]
 public void TryRead_RejectsMalformedOrUnsafeValues(string key, string value)
@@ -109,7 +110,7 @@ the raw value.
 internal sealed class MessageLogRetentionOptions
 {
     internal const string SectionName = "Maintenance:MessageLogRetention";
-    internal const int MaximumBatchSize = 10000;
+    internal const int MaximumBatchSize = 1000;
 
     private MessageLogRetentionOptions(
         bool enabled,
