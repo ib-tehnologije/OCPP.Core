@@ -106,7 +106,7 @@ namespace OCPP.Core.Server.Maintenance
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<MessageLogRetentionRunner> _logger;
 
-        internal MessageLogRetentionRunner(
+        public MessageLogRetentionRunner(
             IServiceScopeFactory scopeFactory,
             ILogger<MessageLogRetentionRunner> logger)
         {

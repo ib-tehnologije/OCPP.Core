@@ -38,6 +38,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Maintenance;
 using OCPP.Core.Server.Extensions.Hangfire;
 using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
@@ -101,6 +102,8 @@ namespace OCPP.Core.Server
             services.AddSingleton<Payments.ReservationLinkService>();
             services.AddSingleton<OcppMessageDumpService>();
             services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<OcppMessageDumpService>());
+            services.AddSingleton<MessageLogRetentionRunner>();
+            services.AddHostedService<MessageLogRetentionService>();
             services.AddSingleton<Payments.IEmailNotificationService, Payments.EmailNotificationService>();
             services.AddSingleton<IInvoiceDraftBuilder, InvoiceDraftBuilder>();
             services.AddSingleton<IERacuniInvoiceRequestFactory, ERacuniInvoiceRequestFactory>();
