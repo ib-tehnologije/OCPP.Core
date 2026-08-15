@@ -49,7 +49,8 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Financial recovery stopped: {ex.Message}");
+            Console.Error.WriteLine(
+                $"Financial recovery stopped ({ex.GetType().Name}). Review private operator logs for details.");
             return 1;
         }
     }

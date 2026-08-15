@@ -286,6 +286,9 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.SubmissionKey)
                     .HasMaxLength(200);
 
+                entity.Property(e => e.SubmissionLeaseId)
+                    .HasMaxLength(50);
+
                 entity.Property(e => e.StripeCheckoutSessionId)
                     .HasMaxLength(200);
 

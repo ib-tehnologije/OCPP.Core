@@ -1022,16 +1022,19 @@ namespace OCPP.Core.Server.Payments
 
         public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
         {
-            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: false, suppressCustomerSideEffects: false);
+            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: false, suppressCustomerSideEffects: false, recoveryAssessment: null, recoveryReservation: null);
         }
 
-        public void RecoverTerminalSettlement(OCPPCoreContext dbContext, Transaction transaction)
+        public void RecoverTerminalSettlement(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            Transaction transaction)
         {
             if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
+            if (reservation == null) throw new ArgumentNullException(nameof(reservation));
             if (transaction == null) throw new ArgumentNullException(nameof(transaction));
 
-            var reservation = FindReservationForTransaction(dbContext, transaction);
-            var assessment = Recovery.FinancialRecoverySettlementAssessor.Assess(reservation, transaction);
+            var assessment = AssessTerminalSettlement(dbContext, reservation, transaction);
             if (!assessment.Eligible || assessment.TotalCents <= 0)
             {
                 throw new InvalidOperationException(
@@ -1040,20 +1043,51 @@ namespace OCPP.Core.Server.Payments
                         : assessment.Reason);
             }
 
-            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: true, suppressCustomerSideEffects: true);
+            CompleteReservationCore(dbContext, transaction, allowTerminalReplay: true, suppressCustomerSideEffects: true, recoveryAssessment: assessment, recoveryReservation: reservation);
+        }
+
+        public Recovery.FinancialRecoverySettlementDecision AssessTerminalSettlement(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            Transaction transaction)
+        {
+            if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
+            if (!IsEnabled)
+            {
+                return new Recovery.FinancialRecoverySettlementDecision
+                {
+                    Eligible = false,
+                    Reason = "Payment provider integration is disabled."
+                };
+            }
+            if (reservation == null || transaction == null)
+            {
+                return Recovery.FinancialRecoverySettlementAssessor.Assess(reservation, transaction);
+            }
+
+            var flowOptions = ResolveFlowOptions(dbContext);
+            return Recovery.FinancialRecoverySettlementAssessor.Assess(
+                reservation,
+                transaction,
+                flowOptions,
+                _logger);
         }
 
         private void CompleteReservationCore(
             OCPPCoreContext dbContext,
             Transaction transaction,
             bool allowTerminalReplay,
-            bool suppressCustomerSideEffects)
+            bool suppressCustomerSideEffects,
+            Recovery.FinancialRecoverySettlementDecision recoveryAssessment,
+            ChargePaymentReservation recoveryReservation)
         {
             if (!IsEnabled) return;
             if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
             if (transaction == null) throw new ArgumentNullException(nameof(transaction));
 
-            var reservation = FindReservationForTransaction(dbContext, transaction);
+            var reservation = recoveryAssessment == null
+                ? FindReservationForTransaction(dbContext, transaction)
+                : recoveryReservation;
             if (reservation == null) return;
             if ((!allowTerminalReplay && reservation.Status == PaymentReservationStatus.Completed) ||
                 reservation.Status == PaymentReservationStatus.Cancelled)
@@ -1062,10 +1096,13 @@ namespace OCPP.Core.Server.Payments
             }
 
             var now = _utcNow();
-            CloseSupersededTransactions(dbContext, reservation, transaction);
-            RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction.StartTime);
-            reservation.StopTransactionAtUtc ??= transaction.StopTime ?? now;
-            reservation.UpdatedAtUtc = now;
+            if (recoveryAssessment == null)
+            {
+                CloseSupersededTransactions(dbContext, reservation, transaction);
+                RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction.StartTime);
+                reservation.StopTransactionAtUtc ??= transaction.StopTime ?? now;
+                reservation.UpdatedAtUtc = now;
+            }
 
             if (reservation.UsageFeeAnchorMinutes == 1 &&
                 !transaction.ChargingEndedAtUtc.HasValue &&
@@ -1074,12 +1111,15 @@ namespace OCPP.Core.Server.Payments
                 transaction.ChargingEndedAtUtc = reservation.StopTransactionAtUtc.Value;
             }
 
-            bool hasConnectorAvailability = TryGetConnectorAvailability(dbContext, reservation, out bool connectorAvailable);
-            bool disconnected = reservation.DisconnectedAtUtc.HasValue ||
+            bool connectorAvailable = false;
+            bool hasConnectorAvailability = recoveryAssessment == null &&
+                                            TryGetConnectorAvailability(dbContext, reservation, out connectorAvailable);
+            bool disconnected = recoveryAssessment != null ||
+                                reservation.DisconnectedAtUtc.HasValue ||
                                 IsDisconnectedStopReason(transaction.StopReason) ||
                                 connectorAvailable;
 
-            if (!disconnected && hasConnectorAvailability)
+            if (recoveryAssessment == null && !disconnected && hasConnectorAvailability)
             {
                 reservation.Status = PaymentReservationStatus.WaitingForDisconnect;
                 dbContext.SaveChanges();
@@ -1093,8 +1133,11 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
-            reservation.DisconnectedAtUtc ??= ResolveDisconnectedAtUtc(dbContext, reservation) ?? reservation.StopTransactionAtUtc ?? now;
-            dbContext.SaveChanges();
+            if (recoveryAssessment == null)
+            {
+                reservation.DisconnectedAtUtc ??= ResolveDisconnectedAtUtc(dbContext, reservation) ?? reservation.StopTransactionAtUtc ?? now;
+                dbContext.SaveChanges();
+            }
 
             _logger.LogInformation("Stripe/Complete => Begin capture for reservation={ReservationId} tx={TransactionId} cp={ChargePointId} connector={ConnectorId} currentStatus={Status}",
                 reservation.ReservationId,
@@ -1103,15 +1146,15 @@ namespace OCPP.Core.Server.Payments
                 transaction.ConnectorId,
                 reservation.Status);
 
-            bool hasValidDeliveredEnergy = transaction.MeterStop.HasValue &&
-                                           transaction.MeterStart >= 0 &&
-                                           transaction.MeterStop.Value >= 0 &&
-                                           transaction.MeterStop.Value >= transaction.MeterStart;
-            double actualEnergy = 0;
-            if (hasValidDeliveredEnergy)
-            {
-                actualEnergy = Math.Max(0, transaction.MeterStop.Value - transaction.MeterStart);
-            }
+            var flowOptions = ResolveFlowOptions(dbContext);
+            var settlement = recoveryAssessment?.Calculation ?? FinancialSettlementCalculator.Calculate(
+                reservation,
+                transaction,
+                flowOptions,
+                reservation.DisconnectedAtUtc ?? now,
+                _logger);
+            bool hasValidDeliveredEnergy = settlement.HasValidDeliveredEnergy;
+            double actualEnergy = settlement.ActualEnergyKwh;
 
             reservation.ActualEnergyKwh = actualEnergy;
             reservation.UpdatedAtUtc = now;
@@ -1125,30 +1168,12 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
-            var flowOptions = ResolveFlowOptions(dbContext);
-            var shouldNoChargeForDeliveredEnergy = ShouldTreatAsNoChargeForDeliveredEnergy(
-                actualEnergy,
-                hasValidDeliveredEnergy,
-                flowOptions,
-                out var deliveredEnergyNoChargeReason);
-            var energyCostCents = shouldNoChargeForDeliveredEnergy
-                ? 0L
-                : CalculateAmountInCents(actualEnergy, reservation.PricePerKwh);
-            var configuredSessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
-            string sessionFeeSuppressionReason = null;
-            var shouldChargeSessionFee = !shouldNoChargeForDeliveredEnergy && ShouldChargeSessionFee(
-                reservation,
-                actualEnergy,
-                hasValidDeliveredEnergy,
-                flowOptions,
-                out sessionFeeSuppressionReason);
-            var sessionFeeCents = shouldChargeSessionFee
-                ? configuredSessionFeeCents
-                : 0L;
-            if (shouldNoChargeForDeliveredEnergy)
-            {
-                sessionFeeSuppressionReason = deliveredEnergyNoChargeReason;
-            }
+            var shouldNoChargeForDeliveredEnergy = settlement.ShouldNoChargeForDeliveredEnergy;
+            var deliveredEnergyNoChargeReason = settlement.DeliveredEnergyNoChargeReason;
+            var energyCostCents = settlement.EnergyCostCents;
+            var configuredSessionFeeCents = settlement.ConfiguredSessionFeeCents;
+            var sessionFeeSuppressionReason = settlement.SessionFeeSuppressionReason;
+            var sessionFeeCents = settlement.SessionFeeCents;
 
             if (configuredSessionFeeCents > 0 && sessionFeeCents == 0)
             {
@@ -1175,25 +1200,21 @@ namespace OCPP.Core.Server.Payments
                     deliveredEnergyNoChargeReason);
             }
 
-            var idleSnapshot = shouldNoChargeForDeliveredEnergy
-                ? new IdleFeeSnapshot()
-                : IdleFeeCalculator.ApplyFinalSnapshot(
-                    transaction,
-                    reservation,
-                    flowOptions,
-                    reservation.DisconnectedAtUtc ?? now,
-                    _logger);
-            var usageFeeMinutes = shouldNoChargeForDeliveredEnergy
-                ? 0
-                : reservation.UsageFeeAnchorMinutes == 1
-                    ? idleSnapshot.TotalMinutes
-                    : CalculateUsageFeeMinutes(transaction, reservation, flowOptions, now);
-            var usageFeeCents = shouldNoChargeForDeliveredEnergy || usageFeeMinutes <= 0
-                ? 0L
-                : CalculateUsageFeeInCents(usageFeeMinutes, reservation.UsageFeePerMinute);
+            var idleSnapshot = settlement.IdleSnapshot;
+            var usageFeeMinutes = settlement.UsageFeeMinutes;
+            var usageFeeCents = settlement.UsageFeeCents;
+            var amountToCapture = settlement.AmountToCaptureCents;
+            var minimumChargeAmountCents = settlement.MinimumChargeAmountCents;
 
-            var amountToCapture = energyCostCents + usageFeeCents + sessionFeeCents;
-            var minimumChargeAmountCents = Math.Max(0, flowOptions.MinimumChargeAmountCents);
+            // Preserve the normal completion path's final idle snapshot before the
+            // provider call. A provider exception is persisted below, so these
+            // transaction fields must remain part of that same durable failure state.
+            if (!shouldNoChargeForDeliveredEnergy && reservation.UsageFeeAnchorMinutes == 1)
+            {
+                transaction.IdleUsageFeeMinutes = idleSnapshot.TotalMinutes;
+                transaction.IdleUsageFeeAmount = idleSnapshot.TotalAmount;
+                transaction.ChargingEndedAtUtc = null;
+            }
 
             _logger.LogInformation(
                 "Stripe/Complete => Calculated amounts reservation={ReservationId} tx={TransactionId} energyKwh={EnergyKwh:0.###} energyCents={EnergyCents} usageMinutes={UsageMinutes} usageCents={UsageCents} sessionFeeCents={SessionFeeCents} amountToCapture={AmountToCapture} minimumChargeAmountCents={MinimumChargeAmountCents}",
@@ -1309,6 +1330,12 @@ namespace OCPP.Core.Server.Payments
                 }
                 else if (paymentIntent.Status == "succeeded")
                 {
+                    if (recoveryAssessment != null && paymentIntent.AmountReceived != amountToCapture)
+                    {
+                        throw new InvalidOperationException(
+                            "Provider-reported captured amount contradicts the assessed recovery settlement.");
+                    }
+
                     reservation.CapturedAmountCents = paymentIntent.AmountReceived;
                     reservation.CapturedAtUtc = now;
                     reservation.Status = PaymentReservationStatus.Completed;

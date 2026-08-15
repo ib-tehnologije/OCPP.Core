@@ -49,7 +49,7 @@ Implement local eligibility assessment. Dry-run must not arm or invoke the coord
 - Modify: `OCPP.Core.Server.Tests/InvoiceIntegrationServiceTests.cs`
 - Modify: `OCPP.Core.Server.Tests/ERacuniApiClientTests.cs`
 
-Add deterministic `SubmissionKey`, a local acquisition/preflight state machine, and an exact provider-reference lookup result with `Found`, `NotFound`, and `Unknown`. Only a definitive not-found decision may reach create; exceptions after the provider boundary persist `ProviderUnknown`. Run focused tests to green.
+Add deterministic `SubmissionKey`, a local acquisition/preflight state machine with a time-bounded database lease, and an exact provider-reference lookup result with `Found`, `NotFound`, and `Unknown`. Only a definitive not-found decision may reach create; exceptions after the provider boundary persist `ProviderUnknown`. Run focused tests to green.
 
 ## Task 5: Generate and inspect the database migration
 
@@ -59,7 +59,7 @@ Add deterministic `SubmissionKey`, a local acquisition/preflight state machine, 
 - Create through repository command: matching designer file
 - Modify through repository command: `OCPP.Core.Database/Migrations/OCPPCoreContextModelSnapshot.cs`
 
-Run `make add-migration NAME=AddInvoiceSubmissionIdempotency` using the repository-supported EF command. Inspect `Up`, `Down`, designer metadata, and the snapshot. The migration must add a nullable bounded column and filtered unique index, with no data update or backfill. Run `make check-migration-metadata`.
+Run `make add-migration NAME=AddInvoiceSubmissionIdempotency` using the repository-supported EF command. Inspect `Up`, `Down`, designer metadata, and the snapshot. The migration must add the nullable bounded submission key and lease columns plus the filtered unique index, with no data update or backfill. Run `make check-migration-metadata`.
 
 ## Task 6: Add the operator command
 

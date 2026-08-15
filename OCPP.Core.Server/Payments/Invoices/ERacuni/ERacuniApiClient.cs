@@ -101,11 +101,17 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 });
             }
 
-            var isRecognizedEmptyResult = response.ParsedBody.Type == JTokenType.Array ||
-                response.ParsedBody["result"] != null;
+            var isRecognizedEmptyResult = response.ParsedBody is JArray rootArray && rootArray.Count == 0;
+            if (response.ParsedBody is JObject rootObject &&
+                rootObject.GetValue("result", StringComparison.OrdinalIgnoreCase) is JArray resultArray)
+            {
+                isRecognizedEmptyResult = resultArray.Count == 0;
+            }
+
             return isRecognizedEmptyResult
                 ? ERacuniInvoiceLookupResult.NotFound()
-                : ERacuniInvoiceLookupResult.Unknown("Provider lookup response schema is unrecognized.");
+                : ERacuniInvoiceLookupResult.Unknown(
+                    "Provider lookup returned a non-empty or unrecognized response without one exact match.");
         }
 
         private ERacuniApiResult Send(ERacuniApiRequestEnvelope request)

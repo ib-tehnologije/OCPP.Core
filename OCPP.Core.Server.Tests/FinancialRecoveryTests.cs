@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
@@ -70,8 +71,8 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(128L, result.EnergyCostCents);
             Assert.Equal(50L, result.SessionFeeCents);
             Assert.Equal(40L, result.UsageFeeCents);
-            Assert.Equal(20L, result.IdleFeeCents);
-            Assert.Equal(238L, result.TotalCents);
+            Assert.Equal(0L, result.IdleFeeCents);
+            Assert.Equal(218L, result.TotalCents);
         }
 
         [Theory]
@@ -105,6 +106,30 @@ namespace OCPP.Core.Server.Tests
             Assert.Contains("transaction link", result.Reason, StringComparison.OrdinalIgnoreCase);
         }
 
+        [Fact]
+        public void Assess_FailsClosed_WhenReservationIsNotTerminal()
+        {
+            var reservation = CreateReservation();
+            reservation.Status = PaymentReservationStatus.Charging;
+
+            var result = FinancialRecoverySettlementAssessor.Assess(reservation, CreateTransaction());
+
+            Assert.False(result.Eligible);
+            Assert.Contains("terminal", result.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Assess_FailsClosed_WhenDisconnectEvidenceIsMissing()
+        {
+            var reservation = CreateReservation();
+            reservation.DisconnectedAtUtc = null;
+
+            var result = FinancialRecoverySettlementAssessor.Assess(reservation, CreateTransaction());
+
+            Assert.False(result.Eligible);
+            Assert.Contains("disconnect", result.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static ChargePaymentReservation CreateReservation() => new()
         {
             ReservationId = Guid.Parse("33333333-3333-3333-3333-333333333333"),
@@ -113,8 +138,11 @@ namespace OCPP.Core.Server.Tests
             PricePerKwh = 0.30m,
             UserSessionFee = 0.50m,
             UsageFeePerMinute = 0.10m,
+            MaxUsageFeeMinutes = 4,
             Currency = "EUR",
-            StripePaymentIntentId = "pi_synthetic"
+            StripePaymentIntentId = "pi_synthetic",
+            StopTransactionAtUtc = new DateTime(2026, 1, 1, 11, 0, 0, DateTimeKind.Utc),
+            DisconnectedAtUtc = new DateTime(2026, 1, 1, 11, 10, 0, DateTimeKind.Utc)
         };
 
         private static Transaction CreateTransaction() => new()
@@ -183,6 +211,62 @@ namespace OCPP.Core.Server.Tests
         };
     }
 
+    public class FinancialRecoveryInvoiceTests
+    {
+        [Fact]
+        public void Assess_AllowsCompleteCapturedBillingBreakdown()
+        {
+            var result = FinancialRecoveryInvoiceAssessor.Assess(CreateReservation(), CreateTransaction());
+
+            Assert.True(result.Eligible, result.Reason);
+        }
+
+        [Fact]
+        public void Assess_RejectsCapturedAmountThatContradictsBillingBreakdown()
+        {
+            var reservation = CreateReservation();
+            reservation.CapturedAmountCents = 299;
+
+            var result = FinancialRecoveryInvoiceAssessor.Assess(reservation, CreateTransaction());
+
+            Assert.False(result.Eligible);
+            Assert.Contains("captured amount", result.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Assess_RejectsMissingPersistedCurrency()
+        {
+            var transaction = CreateTransaction();
+            transaction.Currency = null;
+
+            var result = FinancialRecoveryInvoiceAssessor.Assess(CreateReservation(), transaction);
+
+            Assert.False(result.Eligible);
+            Assert.Contains("currency", result.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static ChargePaymentReservation CreateReservation() => new()
+        {
+            ReservationId = Guid.Parse("45454545-4545-4545-4545-454545454545"),
+            TransactionId = 45,
+            Status = PaymentReservationStatus.Completed,
+            CapturedAtUtc = new DateTime(2026, 1, 1, 11, 1, 0, DateTimeKind.Utc),
+            CapturedAmountCents = 300,
+            Currency = "EUR"
+        };
+
+        private static Transaction CreateTransaction() => new()
+        {
+            TransactionId = 45,
+            StartTime = new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc),
+            StopTime = new DateTime(2026, 1, 1, 11, 0, 0, DateTimeKind.Utc),
+            Currency = "EUR",
+            EnergyKwh = 5,
+            EnergyCost = 2.50m,
+            UserSessionFeeAmount = 0.50m
+        };
+    }
+
     public class FinancialRecoveryServiceTests
     {
         [Fact]
@@ -217,6 +301,44 @@ namespace OCPP.Core.Server.Tests
             Assert.True(Assert.Single(report.Items).Eligible);
             Assert.Null(reservation.AuthorizationReleaseState);
             Assert.Empty(dbContext.PaymentAuthorizationReleaseAttempts);
+        }
+
+        [Fact]
+        public void Run_ExecuteRestoresUnarmedStateWhenCoordinatorSkipsAuthorizationRelease()
+        {
+            using var dbContext = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.Parse("56565656-5656-5656-5656-565656565656"),
+                ChargePointId = "CP-SYNTHETIC",
+                ChargeTagId = "TAG-SYNTHETIC",
+                Currency = "EUR",
+                Status = PaymentReservationStatus.Abandoned,
+                StripePaymentIntentId = "pi_synthetic",
+                CapturedAmountCents = 0,
+                ActualEnergyKwh = 0
+            };
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.SaveChanges();
+            var manifest = FinancialRecoveryManifest.Parse("""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "release-authorization", "reservationId": "56565656-5656-5656-5656-565656565656" }
+                  ]
+                }
+                """);
+            var coordinator = new RecordingPaymentCoordinator();
+            var service = new FinancialRecoveryService(coordinator, invoiceIntegrationService: null);
+
+            var report = service.Run(dbContext, manifest, execute: true, manifest.Sha256);
+
+            var item = Assert.Single(report.Items);
+            Assert.False(item.Eligible);
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.SkippedNotEligible, item.Outcome);
+            dbContext.ChangeTracker.Clear();
+            Assert.Null(dbContext.ChargePaymentReservations.Single().AuthorizationReleaseState);
+            Assert.Single(coordinator.ReconcileCalls);
         }
 
         private static OCPPCoreContext CreateContext()

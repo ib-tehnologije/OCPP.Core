@@ -12,7 +12,7 @@ using OCPP.Core.Database;
 namespace OCPP.Core.Database.Migrations
 {
     [DbContext(typeof(OCPPCoreContext))]
-    [Migration("20260815094035_AddInvoiceSubmissionIdempotency")]
+    [Migration("20260815103339_AddInvoiceSubmissionIdempotency")]
     partial class AddInvoiceSubmissionIdempotency
     {
         /// <inheritdoc />
@@ -549,6 +549,13 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<string>("SubmissionKey")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("SubmissionLeaseExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SubmissionLeaseId")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int?>("TransactionId")
                         .HasColumnType("int");

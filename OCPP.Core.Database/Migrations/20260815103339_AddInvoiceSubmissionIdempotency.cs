@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using System;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -15,6 +16,19 @@ namespace OCPP.Core.Database.Migrations
                 table: "InvoiceSubmissionLog",
                 type: "nvarchar(200)",
                 maxLength: 200,
+                nullable: true);
+
+            migrationBuilder.AddColumn<DateTime>(
+                name: "SubmissionLeaseExpiresAtUtc",
+                table: "InvoiceSubmissionLog",
+                type: "datetime2",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "SubmissionLeaseId",
+                table: "InvoiceSubmissionLog",
+                type: "nvarchar(50)",
+                maxLength: 50,
                 nullable: true);
 
             migrationBuilder.CreateIndex(
@@ -34,6 +48,14 @@ namespace OCPP.Core.Database.Migrations
 
             migrationBuilder.DropColumn(
                 name: "SubmissionKey",
+                table: "InvoiceSubmissionLog");
+
+            migrationBuilder.DropColumn(
+                name: "SubmissionLeaseExpiresAtUtc",
+                table: "InvoiceSubmissionLog");
+
+            migrationBuilder.DropColumn(
+                name: "SubmissionLeaseId",
                 table: "InvoiceSubmissionLog");
         }
     }

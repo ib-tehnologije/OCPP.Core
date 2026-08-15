@@ -68,13 +68,13 @@ Submit-mode processing follows this order:
 1. build and validate the invoice draft;
 2. derive the exact provider transaction reference and submission key;
 3. check local submitted/external history;
-4. acquire the unique local submission lineage before a create attempt;
+4. acquire the unique local submission lineage and a time-bounded database lease before a create attempt;
 5. for an existing unfinished, failed, or provider-unknown lineage, perform an exact provider lookup;
 6. if exactly one provider record matches, persist its identifiers and mark the lineage submitted;
 7. if the lookup is definitively not found, a recovery execution may attempt create using the same deterministic provider reference;
 8. if lookup fails, is ambiguous, or returns an unrecognized response, mark the lineage `ProviderUnknown` and stop.
 
-Any exception after a provider call may have crossed the network boundary. Such an attempt is `ProviderUnknown`, never automatically safe to retry. Repeated calls, concurrent processes, process restart, a successful provider response followed by local persistence failure, and provider timeout all converge on lookup-before-create.
+Any exception after a provider call may have crossed the network boundary. Such an attempt is `ProviderUnknown`, never automatically safe to retry. A current lease blocks concurrent creation; an expired lease can only be reacquired atomically after provider lookup. Repeated calls, concurrent processes, process restart, a successful provider response followed by local persistence failure, and provider timeout all converge on lookup-before-create.
 
 ## Provider lookup boundary
 

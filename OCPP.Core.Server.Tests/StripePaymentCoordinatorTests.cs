@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
+using OCPP.Core.Server.Payments.Recovery;
 using System.Linq;
 using System.Collections.Generic;
 using System.Net;
@@ -1752,6 +1753,191 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void RecoverTerminalSettlement_CapturesTheExactAssessedAmount()
+        {
+            using var context = CreateContext();
+            var stoppedAt = new DateTime(2025, 1, 1, 11, 0, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-RECOVERY",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-RECOVERY",
+                StripePaymentIntentId = "pi_recovery",
+                Status = PaymentReservationStatus.Failed,
+                TransactionId = 420,
+                StopTransactionAtUtc = stoppedAt,
+                DisconnectedAtUtc = stoppedAt.AddMinutes(10),
+                PricePerKwh = 0.30m,
+                UserSessionFee = 0.50m,
+                UsageFeePerMinute = 0.10m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 10,
+                UsageFeeAnchorMinutes = 0,
+                Currency = "eur"
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 420,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = stoppedAt.AddHours(-1),
+                StopTime = stoppedAt,
+                MeterStart = 100,
+                MeterStop = 104.25,
+                UsageFeeMinutes = 4,
+                IdleUsageFeeAmount = 0.20m
+            };
+            context.ChargePaymentReservations.Add(reservation);
+            context.Transactions.Add(transaction);
+            context.SaveChanges();
+
+            var flowOptions = new PaymentFlowOptions
+            {
+                MinimumSessionFeeKwh = 1.0m,
+                MinimumChargeAmountCents = 50
+            };
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = reservation.StripePaymentIntentId,
+                    Status = "requires_capture",
+                    Amount = 10_000
+                }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                flowOptions: flowOptions,
+                now: () => stoppedAt.AddMinutes(10));
+            var assessment = FinancialRecoverySettlementAssessor.Assess(reservation, transaction, flowOptions);
+
+            coordinator.RecoverTerminalSettlement(context, reservation, transaction);
+
+            Assert.True(assessment.Eligible, assessment.Reason);
+            Assert.Equal(assessment.TotalCents, intentService.LastCaptureOptions?.AmountToCapture);
+            Assert.Equal(assessment.EnergyKwh, transaction.EnergyKwh);
+            Assert.Equal(assessment.UsageFeeMinutes, transaction.UsageFeeMinutes);
+        }
+
+        [Fact]
+        public void RecoverTerminalSettlement_MutatesOnlyTheExplicitlyAllowlistedReservation()
+        {
+            using var context = CreateContext();
+            var stoppedAt = new DateTime(2025, 1, 1, 11, 0, 0, DateTimeKind.Utc);
+            var transaction = new Transaction
+            {
+                TransactionId = 421,
+                ChargePointId = "CP-RECOVERY-SCOPE",
+                ConnectorId = 1,
+                StartTagId = "TAG-RECOVERY-SCOPE",
+                StartTime = stoppedAt.AddHours(-1),
+                StopTime = stoppedAt,
+                MeterStart = 100,
+                MeterStop = 101
+            };
+            ChargePaymentReservation CreateReservation(string paymentIntentId) => new()
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = transaction.ChargePointId,
+                ConnectorId = transaction.ConnectorId,
+                ChargeTagId = transaction.StartTagId,
+                StripePaymentIntentId = paymentIntentId,
+                Status = PaymentReservationStatus.Failed,
+                TransactionId = transaction.TransactionId,
+                StopTransactionAtUtc = stoppedAt,
+                DisconnectedAtUtc = stoppedAt.AddMinutes(2),
+                PricePerKwh = 1m,
+                Currency = "eur"
+            };
+
+            var competingReservation = CreateReservation("pi_competing_scope");
+            var allowlistedReservation = CreateReservation("pi_allowlisted_scope");
+            context.AddRange(competingReservation, allowlistedReservation, transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = allowlistedReservation.StripePaymentIntentId,
+                    Status = "requires_capture",
+                    Amount = 10_000
+                }
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => stoppedAt.AddMinutes(2));
+
+            coordinator.RecoverTerminalSettlement(context, allowlistedReservation, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, allowlistedReservation.Status);
+            Assert.Equal(PaymentReservationStatus.Failed, competingReservation.Status);
+            Assert.Null(competingReservation.CapturedAmountCents);
+        }
+
+        [Fact]
+        public void RecoverTerminalSettlement_RejectsContradictoryProviderCapturedAmount()
+        {
+            using var context = CreateContext();
+            var stoppedAt = new DateTime(2025, 1, 1, 11, 0, 0, DateTimeKind.Utc);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-RECOVERY-CONTRADICTION",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-RECOVERY-CONTRADICTION",
+                StripePaymentIntentId = "pi_recovery_contradiction",
+                Status = PaymentReservationStatus.Failed,
+                TransactionId = 422,
+                StopTransactionAtUtc = stoppedAt,
+                DisconnectedAtUtc = stoppedAt.AddMinutes(2),
+                PricePerKwh = 1m,
+                Currency = "eur"
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 422,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = stoppedAt.AddHours(-1),
+                StopTime = stoppedAt,
+                MeterStart = 100,
+                MeterStop = 101
+            };
+            context.AddRange(reservation, transaction);
+            context.SaveChanges();
+
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                new FakePaymentIntentService
+                {
+                    GetResponse = new PaymentIntent
+                    {
+                        Id = reservation.StripePaymentIntentId,
+                        Status = "succeeded",
+                        AmountReceived = 99
+                    }
+                },
+                now: () => stoppedAt.AddMinutes(2));
+
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                coordinator.RecoverTerminalSettlement(context, reservation, transaction));
+
+            Assert.Contains("contradicts", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
+            Assert.Null(reservation.CapturedAtUtc);
+            Assert.Null(reservation.CapturedAmountCents);
+        }
+
+        [Fact]
         public void CompleteReservation_CancelsBelowMinimumKwhEvenWhenEnergyExceedsMinimumCharge()
         {
             using var context = CreateContext();
@@ -2764,6 +2950,70 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(5, transaction.IdleUsageFeeMinutes);
             Assert.Equal(1.0m, transaction.IdleUsageFeeAmount);
             Assert.Equal(100, reservation.CapturedAmountCents);
+        }
+
+        [Fact]
+        public void CompleteReservation_PersistsFinalIdleSnapshotWhenCaptureFails()
+        {
+            using var context = CreateContext();
+            var stopAtUtc = new DateTime(2026, 3, 12, 12, 10, 0, DateTimeKind.Utc);
+            var disconnectedAtUtc = stopAtUtc.AddMinutes(5);
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-IDLE-FAILURE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-IDLE-FAILURE",
+                StripePaymentIntentId = "pi_idle_failure",
+                Status = PaymentReservationStatus.WaitingForDisconnect,
+                PricePerKwh = 1m,
+                UsageFeePerMinute = 0.20m,
+                StartUsageFeeAfterMinutes = 0,
+                MaxUsageFeeMinutes = 60,
+                UsageFeeAnchorMinutes = 1,
+                Currency = "eur",
+                DisconnectedAtUtc = disconnectedAtUtc
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 317,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = stopAtUtc.AddMinutes(-30),
+                StopTime = stopAtUtc,
+                MeterStart = 10,
+                MeterStop = 11
+            };
+
+            context.AddRange(reservation, transaction);
+            context.SaveChanges();
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent
+                {
+                    Id = reservation.StripePaymentIntentId,
+                    Status = "requires_capture",
+                    Amount = 10_000
+                },
+                CaptureException = new StripeException(
+                    HttpStatusCode.ServiceUnavailable,
+                    new StripeError { Type = "api_error", Code = "provider_unavailable" },
+                    "Capture unavailable")
+            };
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                now: () => disconnectedAtUtc);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
+            Assert.Equal(5, transaction.IdleUsageFeeMinutes);
+            Assert.Equal(1.0m, transaction.IdleUsageFeeAmount);
+            Assert.Null(transaction.ChargingEndedAtUtc);
         }
 
         [Fact]
@@ -4071,6 +4321,7 @@ namespace OCPP.Core.Server.Tests
         public bool CaptureCalled { get; private set; }
         public bool CancelCalled { get; private set; }
         public RequestOptions? LastCancelRequestOptions { get; private set; }
+        public StripeException? CaptureException { get; set; }
         public StripeException? CancelException { get; set; }
 
         public PaymentIntent Get(string id) => GetResponse;
@@ -4089,6 +4340,10 @@ namespace OCPP.Core.Server.Tests
             CaptureCalled = true;
             LastCaptureOptions = options;
             LastCaptureRequestOptions = requestOptions;
+            if (CaptureException != null)
+            {
+                throw CaptureException;
+            }
             var capturedAmount = options.AmountToCapture ?? 0;
             return new PaymentIntent { Id = id, Status = "succeeded", AmountReceived = capturedAmount };
         }

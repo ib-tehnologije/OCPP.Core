@@ -547,6 +547,13 @@ namespace OCPP.Core.Database.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<DateTime?>("SubmissionLeaseExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SubmissionLeaseId")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<int?>("TransactionId")
                         .HasColumnType("int");
 

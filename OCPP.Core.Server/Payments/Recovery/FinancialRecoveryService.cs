@@ -80,7 +80,12 @@ namespace OCPP.Core.Server.Payments.Recovery
             var transaction = reservation.TransactionId.HasValue
                 ? dbContext.Transactions.SingleOrDefault(candidate => candidate.TransactionId == reservation.TransactionId.Value)
                 : null;
-            var assessment = FinancialRecoverySettlementAssessor.Assess(reservation, transaction);
+            if (_paymentCoordinator == null)
+            {
+                return Blocked(entry, "Payment coordinator is unavailable.");
+            }
+
+            var assessment = _paymentCoordinator.AssessTerminalSettlement(dbContext, reservation, transaction);
             if (!assessment.Eligible || assessment.TotalCents <= 0)
             {
                 return Blocked(entry, assessment.Eligible
@@ -90,12 +95,14 @@ namespace OCPP.Core.Server.Payments.Recovery
 
             if (execute)
             {
-                if (_paymentCoordinator == null)
+                _paymentCoordinator.RecoverTerminalSettlement(dbContext, reservation, transaction);
+                dbContext.Entry(reservation).Reload();
+                if (!string.Equals(reservation.Status, PaymentReservationStatus.Completed, StringComparison.OrdinalIgnoreCase) ||
+                    !reservation.CapturedAtUtc.HasValue ||
+                    reservation.CapturedAmountCents != assessment.TotalCents)
                 {
-                    return Blocked(entry, "Payment coordinator is unavailable.");
+                    return Blocked(entry, "Settlement execution did not persist the exact assessed capture.");
                 }
-
-                _paymentCoordinator.RecoverTerminalSettlement(dbContext, transaction);
             }
 
             return Eligible(entry, execute ? "Executed" : "DryRunEligible");
@@ -127,24 +134,42 @@ namespace OCPP.Core.Server.Payments.Recovery
 
             if (execute)
             {
-                if (_paymentCoordinator == null)
+                if (_paymentCoordinator == null || !_paymentCoordinator.IsEnabled)
                 {
-                    return Blocked(entry, "Payment coordinator is unavailable.");
+                    return Blocked(entry, "Payment provider integration is unavailable or disabled.");
                 }
 
-                reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
-                reservation.AuthorizationReleaseNextAttemptAtUtc = null;
-                reservation.UpdatedAtUtc = DateTime.UtcNow;
-                dbContext.SaveChanges();
+                var originalState = reservation.AuthorizationReleaseState;
+                var originalNextAttempt = reservation.AuthorizationReleaseNextAttemptAtUtc;
+                var originalUpdatedAt = reservation.UpdatedAtUtc;
+                var armedByRecovery = !PaymentAuthorizationReleaseState.IsArmed(originalState);
+                if (armedByRecovery)
+                {
+                    reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
+                    reservation.AuthorizationReleaseNextAttemptAtUtc = null;
+                    reservation.UpdatedAtUtc = DateTime.UtcNow;
+                    dbContext.SaveChanges();
+                }
+
                 var result = _paymentCoordinator.ReconcileTerminalPaymentAuthorization(
                     dbContext,
                     reservation,
                     "ExplicitFinancialRecovery");
+                if (armedByRecovery &&
+                    string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.SkippedNotEligible, StringComparison.OrdinalIgnoreCase))
+                {
+                    reservation.AuthorizationReleaseState = originalState;
+                    reservation.AuthorizationReleaseNextAttemptAtUtc = originalNextAttempt;
+                    reservation.UpdatedAtUtc = originalUpdatedAt;
+                    dbContext.SaveChanges();
+                }
+
                 return new FinancialRecoveryReportItem(
                     entry.Operation,
                     entry.ReservationId,
                     !string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.ReviewRequired, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.PermanentFailure, StringComparison.OrdinalIgnoreCase),
+                    !string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.PermanentFailure, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.SkippedNotEligible, StringComparison.OrdinalIgnoreCase),
                     result.Outcome);
             }
 
@@ -157,18 +182,13 @@ namespace OCPP.Core.Server.Payments.Recovery
             ChargePaymentReservation reservation,
             bool execute)
         {
-            if (!string.Equals(reservation.Status, PaymentReservationStatus.Completed, StringComparison.OrdinalIgnoreCase) ||
-                !reservation.CapturedAtUtc.HasValue || reservation.CapturedAmountCents.GetValueOrDefault() <= 0 ||
-                !reservation.TransactionId.HasValue)
+            var transaction = reservation.TransactionId.HasValue
+                ? dbContext.Transactions.SingleOrDefault(candidate => candidate.TransactionId == reservation.TransactionId.Value)
+                : null;
+            var assessment = FinancialRecoveryInvoiceAssessor.Assess(reservation, transaction);
+            if (!assessment.Eligible)
             {
-                return Blocked(entry, "Invoice recovery requires a completed captured reservation with a linked transaction.");
-            }
-
-            var transaction = dbContext.Transactions
-                .SingleOrDefault(candidate => candidate.TransactionId == reservation.TransactionId.Value);
-            if (transaction == null)
-            {
-                return Blocked(entry, "Linked transaction was not found.");
+                return Blocked(entry, assessment.Reason);
             }
 
             if (execute)
@@ -178,7 +198,7 @@ namespace OCPP.Core.Server.Payments.Recovery
                     return Blocked(entry, "Invoice integration service is unavailable.");
                 }
 
-                _invoiceIntegrationService.HandleCompletedReservation(dbContext, reservation, transaction, checkoutSession: null);
+                _invoiceIntegrationService.RecoverCompletedReservation(dbContext, reservation, transaction, checkoutSession: null);
             }
 
             return Eligible(entry, execute ? "Executed" : "DryRunEligibleProviderLookupRequired");

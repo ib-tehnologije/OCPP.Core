@@ -3,6 +3,10 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -41,6 +45,28 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(draft.StripePaymentIntentId, audit.StripePaymentIntentId);
             Assert.Contains("\"apiTransactionId\"", audit.RequestPayloadJson);
             Assert.NotNull(audit.CompletedAtUtc);
+        }
+
+        [Fact]
+        public void RecoverCompletedReservation_RejectsLogOnlyMode()
+        {
+            var service = CreateService(
+                "LogOnly",
+                new StubInvoiceDraftBuilder(CreateDraft()),
+                new StubERacuniInvoiceRequestFactory(),
+                new StubERacuniApiClient());
+
+            using var dbContext = CreateContext();
+
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                service.RecoverCompletedReservation(
+                    dbContext,
+                    new ChargePaymentReservation(),
+                    new Transaction(),
+                    new Session()));
+
+            Assert.Contains("submit mode", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(dbContext.InvoiceSubmissionLogs);
         }
 
         [Fact]
@@ -96,6 +122,104 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void HandleCompletedReservation_DoesNotCreate_WhenHistoricalNullKeySubmissionAlreadySucceeded()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient();
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            dbContext.InvoiceSubmissionLogs.Add(new InvoiceSubmissionLog
+            {
+                ReservationId = draft.ReservationId,
+                TransactionId = draft.TransactionId,
+                Provider = "ERacuni",
+                Mode = "Submit",
+                Status = "Submitted",
+                ApiTransactionId = draft.ReservationId.ToString("N"),
+                ExternalDocumentId = "historical-doc",
+                CreatedAtUtc = DateTime.UtcNow.AddDays(-1)
+            });
+            dbContext.SaveChanges();
+
+            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session());
+
+            Assert.Equal(0, apiClient.LookupCount);
+            Assert.Equal(0, apiClient.CreateCount);
+            Assert.Single(dbContext.InvoiceSubmissionLogs);
+        }
+
+        [Fact]
+        public async Task HandleCompletedReservation_AllowsOnlyOneProviderCreateAcrossRelationalContexts()
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), $"invoice-lineage-{Guid.NewGuid():N}.sqlite");
+            var connectionString = $"Data Source={databasePath}";
+            try
+            {
+                var setupOptions = new DbContextOptionsBuilder<OCPPCoreContext>()
+                    .UseSqlite(connectionString)
+                    .Options;
+                using (var setupContext = new OCPPCoreContext(setupOptions))
+                {
+                    setupContext.Database.EnsureCreated();
+                }
+
+                var draft = CreateDraft();
+                var apiClient = new StubERacuniApiClient
+                {
+                    LookupResultToReturn = ERacuniInvoiceLookupResult.NotFound(),
+                    BlockFirstCreate = true
+                };
+                var firstService = CreateService(
+                    "Submit",
+                    new StubInvoiceDraftBuilder(draft),
+                    new StubERacuniInvoiceRequestFactory(),
+                    apiClient);
+                var secondService = CreateService(
+                    "Submit",
+                    new StubInvoiceDraftBuilder(draft),
+                    new StubERacuniInvoiceRequestFactory(),
+                    apiClient);
+
+                var firstTask = Task.Run(() =>
+                {
+                    using var firstContext = new OCPPCoreContext(setupOptions);
+                    firstService.HandleCompletedReservation(firstContext, new ChargePaymentReservation(), new Transaction(), new Session());
+                });
+
+                Assert.True(apiClient.FirstCreateEntered.Wait(TimeSpan.FromSeconds(10)), "First provider create was not reached.");
+
+                Exception secondError;
+                try
+                {
+                    using var secondContext = new OCPPCoreContext(setupOptions);
+                    secondError = Record.Exception(() =>
+                        secondService.HandleCompletedReservation(secondContext, new ChargePaymentReservation(), new Transaction(), new Session()));
+                }
+                finally
+                {
+                    apiClient.ReleaseFirstCreate.Set();
+                }
+
+                await firstTask;
+
+                var inProgress = Assert.IsAssignableFrom<InvalidOperationException>(secondError);
+                Assert.Contains("in progress", inProgress.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(1, apiClient.CreateCount);
+            }
+            finally
+            {
+                if (File.Exists(databasePath)) File.Delete(databasePath);
+                if (File.Exists(databasePath + "-shm")) File.Delete(databasePath + "-shm");
+                if (File.Exists(databasePath + "-wal")) File.Delete(databasePath + "-wal");
+            }
+        }
+
+        [Fact]
         public void HandleCompletedReservation_UsesProviderLookupBeforeRetryingUnknownAttempt()
         {
             var draft = CreateDraft();
@@ -136,6 +260,60 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("Submitted", audit.Status);
             Assert.Equal("recovered-doc", audit.ExternalDocumentId);
             Assert.Equal("INV-RECOVERED", audit.ExternalInvoiceNumber);
+        }
+
+        [Fact]
+        public void RecoverCompletedReservation_FailsClosed_WhenInitialProviderLookupIsUnknown()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient
+            {
+                LookupResultToReturn = ERacuniInvoiceLookupResult.Unknown("synthetic ambiguous response")
+            };
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                service.RecoverCompletedReservation(
+                    dbContext,
+                    new ChargePaymentReservation(),
+                    new Transaction(),
+                    new Session()));
+
+            Assert.Contains("unknown", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(1, apiClient.LookupCount);
+            Assert.Equal(0, apiClient.CreateCount);
+            Assert.Equal("ProviderUnknown", Assert.Single(dbContext.InvoiceSubmissionLogs).Status);
+        }
+
+        [Fact]
+        public void RecoverCompletedReservation_CreatesOnlyAfterDefinitiveInitialNotFound()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient
+            {
+                LookupResultToReturn = ERacuniInvoiceLookupResult.NotFound()
+            };
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            service.RecoverCompletedReservation(
+                dbContext,
+                new ChargePaymentReservation(),
+                new Transaction(),
+                new Session());
+
+            Assert.Equal(1, apiClient.LookupCount);
+            Assert.Equal(1, apiClient.CreateCount);
+            Assert.Equal("Submitted", Assert.Single(dbContext.InvoiceSubmissionLogs).Status);
         }
 
         [Fact]
@@ -338,15 +516,29 @@ namespace OCPP.Core.Server.Tests
 
         private sealed class StubERacuniApiClient : IERacuniApiClient
         {
-            public int CreateCount { get; private set; }
-            public int LookupCount { get; private set; }
+            private int _createCount;
+            private int _lookupCount;
+
+            public int CreateCount => Volatile.Read(ref _createCount);
+            public int LookupCount => Volatile.Read(ref _lookupCount);
             public ERacuniApiResult? ResultToReturn { get; set; }
             public ERacuniInvoiceLookupResult? LookupResultToReturn { get; set; }
             public Exception? CreateException { get; set; }
+            public bool BlockFirstCreate { get; set; }
+            public ManualResetEventSlim FirstCreateEntered { get; } = new(false);
+            public ManualResetEventSlim ReleaseFirstCreate { get; } = new(false);
 
             public ERacuniApiResult CreateSalesInvoice(ERacuniApiRequestEnvelope request)
             {
-                CreateCount++;
+                var createNumber = Interlocked.Increment(ref _createCount);
+                if (BlockFirstCreate && createNumber == 1)
+                {
+                    FirstCreateEntered.Set();
+                    if (!ReleaseFirstCreate.Wait(TimeSpan.FromSeconds(10)))
+                    {
+                        throw new TimeoutException("Synthetic first provider create was not released.");
+                    }
+                }
                 if (CreateException != null)
                 {
                     throw CreateException;
@@ -362,7 +554,7 @@ namespace OCPP.Core.Server.Tests
 
             public ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request)
             {
-                LookupCount++;
+                Interlocked.Increment(ref _lookupCount);
                 return LookupResultToReturn ?? ERacuniInvoiceLookupResult.Unknown("Synthetic lookup was not configured.");
             }
         }

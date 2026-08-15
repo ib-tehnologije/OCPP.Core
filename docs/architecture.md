@@ -88,7 +88,7 @@ Locations: `OCPP.Core.Server.Tests/`, `OCPP.Core.Test/`, `Simulators/`
 5. After checkout confirmation, server code requests charger start through the live OCPP session and updates reservation/transaction state.
 6. Public status pages poll server payment status and can request stop or R1 invoice data.
 7. When a newly terminal reservation still owns an uncaptured authorization, the server persists an armed release state before provider work. Webhooks and the cleanup sweep converge on the same strict, idempotent reconciler; retry state survives restarts and historical unarmed rows stay outside the workflow.
-8. Exceptional financial recovery is isolated in `OCPP.Core.Recovery`. A manifest allowlists exact reservations, assessors fail closed on incomplete persisted evidence, and execute mode requires the exact manifest digest. Settlement reuses the payment coordinator while suppressing customer side effects; authorization release reuses the durable reconciler; invoice recovery uses a unique submission lineage and exact provider-reference lookup before create.
+8. Exceptional financial recovery is isolated in `OCPP.Core.Recovery`. A manifest allowlists exact reservations, assessors fail closed on incomplete persisted evidence, and execute mode requires the exact manifest digest. Settlement reuses the payment coordinator while suppressing customer side effects; authorization release reuses the durable reconciler; invoice recovery uses a unique submission lineage, a time-bounded database lease, and exact provider-reference lookup before create.
 
 ### Database Flow
 

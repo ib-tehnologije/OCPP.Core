@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -14,10 +15,13 @@ namespace OCPP.Core.Server.Payments.Invoices
     public interface IInvoiceIntegrationService
     {
         void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession);
+        void RecoverCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession) =>
+            HandleCompletedReservation(dbContext, reservation, transaction, checkoutSession);
     }
 
     public class InvoiceIntegrationService : IInvoiceIntegrationService
     {
+        private static readonly TimeSpan SubmissionLeaseDuration = TimeSpan.FromMinutes(5);
         private readonly InvoiceIntegrationOptions _options;
         private readonly IInvoiceDraftBuilder _draftBuilder;
         private readonly IERacuniInvoiceRequestFactory _eracuniRequestFactory;
@@ -40,6 +44,41 @@ namespace OCPP.Core.Server.Payments.Invoices
 
         public void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
         {
+            HandleCompletedReservationCore(
+                dbContext,
+                reservation,
+                transaction,
+                checkoutSession,
+                requireProviderPreflight: false);
+        }
+
+        public void RecoverCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
+        {
+            if (!_options.Enabled)
+            {
+                throw new InvalidOperationException("Invoice integration is disabled.");
+            }
+
+            if (!string.Equals((_options.Mode ?? string.Empty).Trim(), "Submit", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Invoice recovery requires submit mode.");
+            }
+
+            HandleCompletedReservationCore(
+                dbContext,
+                reservation,
+                transaction,
+                checkoutSession,
+                requireProviderPreflight: true);
+        }
+
+        private void HandleCompletedReservationCore(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            Transaction transaction,
+            Session checkoutSession,
+            bool requireProviderPreflight)
+        {
             if (!_options.Enabled || reservation == null || transaction == null)
             {
                 return;
@@ -50,6 +89,7 @@ namespace OCPP.Core.Server.Payments.Invoices
             var provider = (_options.Provider ?? "ERacuni").Trim();
             var auditLog = CreateAuditLog(draft, reservation, provider, mode);
             var providerCallStarted = false;
+            var providerLookupCompleted = false;
 
             _logger.LogInformation(
                 "Invoice/Integration => Prepared draft provider={Provider} mode={Mode} reservation={ReservationId} transaction={TransactionId} kind={InvoiceKind} total={TotalAmount} currency={Currency} lines={LineCount}",
@@ -104,9 +144,17 @@ namespace OCPP.Core.Server.Payments.Invoices
                     return;
                 }
 
-                var existing = dbContext?.InvoiceSubmissionLogs
-                    .OrderByDescending(log => log.CreatedAtUtc)
-                    .FirstOrDefault(log => log.SubmissionKey == auditLog.SubmissionKey);
+                if (dbContext == null)
+                {
+                    throw new InvalidOperationException("Submit mode requires a durable invoice submission database context.");
+                }
+
+                if (HasSubmittedOrExternalHistory(dbContext, auditLog))
+                {
+                    return;
+                }
+
+                var existing = FindOrAdoptExistingLineage(dbContext, auditLog);
                 if (existing != null)
                 {
                     auditLog = existing;
@@ -117,14 +165,21 @@ namespace OCPP.Core.Server.Payments.Invoices
                         return;
                     }
 
+                    if (HasActiveSubmissionLease(auditLog, DateTime.UtcNow))
+                    {
+                        throw new InvoiceSubmissionInProgressException();
+                    }
+
                     var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
                         BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    providerLookupCompleted = true;
                     if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
                     {
                         ApplyProviderResult(auditLog, lookup.ProviderResult);
                         auditLog.Status = "Submitted";
                         auditLog.CompletedAtUtc = DateTime.UtcNow;
                         auditLog.Error = null;
+                        ClearSubmissionLease(auditLog);
                         PersistAuditLog(dbContext, auditLog);
                         return;
                     }
@@ -134,6 +189,66 @@ namespace OCPP.Core.Server.Payments.Invoices
                         auditLog.Status = "ProviderUnknown";
                         auditLog.CompletedAtUtc = DateTime.UtcNow;
                         auditLog.Error = Truncate(lookup.Error, 4000);
+                        ClearSubmissionLease(auditLog);
+                        PersistAuditLog(dbContext, auditLog);
+                        throw new InvalidOperationException(
+                            "Invoice provider state is unknown; create was not attempted.");
+                    }
+
+                    if (!TryAcquireSubmissionLease(dbContext, auditLog, DateTime.UtcNow))
+                    {
+                        throw new InvoiceSubmissionInProgressException();
+                    }
+                }
+                else
+                {
+                    auditLog.Status = "Submitting";
+                    auditLog.CompletedAtUtc = null;
+                    auditLog.Error = null;
+                    SetSubmissionLease(auditLog, DateTime.UtcNow);
+                    try
+                    {
+                        PersistAuditLog(dbContext, auditLog);
+                    }
+                    catch (DbUpdateException)
+                    {
+                        dbContext.Entry(auditLog).State = EntityState.Detached;
+                        var winner = dbContext.InvoiceSubmissionLogs
+                            .AsNoTracking()
+                            .SingleOrDefault(log => log.SubmissionKey == auditLog.SubmissionKey);
+                        if (winner != null &&
+                            (string.Equals(winner.Status, "Submitted", StringComparison.OrdinalIgnoreCase) ||
+                             !string.IsNullOrWhiteSpace(winner.ExternalDocumentId) ||
+                             !string.IsNullOrWhiteSpace(winner.ExternalInvoiceNumber)))
+                        {
+                            return;
+                        }
+
+                        throw new InvoiceSubmissionInProgressException();
+                    }
+                }
+
+                if (requireProviderPreflight && !providerLookupCompleted)
+                {
+                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
+                        BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
+                    {
+                        ApplyProviderResult(auditLog, lookup.ProviderResult);
+                        auditLog.Status = "Submitted";
+                        auditLog.CompletedAtUtc = DateTime.UtcNow;
+                        auditLog.Error = null;
+                        ClearSubmissionLease(auditLog);
+                        PersistAuditLog(dbContext, auditLog);
+                        return;
+                    }
+
+                    if (lookup.Outcome != ERacuniInvoiceLookupOutcome.NotFound)
+                    {
+                        auditLog.Status = "ProviderUnknown";
+                        auditLog.CompletedAtUtc = DateTime.UtcNow;
+                        auditLog.Error = Truncate(lookup.Error, 4000);
+                        ClearSubmissionLease(auditLog);
                         PersistAuditLog(dbContext, auditLog);
                         throw new InvalidOperationException(
                             "Invoice provider state is unknown; create was not attempted.");
@@ -154,12 +269,14 @@ namespace OCPP.Core.Server.Payments.Invoices
                     auditLog.Status = "Failed";
                     auditLog.CompletedAtUtc = DateTime.UtcNow;
                     auditLog.Error = BuildFailureMessage(result);
+                    ClearSubmissionLease(auditLog);
                     PersistAuditLog(dbContext, auditLog);
                     throw new InvalidOperationException(auditLog.Error);
                 }
 
                 auditLog.Status = "Submitted";
                 auditLog.CompletedAtUtc = DateTime.UtcNow;
+                ClearSubmissionLease(auditLog);
                 PersistAuditLog(dbContext, auditLog);
 
                 _logger.LogInformation(
@@ -167,6 +284,10 @@ namespace OCPP.Core.Server.Payments.Invoices
                     draft.ReservationId,
                     (int)result.StatusCode,
                     result.Body);
+            }
+            catch (InvoiceSubmissionInProgressException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -183,6 +304,7 @@ namespace OCPP.Core.Server.Payments.Invoices
 
                 auditLog.CompletedAtUtc ??= DateTime.UtcNow;
                 auditLog.Error = Truncate(ex.ToString(), 4000);
+                ClearSubmissionLease(auditLog);
                 PersistAuditLog(dbContext, auditLog);
                 throw;
             }
@@ -280,6 +402,120 @@ namespace OCPP.Core.Server.Payments.Invoices
             }
 
             return $"{provider.Trim()}:{apiTransactionId.Trim()}";
+        }
+
+        private static bool HasSubmittedOrExternalHistory(
+            OCPPCoreContext dbContext,
+            InvoiceSubmissionLog candidate)
+        {
+            return dbContext.InvoiceSubmissionLogs.AsNoTracking().Any(log =>
+                (log.ReservationId == candidate.ReservationId ||
+                 (!string.IsNullOrWhiteSpace(candidate.ApiTransactionId) &&
+                  log.ApiTransactionId == candidate.ApiTransactionId)) &&
+                (log.Status == "Submitted" ||
+                 log.ExternalDocumentId != null ||
+                 log.ExternalInvoiceNumber != null ||
+                 log.ExternalPublicUrl != null ||
+                 log.ExternalPdfUrl != null));
+        }
+
+        private static InvoiceSubmissionLog FindOrAdoptExistingLineage(
+            OCPPCoreContext dbContext,
+            InvoiceSubmissionLog candidate)
+        {
+            var exact = dbContext.InvoiceSubmissionLogs
+                .OrderByDescending(log => log.CreatedAtUtc)
+                .FirstOrDefault(log => log.SubmissionKey == candidate.SubmissionKey);
+            if (exact != null)
+            {
+                return exact;
+            }
+
+            var historical = dbContext.InvoiceSubmissionLogs
+                .Where(log => log.SubmissionKey == null &&
+                    (log.ReservationId == candidate.ReservationId ||
+                     (!string.IsNullOrWhiteSpace(candidate.ApiTransactionId) &&
+                      log.ApiTransactionId == candidate.ApiTransactionId)))
+                .OrderByDescending(log => log.CreatedAtUtc)
+                .Take(2)
+                .ToList();
+            if (historical.Count > 1)
+            {
+                throw new InvalidOperationException(
+                    "Multiple historical invoice submission lineages require manual reconciliation.");
+            }
+
+            var adopted = historical.SingleOrDefault();
+            if (adopted == null)
+            {
+                return null;
+            }
+
+            adopted.SubmissionKey = candidate.SubmissionKey;
+            adopted.ApiTransactionId ??= candidate.ApiTransactionId;
+            PersistAuditLog(dbContext, adopted);
+            return adopted;
+        }
+
+        private static bool HasActiveSubmissionLease(InvoiceSubmissionLog auditLog, DateTime nowUtc) =>
+            !string.IsNullOrWhiteSpace(auditLog?.SubmissionLeaseId) &&
+            auditLog.SubmissionLeaseExpiresAtUtc.HasValue &&
+            auditLog.SubmissionLeaseExpiresAtUtc.Value > nowUtc;
+
+        private static bool TryAcquireSubmissionLease(
+            OCPPCoreContext dbContext,
+            InvoiceSubmissionLog auditLog,
+            DateTime nowUtc)
+        {
+            var leaseId = Guid.NewGuid().ToString("N");
+            var leaseExpiresAtUtc = nowUtc.Add(SubmissionLeaseDuration);
+            if (!dbContext.Database.IsRelational())
+            {
+                if (HasActiveSubmissionLease(auditLog, nowUtc))
+                {
+                    return false;
+                }
+
+                auditLog.SubmissionLeaseId = leaseId;
+                auditLog.SubmissionLeaseExpiresAtUtc = leaseExpiresAtUtc;
+                auditLog.Status = "Submitting";
+                auditLog.CompletedAtUtc = null;
+                auditLog.Error = null;
+                PersistAuditLog(dbContext, auditLog);
+                return true;
+            }
+
+            var affected = dbContext.InvoiceSubmissionLogs
+                .Where(log => log.InvoiceSubmissionLogId == auditLog.InvoiceSubmissionLogId &&
+                    (log.SubmissionLeaseId == null ||
+                     !log.SubmissionLeaseExpiresAtUtc.HasValue ||
+                     log.SubmissionLeaseExpiresAtUtc <= nowUtc))
+                .ExecuteUpdate(setters => setters
+                    .SetProperty(log => log.SubmissionLeaseId, leaseId)
+                    .SetProperty(log => log.SubmissionLeaseExpiresAtUtc, leaseExpiresAtUtc)
+                    .SetProperty(log => log.Status, "Submitting")
+                    .SetProperty(log => log.CompletedAtUtc, (DateTime?)null)
+                    .SetProperty(log => log.Error, (string)null));
+            if (affected != 1)
+            {
+                return false;
+            }
+
+            dbContext.Entry(auditLog).Reload();
+            return string.Equals(auditLog.SubmissionLeaseId, leaseId, StringComparison.Ordinal);
+        }
+
+        private static void SetSubmissionLease(InvoiceSubmissionLog auditLog, DateTime nowUtc)
+        {
+            auditLog.SubmissionLeaseId = Guid.NewGuid().ToString("N");
+            auditLog.SubmissionLeaseExpiresAtUtc = nowUtc.Add(SubmissionLeaseDuration);
+        }
+
+        private static void ClearSubmissionLease(InvoiceSubmissionLog auditLog)
+        {
+            if (auditLog == null) return;
+            auditLog.SubmissionLeaseId = null;
+            auditLog.SubmissionLeaseExpiresAtUtc = null;
         }
 
         private static ERacuniApiRequestEnvelope BuildLookupRequest(
@@ -407,5 +643,13 @@ namespace OCPP.Core.Server.Payments.Invoices
             string ProductCode,
             string EnvironmentVariable,
             string ConfigPath);
+
+        private sealed class InvoiceSubmissionInProgressException : InvalidOperationException
+        {
+            public InvoiceSubmissionInProgressException()
+                : base("Invoice submission is already in progress for this deterministic lineage.")
+            {
+            }
+        }
     }
 }

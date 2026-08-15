@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Extensions.Logging;
 using OCPP.Core.Database;
 
 namespace OCPP.Core.Server.Payments.Recovery
@@ -7,7 +8,14 @@ namespace OCPP.Core.Server.Payments.Recovery
     {
         public static FinancialRecoverySettlementDecision Assess(
             ChargePaymentReservation reservation,
-            Transaction transaction)
+            Transaction transaction) =>
+            Assess(reservation, transaction, new PaymentFlowOptions());
+
+        public static FinancialRecoverySettlementDecision Assess(
+            ChargePaymentReservation reservation,
+            Transaction transaction,
+            PaymentFlowOptions flowOptions,
+            ILogger logger = null)
         {
             if (reservation == null)
             {
@@ -24,9 +32,26 @@ namespace OCPP.Core.Server.Payments.Recovery
                 return Blocked("Reservation transaction link does not match the supplied transaction.");
             }
 
+            if (!string.Equals(reservation.Status, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase))
+            {
+                return Blocked("Recovery settlement requires a failed terminal reservation.");
+            }
+
             if (!transaction.StopTime.HasValue || transaction.StopTime.Value < transaction.StartTime)
             {
                 return Blocked("Transaction stop time is missing or precedes its start time.");
+            }
+
+            if (!reservation.StopTransactionAtUtc.HasValue ||
+                reservation.StopTransactionAtUtc.Value != transaction.StopTime.Value)
+            {
+                return Blocked("Reservation stop evidence is missing or contradicts the linked transaction.");
+            }
+
+            if (!reservation.DisconnectedAtUtc.HasValue ||
+                reservation.DisconnectedAtUtc.Value < transaction.StopTime.Value)
+            {
+                return Blocked("Final disconnect evidence is missing or precedes the transaction stop.");
             }
 
             if (!transaction.MeterStop.HasValue)
@@ -63,34 +88,45 @@ namespace OCPP.Core.Server.Payments.Recovery
                 return Blocked("Persisted reservation energy contradicts transaction meter evidence.");
             }
 
-            var energyCostCents = ToCents(reservation.PricePerKwh * Convert.ToDecimal(energyKwh));
-            var sessionFeeCents = energyKwh > 0 ? ToCents(reservation.UserSessionFee) : 0;
-            var usageFeeCents = ToCents(reservation.UsageFeePerMinute * transaction.UsageFeeMinutes);
-            var idleFeeCents = ToCents(transaction.IdleUsageFeeAmount);
-            var totalCents = checked(energyCostCents + sessionFeeCents + usageFeeCents + idleFeeCents);
-
-            if (reservation.CapturedAmountCents.HasValue && reservation.CapturedAmountCents.Value > 0 &&
-                reservation.CapturedAmountCents.Value != totalCents)
+            if (reservation.CapturedAtUtc.HasValue || reservation.CapturedAmountCents.GetValueOrDefault() > 0)
             {
-                return Blocked("Persisted captured amount contradicts the derived billable total.");
+                return Blocked("Recovery settlement refuses a reservation with captured funds.");
+            }
+
+            var calculation = FinancialSettlementCalculator.Calculate(
+                reservation,
+                transaction,
+                flowOptions,
+                reservation.DisconnectedAtUtc.Value,
+                logger);
+            if (!calculation.HasValidDeliveredEnergy || calculation.ShouldNoChargeForDeliveredEnergy)
+            {
+                return Blocked(calculation.DeliveredEnergyNoChargeReason ?? "Delivered energy is not billable.");
+            }
+
+            if (calculation.AmountToCaptureCents <= 0)
+            {
+                return Blocked("Derived billable amount is not positive.");
+            }
+
+            if (calculation.MinimumChargeAmountCents > 0 &&
+                calculation.AmountToCaptureCents < calculation.MinimumChargeAmountCents)
+            {
+                return Blocked("Derived billable amount is below the configured minimum capture amount.");
             }
 
             return new FinancialRecoverySettlementDecision
             {
                 Eligible = true,
-                EnergyKwh = energyKwh,
-                EnergyCostCents = energyCostCents,
-                SessionFeeCents = sessionFeeCents,
-                UsageFeeCents = usageFeeCents,
-                IdleFeeCents = idleFeeCents,
-                TotalCents = totalCents
+                EnergyKwh = calculation.ActualEnergyKwh,
+                EnergyCostCents = calculation.EnergyCostCents,
+                SessionFeeCents = calculation.SessionFeeCents,
+                UsageFeeMinutes = calculation.UsageFeeMinutes,
+                UsageFeeCents = calculation.UsageFeeCents,
+                IdleFeeCents = reservation.UsageFeeAnchorMinutes == 1 ? calculation.UsageFeeCents : 0,
+                TotalCents = calculation.AmountToCaptureCents,
+                Calculation = calculation
             };
-        }
-
-        private static long ToCents(decimal amount)
-        {
-            var rounded = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
-            return checked((long)Math.Round(rounded * 100m, 0, MidpointRounding.AwayFromZero));
         }
 
         private static FinancialRecoverySettlementDecision Blocked(string reason) => new()
@@ -107,8 +143,10 @@ namespace OCPP.Core.Server.Payments.Recovery
         public double EnergyKwh { get; set; }
         public long EnergyCostCents { get; set; }
         public long SessionFeeCents { get; set; }
+        public int UsageFeeMinutes { get; set; }
         public long UsageFeeCents { get; set; }
         public long IdleFeeCents { get; set; }
         public long TotalCents { get; set; }
+        internal FinancialSettlementCalculation Calculation { get; set; }
     }
 }
