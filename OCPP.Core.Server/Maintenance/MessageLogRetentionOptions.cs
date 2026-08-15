@@ -6,7 +6,9 @@ namespace OCPP.Core.Server.Maintenance
     internal sealed class MessageLogRetentionOptions
     {
         internal const string SectionName = "Maintenance:MessageLogRetention";
+        internal const int MaximumRetentionDays = 36500;
         internal const int MaximumBatchSize = 1000;
+        internal const int MaximumCleanupIntervalMinutes = 1440;
 
         private MessageLogRetentionOptions(
             bool enabled,
@@ -41,7 +43,7 @@ namespace OCPP.Core.Server.Maintenance
                     "RetentionDays",
                     30,
                     1,
-                    int.MaxValue,
+                    MaximumRetentionDays,
                     out int retentionDays,
                     out error) ||
                 !TryInteger(
@@ -57,7 +59,7 @@ namespace OCPP.Core.Server.Maintenance
                     "CleanupIntervalMinutes",
                     60,
                     1,
-                    int.MaxValue,
+                    MaximumCleanupIntervalMinutes,
                     out int cleanupIntervalMinutes,
                     out error))
             {

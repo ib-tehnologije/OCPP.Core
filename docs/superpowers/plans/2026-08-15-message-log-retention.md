@@ -13,9 +13,12 @@
 - `Maintenance:MessageLogRetention:Enabled` defaults to `false`.
 - `Maintenance:MessageLogRetention:DryRun` defaults to `true`.
 - Retention defaults to exactly `30` days; only `LogTime < cutoff` is eligible.
+- Retention days must remain between `1` and `36500` so cutoff arithmetic is
+  representable.
 - Batch size defaults to `1000` and must remain between `1` and `1000` so the
   selected-identifier delete remains below SQL Server's parameter limit.
-- Cleanup interval defaults to `60` minutes and must be positive.
+- Cleanup interval defaults to `60` minutes and must remain between `1` and
+  `1440`.
 - Explicit invalid configuration fails closed without database access.
 - Every deletion batch commits independently and is ordered by `LogTime`, then `LogId`.
 - Never delete or mutate transactions, payments, invoices, reservations, connector state, or audit evidence.
@@ -65,9 +68,11 @@ public void TryRead_UsesDisabledDryRunThirtyDayDefaults()
 [Theory]
 [InlineData("RetentionDays", "0")]
 [InlineData("RetentionDays", "abc")]
+[InlineData("RetentionDays", "36501")]
 [InlineData("BatchSize", "0")]
 [InlineData("BatchSize", "1001")]
 [InlineData("CleanupIntervalMinutes", "0")]
+[InlineData("CleanupIntervalMinutes", "1441")]
 [InlineData("Enabled", "not-bool")]
 public void TryRead_RejectsMalformedOrUnsafeValues(string key, string value)
 {
@@ -110,7 +115,9 @@ the raw value.
 internal sealed class MessageLogRetentionOptions
 {
     internal const string SectionName = "Maintenance:MessageLogRetention";
+    internal const int MaximumRetentionDays = 36500;
     internal const int MaximumBatchSize = 1000;
+    internal const int MaximumCleanupIntervalMinutes = 1440;
 
     private MessageLogRetentionOptions(
         bool enabled,
@@ -140,11 +147,12 @@ internal sealed class MessageLogRetentionOptions
         IConfigurationSection section = configuration.GetSection(SectionName);
         if (!TryBoolean(section, "Enabled", false, out bool enabled, out error) ||
             !TryBoolean(section, "DryRun", true, out bool dryRun, out error) ||
-            !TryInteger(section, "RetentionDays", 30, 1, int.MaxValue,
+            !TryInteger(section, "RetentionDays", 30, 1, MaximumRetentionDays,
                 out int retentionDays, out error) ||
             !TryInteger(section, "BatchSize", 1000, 1, MaximumBatchSize,
                 out int batchSize, out error) ||
-            !TryInteger(section, "CleanupIntervalMinutes", 60, 1, int.MaxValue,
+            !TryInteger(section, "CleanupIntervalMinutes", 60, 1,
+                MaximumCleanupIntervalMinutes,
                 out int cleanupIntervalMinutes, out error))
         {
             options = null;

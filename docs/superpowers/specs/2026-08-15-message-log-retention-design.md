@@ -27,10 +27,11 @@ Add the following keys under `Maintenance:MessageLogRetention`:
 
 - `Enabled`: defaults to `false`.
 - `DryRun`: defaults to `true`.
-- `RetentionDays`: defaults to `30` and must be positive.
+- `RetentionDays`: defaults to `30` and must be between `1` and `36500`.
 - `BatchSize`: defaults to `1000` and must be between `1` and `1000`, keeping
   selected-identifier deletes below SQL Server's parameter limit.
-- `CleanupIntervalMinutes`: defaults to `60` and must be positive.
+- `CleanupIntervalMinutes`: defaults to `60` and must be between `1` and
+  `1440`.
 
 Missing values use these safe defaults. Explicit malformed or out-of-range
 values fail closed: the service logs a sanitized configuration error and does

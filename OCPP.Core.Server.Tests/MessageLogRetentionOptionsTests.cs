@@ -56,9 +56,11 @@ namespace OCPP.Core.Server.Tests
         [Theory]
         [InlineData("RetentionDays", "0")]
         [InlineData("RetentionDays", "abc")]
+        [InlineData("RetentionDays", "36501")]
         [InlineData("BatchSize", "0")]
         [InlineData("BatchSize", "1001")]
         [InlineData("CleanupIntervalMinutes", "0")]
+        [InlineData("CleanupIntervalMinutes", "1441")]
         [InlineData("Enabled", "not-bool")]
         [InlineData("DryRun", "not-bool")]
         public void TryRead_RejectsMalformedOrUnsafeValues(string key, string value)

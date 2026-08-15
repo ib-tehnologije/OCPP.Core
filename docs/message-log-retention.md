@@ -13,9 +13,9 @@ All keys are under `Maintenance:MessageLogRetention`.
 | --- | --- | --- | --- |
 | `Enabled` | `false` | `true` or `false` | Enables periodic assessment. |
 | `DryRun` | `true` | `true` or `false` | Reports candidates without deletion when `true`. |
-| `RetentionDays` | `30` | positive integer | Rows with `LogTime` strictly older than the fixed UTC cutoff are eligible. |
+| `RetentionDays` | `30` | `1` through `36500` | Rows with `LogTime` strictly older than the fixed UTC cutoff are eligible. |
 | `BatchSize` | `1000` | `1` through `1000` | Maximum selected identifiers in one delete operation. |
-| `CleanupIntervalMinutes` | `60` | positive integer | Delay before the first sweep and between later sweeps. |
+| `CleanupIntervalMinutes` | `60` | `1` through `1440` | Delay before the first sweep and between later sweeps. |
 
 An explicit malformed or out-of-range value disables the service. It is not
 clamped. Environment-variable names use double underscores, for example
