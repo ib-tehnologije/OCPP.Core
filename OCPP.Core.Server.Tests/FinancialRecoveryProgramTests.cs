@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
 using Xunit;
@@ -70,9 +71,13 @@ namespace OCPP.Core.Server.Tests
 
     public sealed class FinancialRecoveryProgramScenario : IDisposable
     {
+        private const string SentinelSqlServerConnectionString = "Server=127.0.0.1,1;Database=financial_recovery_sentinel;User Id=sentinel;Password=sentinel;Connect Timeout=1";
         private const string SqlServerConnectionStringVariable = "ConnectionStrings__SqlServer";
         private const string SqliteConnectionStringVariable = "ConnectionStrings__SQLite";
+        private const string SqlServerConnectionStringOverride = " ";
+        private const string StripeEnabledVariable = "Stripe__Enabled";
         private const string StripeUseMockServicesVariable = "Stripe__UseMockServices";
+        private const string InvoicesEnabledVariable = "Invoices__Enabled";
         private readonly string _temporaryDirectory;
         private readonly string _databasePath;
         private readonly string _manifestPath;
@@ -85,6 +90,15 @@ namespace OCPP.Core.Server.Tests
             _databasePath = Path.Combine(_temporaryDirectory, "recovery.sqlite");
             _manifestPath = Path.Combine(_temporaryDirectory, "manifest.json");
             File.WriteAllText(_manifestPath, manifestJson);
+            File.WriteAllText(
+                Path.Combine(_temporaryDirectory, "appsettings.json"),
+                $$"""
+                {
+                  "ConnectionStrings": {
+                    "SqlServer": "{{SentinelSqlServerConnectionString}}"
+                  }
+                }
+                """);
 
             using var context = CreateContext();
             context.Database.EnsureCreated();
@@ -139,7 +153,10 @@ namespace OCPP.Core.Server.Tests
             var originalError = Console.Error;
             var originalSqlServerConnectionString = Environment.GetEnvironmentVariable(SqlServerConnectionStringVariable);
             var originalSqliteConnectionString = Environment.GetEnvironmentVariable(SqliteConnectionStringVariable);
+            var originalStripeEnabled = Environment.GetEnvironmentVariable(StripeEnabledVariable);
             var originalStripeUseMockServices = Environment.GetEnvironmentVariable(StripeUseMockServicesVariable);
+            var originalInvoicesEnabled = Environment.GetEnvironmentVariable(InvoicesEnabledVariable);
+            var originalCurrentDirectory = Environment.CurrentDirectory;
             using var standardOut = new StringWriter(CultureInfo.InvariantCulture);
             using var standardError = new StringWriter(CultureInfo.InvariantCulture);
 
@@ -147,9 +164,30 @@ namespace OCPP.Core.Server.Tests
             {
                 Console.SetOut(standardOut);
                 Console.SetError(standardError);
-                Environment.SetEnvironmentVariable(SqlServerConnectionStringVariable, string.Empty);
+                Directory.SetCurrentDirectory(_temporaryDirectory);
+                Assert.Equal(
+                    SentinelSqlServerConnectionString,
+                    new ConfigurationBuilder()
+                        .SetBasePath(Directory.GetCurrentDirectory())
+                        .AddJsonFile("appsettings.json")
+                        .Build()
+                        .GetConnectionString("SqlServer"));
+
+                Environment.SetEnvironmentVariable(SqlServerConnectionStringVariable, SqlServerConnectionStringOverride);
                 Environment.SetEnvironmentVariable(SqliteConnectionStringVariable, $"Data Source={_databasePath}");
+                Environment.SetEnvironmentVariable(StripeEnabledVariable, "false");
                 Environment.SetEnvironmentVariable(StripeUseMockServicesVariable, "true");
+                Environment.SetEnvironmentVariable(InvoicesEnabledVariable, "false");
+
+                var configuration = new ConfigurationBuilder()
+                    .SetBasePath(Directory.GetCurrentDirectory())
+                    .AddJsonFile("appsettings.json")
+                    .AddEnvironmentVariables()
+                    .Build();
+                Assert.Equal(SqlServerConnectionStringOverride, configuration.GetConnectionString("SqlServer"));
+                Assert.Equal($"Data Source={_databasePath}", configuration.GetConnectionString("SQLite"));
+                Assert.False(configuration.GetValue<bool>("Stripe:Enabled"));
+                Assert.False(configuration.GetValue<bool>("Invoices:Enabled"));
 
                 var exitCode = OCPP.Core.Recovery.Program.Main(new[] { "--manifest", _manifestPath });
                 return new FinancialRecoveryProgramResult(exitCode, standardOut.ToString(), standardError.ToString());
@@ -158,9 +196,12 @@ namespace OCPP.Core.Server.Tests
             {
                 Console.SetOut(originalOut);
                 Console.SetError(originalError);
+                Directory.SetCurrentDirectory(originalCurrentDirectory);
                 Environment.SetEnvironmentVariable(SqlServerConnectionStringVariable, originalSqlServerConnectionString);
                 Environment.SetEnvironmentVariable(SqliteConnectionStringVariable, originalSqliteConnectionString);
+                Environment.SetEnvironmentVariable(StripeEnabledVariable, originalStripeEnabled);
                 Environment.SetEnvironmentVariable(StripeUseMockServicesVariable, originalStripeUseMockServices);
+                Environment.SetEnvironmentVariable(InvoicesEnabledVariable, originalInvoicesEnabled);
             }
         }
 
