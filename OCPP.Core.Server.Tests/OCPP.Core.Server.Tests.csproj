@@ -15,5 +15,6 @@
     <ProjectReference Include="..\OCPP.Core.Server\OCPP.Core.Server.csproj" />
     <ProjectReference Include="..\OCPP.Core.Database\OCPP.Core.Database.csproj" />
     <ProjectReference Include="..\OCPP.Core.Management\OCPP.Core.Management.csproj" />
+    <ProjectReference Include="..\OCPP.Core.Recovery\OCPP.Core.Recovery.csproj" />
   </ItemGroup>
 </Project>

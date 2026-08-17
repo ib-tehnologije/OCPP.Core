@@ -10,4 +10,7 @@
     <ProjectReference Include="..\OCPP.Core.Database\OCPP.Core.Database.csproj" />
     <ProjectReference Include="..\OCPP.Core.Server\OCPP.Core.Server.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OCPP.Core.Server.Tests" />
+  </ItemGroup>
 </Project>

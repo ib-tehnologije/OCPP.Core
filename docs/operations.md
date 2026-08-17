@@ -144,6 +144,8 @@ Management app:
 
 The `OCPP.Core.Recovery` command is not a background job and never scans for candidates. Store the real manifest outside the repository; each entry names exactly one reservation and one of `recover-settlement`, `release-authorization`, or `recover-invoice`.
 
+Before resolving services, the standalone command registers its built configuration with the service collection. Program-level tests cover both an empty-manifest dry-run and a synthetic invoice dry-run.
+
 1. Confirm the database migration is applied through the ordinary deployment process. The command does not migrate a database.
 2. Run without `--execute`. A dry-run performs local evidence checks only and prints a SHA-256 digest plus redacted reservation identifiers.
 3. Review every decision. Settlement requires exact linked terminal transaction, ordered timestamps, valid meter delta, non-negative pricing snapshots, and a positive derived billable amount. Authorization release requires a terminal unused reservation without transaction, energy, captured funds, or invoice evidence. Invoice recovery requires a completed captured reservation and linked transaction.
