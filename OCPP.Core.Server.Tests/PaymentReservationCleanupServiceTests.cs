@@ -248,10 +248,12 @@ namespace OCPP.Core.Server.Tests
                     ChargePointId = "CP-LATE",
                     ConnectorId = 1,
                     ChargeTagId = "TAG-LATE",
+                    OcppIdTag = "TAG-LATE",
                     StripeCheckoutSessionId = "sess_late_cleanup",
                     Status = PaymentReservationStatus.Pending,
                     Currency = "eur",
                     CreatedAtUtc = DateTime.UtcNow.AddHours(-2),
+                    StartDeadlineAtUtc = DateTime.UtcNow.AddHours(-1),
                     UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
                 });
                 db.SaveChanges();
@@ -891,6 +893,7 @@ namespace OCPP.Core.Server.Tests
         public List<(Guid ReservationId, string Trigger)> ReconcileCalls { get; } = new();
         public List<int> CompleteCalls { get; } = new();
         public string? ReconcileErrorToRecord { get; set; }
+        public string ReconcileOutcome { get; set; } = PaymentAuthorizationReleaseOutcome.SkippedNotEligible;
 
         public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) =>
             throw new NotImplementedException();
@@ -925,7 +928,7 @@ namespace OCPP.Core.Server.Tests
             }
             return new PaymentAuthorizationReleaseResult
             {
-                Outcome = PaymentAuthorizationReleaseOutcome.SkippedNotEligible
+                Outcome = ReconcileOutcome
             };
         }
 

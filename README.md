@@ -137,6 +137,17 @@ For local SQLite runs, the server uses `EnsureCreated()` at startup instead of a
 make sqlite-reset
 ```
 
+## Guarded financial recovery
+
+`OCPP.Core.Recovery` is an operator-only, allowlist-driven command for exceptional terminal settlement, authorization release, and invoice reconciliation. It is dry-run by default; mutation requires `--execute` plus the SHA-256 digest of the exact manifest. Keep real manifests outside the repository and start from the synthetic shape in `examples/financial-recovery-manifest.example.json`.
+
+```sh
+dotnet run --project OCPP.Core.Recovery -- --manifest /private/path/recovery.json
+dotnet run --project OCPP.Core.Recovery -- --manifest /private/path/recovery.json --execute --confirm-sha256 '<dry-run digest>'
+```
+
+Execution requires an operator-approved environment with the shared database and provider configuration. The command does not discover candidates, deploy code, apply migrations, or send recovery-completion customer notifications. See [Operations](docs/operations.md) for the mandatory evidence and preservation boundaries.
+
 ## Documentation Ownership
 
 Public technical documentation lives in this repository.

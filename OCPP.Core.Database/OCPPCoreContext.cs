@@ -283,6 +283,12 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.ApiTransactionId)
                     .HasMaxLength(100);
 
+                entity.Property(e => e.SubmissionKey)
+                    .HasMaxLength(200);
+
+                entity.Property(e => e.SubmissionLeaseId)
+                    .HasMaxLength(50);
+
                 entity.Property(e => e.StripeCheckoutSessionId)
                     .HasMaxLength(200);
 
@@ -315,6 +321,11 @@ namespace OCPP.Core.Database
 
                 entity.HasIndex(e => e.CreatedAtUtc)
                     .HasDatabaseName("IX_InvoiceSubmissionLog_Created");
+
+                entity.HasIndex(e => e.SubmissionKey)
+                    .IsUnique()
+                    .HasFilter("[SubmissionKey] IS NOT NULL")
+                    .HasDatabaseName("UX_InvoiceSubmissionLog_SubmissionKey");
             });
 
             modelBuilder.Entity<MessageLog>(entity =>
