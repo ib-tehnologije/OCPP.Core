@@ -25,6 +25,7 @@ internal static class Program
                 .AddEnvironmentVariables()
                 .Build();
             var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(configuration);
             new OCPP.Core.Server.Startup(configuration).ConfigureServices(services);
             using var provider = services.BuildServiceProvider();
             using var scope = provider.CreateScope();
