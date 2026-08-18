@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -321,6 +322,30 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(ERacuniInvoiceLookupResponseShape.NotAvailable, result.Diagnostics.ResponseShape);
         }
 
+        [Fact]
+        public void LookupSalesInvoiceByApiTransactionId_BoundsResponseBodyReadWithHttpClientTimeout()
+        {
+            var content = new CancellationAwareSlowHttpContent();
+            var handler = new RecordingHttpMessageHandler
+            {
+                Response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = content
+                }
+            };
+            var client = CreateClient(handler, TimeSpan.FromMilliseconds(100));
+            var stopwatch = Stopwatch.StartNew();
+
+            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+
+            stopwatch.Stop();
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.Transport, result.Diagnostics.FailureCategory);
+            Assert.Equal(200, result.Diagnostics.HttpStatusCode);
+            Assert.True(content.CancellationObserved);
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Lookup took {stopwatch.Elapsed}.");
+        }
+
         private static ERacuniApiRequestEnvelope CreateLookupRequest() => new()
         {
             Username = "api-user",
@@ -330,10 +355,18 @@ namespace OCPP.Core.Server.Tests
             Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
         };
 
-        private static ERacuniApiClient CreateClient(RecordingHttpMessageHandler handler)
+        private static ERacuniApiClient CreateClient(
+            RecordingHttpMessageHandler handler,
+            TimeSpan? timeout = null)
         {
+            var httpClient = new HttpClient(handler);
+            if (timeout.HasValue)
+            {
+                httpClient.Timeout = timeout.Value;
+            }
+
             return new ERacuniApiClient(
-                new StubHttpClientFactory(new HttpClient(handler)),
+                new StubHttpClientFactory(httpClient),
                 Options.Create(new InvoiceIntegrationOptions
                 {
                     ERacuni = new ERacuniInvoiceOptions { MinimumRequestIntervalMilliseconds = 0 }
@@ -392,6 +425,39 @@ namespace OCPP.Core.Server.Tests
             {
                 length = 0;
                 return false;
+            }
+        }
+
+        private sealed class CancellationAwareSlowHttpContent : HttpContent
+        {
+            public bool CancellationObserved { get; private set; }
+
+            protected override System.Threading.Tasks.Task SerializeToStreamAsync(
+                System.IO.Stream stream,
+                System.Net.TransportContext? context) =>
+                SerializeToStreamAsync(stream, context, System.Threading.CancellationToken.None);
+
+            protected override async System.Threading.Tasks.Task SerializeToStreamAsync(
+                System.IO.Stream stream,
+                System.Net.TransportContext? context,
+                System.Threading.CancellationToken cancellationToken)
+            {
+                try
+                {
+                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes("{}"), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    CancellationObserved = true;
+                    throw;
+                }
+            }
+
+            protected override bool TryComputeLength(out long length)
+            {
+                length = 2;
+                return true;
             }
         }
     }

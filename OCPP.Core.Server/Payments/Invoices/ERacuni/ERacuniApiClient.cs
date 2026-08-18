@@ -200,14 +200,17 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
 
                 _lastRequestStartedUtc = DateTime.UtcNow;
                 requestAttempted?.Invoke();
+                using var timeoutCancellation = CreateTimeoutCancellation(client.Timeout);
+                var cancellationToken = timeoutCancellation?.Token ?? CancellationToken.None;
 
                 using var response = client.SendAsync(
                     message,
-                    HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).GetAwaiter().GetResult();
                 responseReceived?.Invoke(response.StatusCode);
                 var body = response.Content == null
                     ? null
-                    : response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    : response.Content.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
 
                 _logger.LogInformation(
                     "Invoice/ERacuni => HTTP {StatusCode} bodyLength={BodyLength}",
@@ -226,6 +229,11 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 _requestLock.Release();
             }
         }
+
+        private static CancellationTokenSource CreateTimeoutCancellation(TimeSpan timeout) =>
+            timeout == Timeout.InfiniteTimeSpan
+                ? null
+                : new CancellationTokenSource(timeout);
 
         private static ERacuniInvoiceLookupResult Unknown(
             string error,
