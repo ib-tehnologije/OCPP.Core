@@ -300,6 +300,27 @@ namespace OCPP.Core.Server.Tests
             Assert.DoesNotContain("private non-json", result.Error, StringComparison.Ordinal);
         }
 
+        [Fact]
+        public void LookupSalesInvoiceByApiTransactionId_PreservesStatusWhenResponseBodyReadFails()
+        {
+            var handler = new RecordingHttpMessageHandler
+            {
+                Response = new HttpResponseMessage(HttpStatusCode.BadGateway)
+                {
+                    Content = new ThrowingHttpContent()
+                }
+            };
+            var client = CreateClient(handler);
+
+            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.Transport, result.Diagnostics.FailureCategory);
+            Assert.Equal(502, result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.NotAvailable, result.Diagnostics.ResponseShape);
+        }
+
         private static ERacuniApiRequestEnvelope CreateLookupRequest() => new()
         {
             Username = "api-user",
@@ -358,6 +379,20 @@ namespace OCPP.Core.Server.Tests
             }
 
             public HttpClient CreateClient(string name) => _client;
+        }
+
+        private sealed class ThrowingHttpContent : HttpContent
+        {
+            protected override System.Threading.Tasks.Task SerializeToStreamAsync(
+                System.IO.Stream stream,
+                System.Net.TransportContext? context) =>
+                System.Threading.Tasks.Task.FromException(new HttpRequestException("synthetic body read failure"));
+
+            protected override bool TryComputeLength(out long length)
+            {
+                length = 0;
+                return false;
+            }
         }
     }
 }

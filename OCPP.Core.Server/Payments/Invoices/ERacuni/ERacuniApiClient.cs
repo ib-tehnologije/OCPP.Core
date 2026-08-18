@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Net.Http;
 using System.Linq;
 using System.Text;
@@ -56,9 +57,13 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
 
             ERacuniApiResult response;
             var requestAttempted = false;
+            int? receivedHttpStatusCode = null;
             try
             {
-                response = Send(request, () => requestAttempted = true);
+                response = Send(
+                    request,
+                    () => requestAttempted = true,
+                    statusCode => receivedHttpStatusCode = (int)statusCode);
             }
             catch (InvalidOperationException) when (!requestAttempted)
             {
@@ -74,7 +79,8 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                     requestAttempted,
                     requestAttempted
                         ? ERacuniInvoiceLookupFailureCategory.Transport
-                        : ERacuniInvoiceLookupFailureCategory.Configuration);
+                        : ERacuniInvoiceLookupFailureCategory.Configuration,
+                    receivedHttpStatusCode);
             }
 
             var status = (int)response.StatusCode;
@@ -167,9 +173,12 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                     responseShape);
         }
 
-        private ERacuniApiResult Send(ERacuniApiRequestEnvelope request) => Send(request, null);
+        private ERacuniApiResult Send(ERacuniApiRequestEnvelope request) => Send(request, null, null);
 
-        private ERacuniApiResult Send(ERacuniApiRequestEnvelope request, Action requestAttempted)
+        private ERacuniApiResult Send(
+            ERacuniApiRequestEnvelope request,
+            Action requestAttempted,
+            Action<HttpStatusCode> responseReceived)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
@@ -192,7 +201,10 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 _lastRequestStartedUtc = DateTime.UtcNow;
                 requestAttempted?.Invoke();
 
-                using var response = client.SendAsync(message).GetAwaiter().GetResult();
+                using var response = client.SendAsync(
+                    message,
+                    HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+                responseReceived?.Invoke(response.StatusCode);
                 var body = response.Content == null
                     ? null
                     : response.Content.ReadAsStringAsync().GetAwaiter().GetResult();

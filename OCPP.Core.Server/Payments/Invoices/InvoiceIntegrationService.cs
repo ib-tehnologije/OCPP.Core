@@ -586,6 +586,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 ResponseShape: ERacuniInvoiceLookupResponseShape.NotAvailable);
             auditLog.ProviderOperation = "SalesInvoiceList";
             auditLog.HttpStatusCode = diagnostics.HttpStatusCode;
+            auditLog.ResponseBody = null;
             auditLog.ProviderResponseStatus = Truncate(
                 $"{lookup.Outcome}:{diagnostics.FailureCategory}:{diagnostics.ResponseShape}:" +
                 (diagnostics.RequestAttempted ? "attempted" : "not-attempted"),
