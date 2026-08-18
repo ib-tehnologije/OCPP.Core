@@ -173,6 +173,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                     var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
                         BuildLookupRequest(request, auditLog.ApiTransactionId));
                     providerLookupCompleted = true;
+                    ApplyProviderLookupEvidence(auditLog, lookup);
                     if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
                     {
                         ApplyProviderResult(auditLog, lookup.ProviderResult);
@@ -232,6 +233,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 {
                     var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
                         BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    ApplyProviderLookupEvidence(auditLog, lookup);
                     if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
                     {
                         ApplyProviderResult(auditLog, lookup.ProviderResult);
@@ -258,6 +260,9 @@ namespace OCPP.Core.Server.Payments.Invoices
                 auditLog.Status = "Submitting";
                 auditLog.CompletedAtUtc = null;
                 auditLog.Error = null;
+                auditLog.ProviderOperation = request.Method;
+                auditLog.HttpStatusCode = null;
+                auditLog.ProviderResponseStatus = null;
                 PersistAuditLog(dbContext, auditLog);
 
                 providerCallStarted = true;
@@ -303,7 +308,11 @@ namespace OCPP.Core.Server.Payments.Invoices
                 }
 
                 auditLog.CompletedAtUtc ??= DateTime.UtcNow;
-                auditLog.Error = Truncate(ex.ToString(), 4000);
+                if (!string.Equals(auditLog.Status, "ProviderUnknown", StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrWhiteSpace(auditLog.Error))
+                {
+                    auditLog.Error = Truncate(ex.ToString(), 4000);
+                }
                 ClearSubmissionLease(auditLog);
                 PersistAuditLog(dbContext, auditLog);
                 throw;
@@ -559,6 +568,33 @@ namespace OCPP.Core.Server.Payments.Invoices
             auditLog.ExternalPublicUrl = metadata.PublicUrl;
             auditLog.ExternalPdfUrl = metadata.PdfUrl;
             auditLog.ProviderResponseStatus = metadata.Status;
+        }
+
+        private static void ApplyProviderLookupEvidence(
+            InvoiceSubmissionLog auditLog,
+            ERacuniInvoiceLookupResult lookup)
+        {
+            if (auditLog == null || lookup == null)
+            {
+                return;
+            }
+
+            var diagnostics = lookup.Diagnostics ?? new ERacuniInvoiceLookupDiagnostics(
+                RequestAttempted: false,
+                FailureCategory: ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse,
+                HttpStatusCode: null,
+                ResponseShape: ERacuniInvoiceLookupResponseShape.NotAvailable);
+            auditLog.ProviderOperation = "SalesInvoiceList";
+            auditLog.HttpStatusCode = diagnostics.HttpStatusCode;
+            auditLog.ProviderResponseStatus = Truncate(
+                $"{lookup.Outcome}:{diagnostics.FailureCategory}:{diagnostics.ResponseShape}:" +
+                (diagnostics.RequestAttempted ? "attempted" : "not-attempted"),
+                100);
+            if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Unknown &&
+                !string.IsNullOrWhiteSpace(lookup.Error))
+            {
+                auditLog.Error = Truncate(lookup.Error, 4000);
+            }
         }
 
         private static bool IsSuccessStatusCode(HttpStatusCode statusCode)

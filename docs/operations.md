@@ -156,6 +156,8 @@ Before resolving services, the standalone command registers its built configurat
 
 Any changed manifest, missing evidence, provider ambiguity, duplicate provider match, or unavailable dependency stops the affected item. Do not bypass the digest, edit database fields manually, substitute estimated energy or fees, or turn the command into a scheduled task.
 
+Invoice lookup failures retain sanitized diagnostic structure in the existing submission audit: whether a provider request was attempted, the failure category, the nullable HTTP status, the recognized response shape, and `SalesInvoiceList` as the provider operation. Raw provider bodies, credentials, and customer identifiers are not copied into lookup-failure diagnostics. A specific `ProviderUnknown` lookup error is preserved through outer exception handling, and only a definitive not-found lookup may proceed to invoice creation.
+
 ## Logging and Monitoring
 
 Observed:

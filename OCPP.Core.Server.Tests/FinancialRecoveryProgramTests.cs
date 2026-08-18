@@ -1,10 +1,18 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Recovery;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -61,6 +69,41 @@ namespace OCPP.Core.Server.Tests
             using var verificationContext = scenario.CreateContext();
             Assert.Empty(verificationContext.InvoiceSubmissionLogs);
         }
+
+        [Fact]
+        public void Main_ExecuteWithUnknownLookup_PreservesSanitizedAuditAndNeverCreates()
+        {
+            const string reservationId = "77777777-7777-7777-7777-777777777777";
+            using var provider = new SyntheticInvoiceProviderServer(
+                "{\"status\":\"ok\",\"unexpected\":[{\"private\":\"provider-payload\"}]}");
+            using var scenario = _fixture.CreateScenario($$"""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "recover-invoice", "reservationId": "{{reservationId}}" }
+                  ]
+                }
+                """);
+            scenario.SeedInvoiceRecovery(Guid.Parse(reservationId));
+
+            var result = scenario.RunExecute(provider.BaseUrl);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Single(provider.RequestBodies);
+            Assert.Contains("\"method\":\"SalesInvoiceList\"", provider.RequestBodies[0], StringComparison.Ordinal);
+            Assert.DoesNotContain("SalesInvoiceCreate", provider.RequestBodies[0], StringComparison.Ordinal);
+            using var verificationContext = scenario.CreateContext();
+            var audit = Assert.Single(verificationContext.InvoiceSubmissionLogs);
+            Assert.Equal("ProviderUnknown", audit.Status);
+            Assert.Equal("SalesInvoiceList", audit.ProviderOperation);
+            Assert.Equal(200, audit.HttpStatusCode);
+            Assert.Equal("Unknown:UnrecognizedResponse:JsonObject:attempted", audit.ProviderResponseStatus);
+            Assert.Equal(
+                "Provider lookup returned a non-empty or unrecognized response without one exact match.",
+                audit.Error);
+            Assert.Null(audit.ResponseBody);
+            Assert.DoesNotContain("provider-payload", audit.Error, StringComparison.Ordinal);
+        }
     }
 
     public sealed class FinancialRecoveryProgramFixture
@@ -78,6 +121,21 @@ namespace OCPP.Core.Server.Tests
         private const string StripeEnabledVariable = "Stripe__Enabled";
         private const string StripeUseMockServicesVariable = "Stripe__UseMockServices";
         private const string InvoicesEnabledVariable = "Invoices__Enabled";
+        private const string InvoicesProviderVariable = "Invoices__Provider";
+        private const string InvoicesModeVariable = "Invoices__Mode";
+        private const string InvoicesApiBaseUrlVariable = "Invoices__ERacuni__ApiBaseUrl";
+        private const string InvoicesApiPathVariable = "Invoices__ERacuni__ApiPath";
+        private const string InvoicesUsernameVariable = "Invoices__ERacuni__Username";
+        private const string InvoicesSecretKeyVariable = "Invoices__ERacuni__SecretKey";
+        private const string InvoicesTokenVariable = "Invoices__ERacuni__Token";
+        private const string InvoicesRequestIntervalVariable = "Invoices__ERacuni__MinimumRequestIntervalMilliseconds";
+        private static readonly string[] InvoiceProductCodeVariables =
+        {
+            "Invoices__ERacuni__LineItems__Energy__ProductCode",
+            "Invoices__ERacuni__LineItems__SessionFee__ProductCode",
+            "Invoices__ERacuni__LineItems__UsageFee__ProductCode",
+            "Invoices__ERacuni__LineItems__IdleFee__ProductCode"
+        };
         private readonly string _temporaryDirectory;
         private readonly string _databasePath;
         private readonly string _manifestPath;
@@ -147,7 +205,12 @@ namespace OCPP.Core.Server.Tests
             context.SaveChanges();
         }
 
-        public FinancialRecoveryProgramResult Run()
+        public FinancialRecoveryProgramResult Run() => RunCore(execute: false, providerBaseUrl: null);
+
+        public FinancialRecoveryProgramResult RunExecute(string providerBaseUrl) =>
+            RunCore(execute: true, providerBaseUrl);
+
+        private FinancialRecoveryProgramResult RunCore(bool execute, string? providerBaseUrl)
         {
             var originalOut = Console.Out;
             var originalError = Console.Error;
@@ -156,6 +219,26 @@ namespace OCPP.Core.Server.Tests
             var originalStripeEnabled = Environment.GetEnvironmentVariable(StripeEnabledVariable);
             var originalStripeUseMockServices = Environment.GetEnvironmentVariable(StripeUseMockServicesVariable);
             var originalInvoicesEnabled = Environment.GetEnvironmentVariable(InvoicesEnabledVariable);
+            var invoiceVariables = new[]
+            {
+                InvoicesProviderVariable,
+                InvoicesModeVariable,
+                InvoicesApiBaseUrlVariable,
+                InvoicesApiPathVariable,
+                InvoicesUsernameVariable,
+                InvoicesSecretKeyVariable,
+                InvoicesTokenVariable,
+                InvoicesRequestIntervalVariable
+            };
+            var originalInvoiceValues = new Dictionary<string, string?>();
+            foreach (var variable in invoiceVariables)
+            {
+                originalInvoiceValues[variable] = Environment.GetEnvironmentVariable(variable);
+            }
+            foreach (var variable in InvoiceProductCodeVariables)
+            {
+                originalInvoiceValues[variable] = Environment.GetEnvironmentVariable(variable);
+            }
             var originalCurrentDirectory = Environment.CurrentDirectory;
             using var standardOut = new StringWriter(CultureInfo.InvariantCulture);
             using var standardError = new StringWriter(CultureInfo.InvariantCulture);
@@ -177,7 +260,22 @@ namespace OCPP.Core.Server.Tests
                 Environment.SetEnvironmentVariable(SqliteConnectionStringVariable, $"Data Source={_databasePath}");
                 Environment.SetEnvironmentVariable(StripeEnabledVariable, "false");
                 Environment.SetEnvironmentVariable(StripeUseMockServicesVariable, "true");
-                Environment.SetEnvironmentVariable(InvoicesEnabledVariable, "false");
+                Environment.SetEnvironmentVariable(InvoicesEnabledVariable, execute ? "true" : "false");
+                if (execute)
+                {
+                    Environment.SetEnvironmentVariable(InvoicesProviderVariable, "ERacuni");
+                    Environment.SetEnvironmentVariable(InvoicesModeVariable, "Submit");
+                    Environment.SetEnvironmentVariable(InvoicesApiBaseUrlVariable, providerBaseUrl);
+                    Environment.SetEnvironmentVariable(InvoicesApiPathVariable, "/api");
+                    Environment.SetEnvironmentVariable(InvoicesUsernameVariable, "synthetic-user");
+                    Environment.SetEnvironmentVariable(InvoicesSecretKeyVariable, "synthetic-secret");
+                    Environment.SetEnvironmentVariable(InvoicesTokenVariable, "synthetic-token");
+                    Environment.SetEnvironmentVariable(InvoicesRequestIntervalVariable, "0");
+                    foreach (var variable in InvoiceProductCodeVariables)
+                    {
+                        Environment.SetEnvironmentVariable(variable, "SYNTHETIC-PRODUCT");
+                    }
+                }
 
                 var configuration = new ConfigurationBuilder()
                     .SetBasePath(Directory.GetCurrentDirectory())
@@ -187,9 +285,18 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal(SqlServerConnectionStringOverride, configuration.GetConnectionString("SqlServer"));
                 Assert.Equal($"Data Source={_databasePath}", configuration.GetConnectionString("SQLite"));
                 Assert.False(configuration.GetValue<bool>("Stripe:Enabled"));
-                Assert.False(configuration.GetValue<bool>("Invoices:Enabled"));
+                Assert.Equal(execute, configuration.GetValue<bool>("Invoices:Enabled"));
 
-                var exitCode = OCPP.Core.Recovery.Program.Main(new[] { "--manifest", _manifestPath });
+                var arguments = new List<string> { "--manifest", _manifestPath };
+                if (execute)
+                {
+                    var digest = FinancialRecoveryManifest.Parse(File.ReadAllText(_manifestPath)).Sha256;
+                    arguments.Add("--execute");
+                    arguments.Add("--confirm-sha256");
+                    arguments.Add(digest);
+                }
+
+                var exitCode = OCPP.Core.Recovery.Program.Main(arguments.ToArray());
                 return new FinancialRecoveryProgramResult(exitCode, standardOut.ToString(), standardError.ToString());
             }
             finally
@@ -202,6 +309,10 @@ namespace OCPP.Core.Server.Tests
                 Environment.SetEnvironmentVariable(StripeEnabledVariable, originalStripeEnabled);
                 Environment.SetEnvironmentVariable(StripeUseMockServicesVariable, originalStripeUseMockServices);
                 Environment.SetEnvironmentVariable(InvoicesEnabledVariable, originalInvoicesEnabled);
+                foreach (var original in originalInvoiceValues)
+                {
+                    Environment.SetEnvironmentVariable(original.Key, original.Value);
+                }
             }
         }
 
@@ -218,4 +329,80 @@ namespace OCPP.Core.Server.Tests
     }
 
     public sealed record FinancialRecoveryProgramResult(int ExitCode, string StdOut, string StdErr);
+
+    public sealed class SyntheticInvoiceProviderServer : IDisposable
+    {
+        private readonly TcpListener _listener;
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly Task _serverTask;
+        private readonly string _responseBody;
+        private readonly ConcurrentQueue<string> _requestBodies = new();
+
+        public SyntheticInvoiceProviderServer(string responseBody)
+        {
+            _responseBody = responseBody;
+            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener.Start();
+            var port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            BaseUrl = $"http://127.0.0.1:{port}";
+            _serverTask = Task.Run(ServeAsync);
+        }
+
+        public string BaseUrl { get; }
+        public IReadOnlyList<string> RequestBodies => _requestBodies.ToArray();
+
+        public void Dispose()
+        {
+            _cancellation.Cancel();
+            _listener.Stop();
+            try
+            {
+                _serverTask.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (SocketException)
+            {
+            }
+            _cancellation.Dispose();
+        }
+
+        private async Task ServeAsync()
+        {
+            while (!_cancellation.IsCancellationRequested)
+            {
+                using var client = await _listener.AcceptTcpClientAsync(_cancellation.Token);
+                using var stream = client.GetStream();
+                using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+                var contentLength = 0;
+                while (await reader.ReadLineAsync(_cancellation.Token) is { } header && header.Length > 0)
+                {
+                    if (header.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        contentLength = int.Parse(header["Content-Length:".Length..].Trim(), CultureInfo.InvariantCulture);
+                    }
+                }
+
+                var body = new char[contentLength];
+                var offset = 0;
+                while (offset < body.Length)
+                {
+                    var read = await reader.ReadAsync(body.AsMemory(offset), _cancellation.Token);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    offset += read;
+                }
+                _requestBodies.Enqueue(new string(body, 0, offset));
+
+                var responseBytes = Encoding.UTF8.GetBytes(_responseBody);
+                var headers = Encoding.ASCII.GetBytes(
+                    $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {responseBytes.Length}\r\nConnection: close\r\n\r\n");
+                await stream.WriteAsync(headers, _cancellation.Token);
+                await stream.WriteAsync(responseBytes, _cancellation.Token);
+            }
+        }
+    }
 }

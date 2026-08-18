@@ -291,6 +291,45 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void RecoverCompletedReservation_PreservesStructuredLookupEvidenceAndDoesNotCreate()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient
+            {
+                LookupResultToReturn = ERacuniInvoiceLookupResult.Unknown(
+                    "Provider lookup returned a non-JSON response.",
+                    new ERacuniInvoiceLookupDiagnostics(
+                        RequestAttempted: true,
+                        FailureCategory: ERacuniInvoiceLookupFailureCategory.NonJsonResponse,
+                        HttpStatusCode: 200,
+                        ResponseShape: ERacuniInvoiceLookupResponseShape.NonJson))
+            };
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            Assert.Throws<InvalidOperationException>(() =>
+                service.RecoverCompletedReservation(
+                    dbContext,
+                    new ChargePaymentReservation(),
+                    new Transaction(),
+                    new Session()));
+
+            Assert.Equal(1, apiClient.LookupCount);
+            Assert.Equal(0, apiClient.CreateCount);
+            var audit = Assert.Single(dbContext.InvoiceSubmissionLogs);
+            Assert.Equal("ProviderUnknown", audit.Status);
+            Assert.Equal("SalesInvoiceList", audit.ProviderOperation);
+            Assert.Equal(200, audit.HttpStatusCode);
+            Assert.Equal("Unknown:NonJsonResponse:NonJson:attempted", audit.ProviderResponseStatus);
+            Assert.Equal("Provider lookup returned a non-JSON response.", audit.Error);
+            Assert.Null(audit.ResponseBody);
+        }
+
+        [Fact]
         public void RecoverCompletedReservation_CreatesOnlyAfterDefinitiveInitialNotFound()
         {
             var draft = CreateDraft();

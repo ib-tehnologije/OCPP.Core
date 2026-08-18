@@ -48,24 +48,55 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             if (request.Parameters is not ERacuniSalesInvoiceLookupParameters parameters ||
                 string.IsNullOrWhiteSpace(parameters.ApiTransactionId))
             {
-                return ERacuniInvoiceLookupResult.Unknown("Exact provider transaction reference is missing.");
+                return Unknown(
+                    "Exact provider transaction reference is missing.",
+                    requestAttempted: false,
+                    ERacuniInvoiceLookupFailureCategory.MissingReference);
             }
 
             ERacuniApiResult response;
+            var requestAttempted = false;
             try
             {
-                response = Send(request);
+                response = Send(request, () => requestAttempted = true);
             }
-            catch (Exception ex)
+            catch (InvalidOperationException) when (!requestAttempted)
             {
-                return ERacuniInvoiceLookupResult.Unknown(ex.Message);
+                return Unknown(
+                    "Provider lookup configuration preflight failed.",
+                    requestAttempted: false,
+                    ERacuniInvoiceLookupFailureCategory.Configuration);
+            }
+            catch (Exception)
+            {
+                return Unknown(
+                    "Provider lookup transport failed.",
+                    requestAttempted,
+                    requestAttempted
+                        ? ERacuniInvoiceLookupFailureCategory.Transport
+                        : ERacuniInvoiceLookupFailureCategory.Configuration);
             }
 
             var status = (int)response.StatusCode;
-            if (status < 200 || status > 299 || response.ParsedBody == null)
+            var responseShape = ClassifyResponseShape(response);
+            if (status < 200 || status > 299)
             {
-                return ERacuniInvoiceLookupResult.Unknown(
-                    $"Provider lookup returned HTTP {status} or a non-JSON response.");
+                return Unknown(
+                    "Provider lookup returned a non-success HTTP response.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.HttpStatus,
+                    status,
+                    responseShape);
+            }
+
+            if (response.ParsedBody == null)
+            {
+                return Unknown(
+                    "Provider lookup returned a non-JSON response.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.NonJsonResponse,
+                    status,
+                    responseShape);
             }
 
             var exactMatches = response.ParsedBody
@@ -80,7 +111,12 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
 
             if (exactMatches.Count > 1)
             {
-                return ERacuniInvoiceLookupResult.Unknown("Provider lookup returned duplicate exact matches.");
+                return Unknown(
+                    "Provider lookup returned duplicate exact matches.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.DuplicateMatch,
+                    status,
+                    responseShape);
             }
 
             if (exactMatches.Count == 1)
@@ -90,7 +126,12 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 if (string.IsNullOrWhiteSpace(metadata.DocumentId) &&
                     string.IsNullOrWhiteSpace(metadata.InvoiceNumber))
                 {
-                    return ERacuniInvoiceLookupResult.Unknown("Provider lookup match has no durable document identifier.");
+                    return Unknown(
+                        "Provider lookup match has no durable document identifier.",
+                        requestAttempted,
+                        ERacuniInvoiceLookupFailureCategory.MissingDurableIdentifier,
+                        status,
+                        responseShape);
                 }
 
                 return ERacuniInvoiceLookupResult.Found(new ERacuniApiResult
@@ -98,7 +139,11 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                     StatusCode = response.StatusCode,
                     Body = match.ToString(Formatting.None),
                     ParsedBody = match
-                });
+                }, Diagnostics(
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.None,
+                    status,
+                    responseShape));
             }
 
             var isRecognizedEmptyResult = response.ParsedBody is JArray rootArray && rootArray.Count == 0;
@@ -109,12 +154,22 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             }
 
             return isRecognizedEmptyResult
-                ? ERacuniInvoiceLookupResult.NotFound()
-                : ERacuniInvoiceLookupResult.Unknown(
-                    "Provider lookup returned a non-empty or unrecognized response without one exact match.");
+                ? ERacuniInvoiceLookupResult.NotFound(Diagnostics(
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.None,
+                    status,
+                    responseShape))
+                : Unknown(
+                    "Provider lookup returned a non-empty or unrecognized response without one exact match.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse,
+                    status,
+                    responseShape);
         }
 
-        private ERacuniApiResult Send(ERacuniApiRequestEnvelope request)
+        private ERacuniApiResult Send(ERacuniApiRequestEnvelope request) => Send(request, null);
+
+        private ERacuniApiResult Send(ERacuniApiRequestEnvelope request, Action requestAttempted)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
@@ -135,6 +190,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 message.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
                 _lastRequestStartedUtc = DateTime.UtcNow;
+                requestAttempted?.Invoke();
 
                 using var response = client.SendAsync(message).GetAwaiter().GetResult();
                 var body = response.Content == null
@@ -157,6 +213,45 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             {
                 _requestLock.Release();
             }
+        }
+
+        private static ERacuniInvoiceLookupResult Unknown(
+            string error,
+            bool requestAttempted,
+            ERacuniInvoiceLookupFailureCategory failureCategory,
+            int? httpStatusCode = null,
+            ERacuniInvoiceLookupResponseShape responseShape = ERacuniInvoiceLookupResponseShape.NotAvailable) =>
+            ERacuniInvoiceLookupResult.Unknown(
+                error,
+                Diagnostics(requestAttempted, failureCategory, httpStatusCode, responseShape));
+
+        private static ERacuniInvoiceLookupDiagnostics Diagnostics(
+            bool requestAttempted,
+            ERacuniInvoiceLookupFailureCategory failureCategory,
+            int? httpStatusCode,
+            ERacuniInvoiceLookupResponseShape responseShape) =>
+            new(requestAttempted, failureCategory, httpStatusCode, responseShape);
+
+        private static ERacuniInvoiceLookupResponseShape ClassifyResponseShape(ERacuniApiResult response)
+        {
+            if (response?.ParsedBody == null)
+            {
+                return ERacuniInvoiceLookupResponseShape.NonJson;
+            }
+
+            if (response.ParsedBody is JArray)
+            {
+                return ERacuniInvoiceLookupResponseShape.JsonArray;
+            }
+
+            if (response.ParsedBody is JObject rootObject)
+            {
+                return rootObject.GetValue("result", StringComparison.OrdinalIgnoreCase) is JArray
+                    ? ERacuniInvoiceLookupResponseShape.ResultArray
+                    : ERacuniInvoiceLookupResponseShape.JsonObject;
+            }
+
+            return ERacuniInvoiceLookupResponseShape.OtherJson;
         }
 
         private static Uri BuildEndpoint(ERacuniInvoiceOptions options)

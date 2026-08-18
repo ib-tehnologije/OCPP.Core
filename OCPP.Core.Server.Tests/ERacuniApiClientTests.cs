@@ -118,6 +118,10 @@ namespace OCPP.Core.Server.Tests
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Found, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.None, result.Diagnostics.FailureCategory);
+            Assert.Equal(200, result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.ResultArray, result.Diagnostics.ResponseShape);
             Assert.Equal("doc-1", result.ProviderResult!.ParsedBody!["documentId"]?.ToString());
             Assert.Contains("\"method\":\"SalesInvoiceList\"", handler.LastRequestBody!);
             Assert.Contains("\"apiTransactionId\":\"exact-ref\"", handler.LastRequestBody!);
@@ -148,6 +152,10 @@ namespace OCPP.Core.Server.Tests
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.DuplicateMatch, result.Diagnostics.FailureCategory);
+            Assert.Equal(200, result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.JsonArray, result.Diagnostics.ResponseShape);
         }
 
         [Theory]
@@ -174,6 +182,9 @@ namespace OCPP.Core.Server.Tests
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse, result.Diagnostics.FailureCategory);
+            Assert.Equal(200, result.Diagnostics.HttpStatusCode);
         }
 
         [Theory]
@@ -200,7 +211,103 @@ namespace OCPP.Core.Server.Tests
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.NotFound, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.None, result.Diagnostics.FailureCategory);
+            Assert.Equal(200, result.Diagnostics.HttpStatusCode);
         }
+
+        [Fact]
+        public void LookupSalesInvoiceByApiTransactionId_ReturnsStructuredPreflightFailureWithoutSending()
+        {
+            var handler = new RecordingHttpMessageHandler();
+            var client = CreateClient(handler);
+
+            var result = client.LookupSalesInvoiceByApiTransactionId(new ERacuniApiRequestEnvelope
+            {
+                Method = "SalesInvoiceList",
+                Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
+            });
+
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.False(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.Configuration, result.Diagnostics.FailureCategory);
+            Assert.Null(result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.NotAvailable, result.Diagnostics.ResponseShape);
+            Assert.Null(handler.LastRequest);
+            Assert.DoesNotContain("credential", result.Error, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void LookupSalesInvoiceByApiTransactionId_ReturnsSanitizedTransportFailureAfterAttempt()
+        {
+            var handler = new RecordingHttpMessageHandler
+            {
+                ExceptionToThrow = new HttpRequestException("synthetic-private-transport-detail")
+            };
+            var client = CreateClient(handler);
+
+            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.Transport, result.Diagnostics.FailureCategory);
+            Assert.Null(result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.NotAvailable, result.Diagnostics.ResponseShape);
+            Assert.DoesNotContain("synthetic-private", result.Error, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void LookupSalesInvoiceByApiTransactionId_ReturnsStructuredHttpFailureWithoutBody()
+        {
+            var handler = new RecordingHttpMessageHandler
+            {
+                Response = new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                {
+                    Content = new StringContent("{\"private\":\"provider-detail\"}", Encoding.UTF8, "application/json")
+                }
+            };
+            var client = CreateClient(handler);
+
+            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.HttpStatus, result.Diagnostics.FailureCategory);
+            Assert.Equal(401, result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.JsonObject, result.Diagnostics.ResponseShape);
+            Assert.DoesNotContain("provider-detail", result.Error, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void LookupSalesInvoiceByApiTransactionId_ReturnsStructuredNonJsonFailureWithoutBody()
+        {
+            var handler = new RecordingHttpMessageHandler
+            {
+                Response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("private non-json provider payload", Encoding.UTF8, "text/plain")
+                }
+            };
+            var client = CreateClient(handler);
+
+            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.NonJsonResponse, result.Diagnostics.FailureCategory);
+            Assert.Equal(200, result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.NonJson, result.Diagnostics.ResponseShape);
+            Assert.DoesNotContain("private non-json", result.Error, StringComparison.Ordinal);
+        }
+
+        private static ERacuniApiRequestEnvelope CreateLookupRequest() => new()
+        {
+            Username = "api-user",
+            SecretKey = "secret-1234",
+            Token = "token-9876",
+            Method = "SalesInvoiceList",
+            Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
+        };
 
         private static ERacuniApiClient CreateClient(RecordingHttpMessageHandler handler)
         {
@@ -218,6 +325,7 @@ namespace OCPP.Core.Server.Tests
             public HttpRequestMessage? LastRequest { get; private set; }
             public string? LastRequestBody { get; private set; }
             public HttpResponseMessage? Response { get; set; }
+            public Exception? ExceptionToThrow { get; set; }
 
             protected override System.Threading.Tasks.Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
             {
@@ -225,6 +333,11 @@ namespace OCPP.Core.Server.Tests
                 LastRequestBody = request.Content == null
                     ? string.Empty
                     : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+
+                if (ExceptionToThrow != null)
+                {
+                    return System.Threading.Tasks.Task.FromException<HttpResponseMessage>(ExceptionToThrow);
+                }
 
                 var response = Response ?? new HttpResponseMessage(HttpStatusCode.OK)
                 {
