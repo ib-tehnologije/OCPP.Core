@@ -184,29 +184,87 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         Unknown
     }
 
+    public enum ERacuniInvoiceLookupFailureCategory
+    {
+        None,
+        MissingReference,
+        Configuration,
+        Transport,
+        HttpStatus,
+        NonJsonResponse,
+        DuplicateMatch,
+        MissingDurableIdentifier,
+        UnrecognizedResponse
+    }
+
+    public enum ERacuniInvoiceLookupResponseShape
+    {
+        NotAvailable,
+        JsonArray,
+        ResultArray,
+        JsonObject,
+        OtherJson,
+        NonJson
+    }
+
+    public sealed record ERacuniInvoiceLookupDiagnostics(
+        bool RequestAttempted,
+        ERacuniInvoiceLookupFailureCategory FailureCategory,
+        int? HttpStatusCode,
+        ERacuniInvoiceLookupResponseShape ResponseShape);
+
     public sealed class ERacuniInvoiceLookupResult
     {
         private ERacuniInvoiceLookupResult(
             ERacuniInvoiceLookupOutcome outcome,
             ERacuniApiResult providerResult,
-            string error)
+            string error,
+            ERacuniInvoiceLookupDiagnostics diagnostics)
         {
             Outcome = outcome;
             ProviderResult = providerResult;
             Error = error;
+            Diagnostics = diagnostics;
         }
 
         public ERacuniInvoiceLookupOutcome Outcome { get; }
         public ERacuniApiResult ProviderResult { get; }
         public string Error { get; }
+        public ERacuniInvoiceLookupDiagnostics Diagnostics { get; }
 
-        public static ERacuniInvoiceLookupResult Found(ERacuniApiResult result) =>
-            new(ERacuniInvoiceLookupOutcome.Found, result, null);
+        public static ERacuniInvoiceLookupResult Found(
+            ERacuniApiResult result,
+            ERacuniInvoiceLookupDiagnostics diagnostics = null) =>
+            new(
+                ERacuniInvoiceLookupOutcome.Found,
+                result,
+                null,
+                diagnostics ?? NotAttemptedDiagnostics(ERacuniInvoiceLookupFailureCategory.None));
 
-        public static ERacuniInvoiceLookupResult NotFound() =>
-            new(ERacuniInvoiceLookupOutcome.NotFound, null, null);
+        public static ERacuniInvoiceLookupResult NotFound(
+            ERacuniInvoiceLookupDiagnostics diagnostics = null) =>
+            new(
+                ERacuniInvoiceLookupOutcome.NotFound,
+                null,
+                null,
+                diagnostics ?? NotAttemptedDiagnostics(ERacuniInvoiceLookupFailureCategory.None));
 
         public static ERacuniInvoiceLookupResult Unknown(string error) =>
-            new(ERacuniInvoiceLookupOutcome.Unknown, null, error);
+            Unknown(
+                error,
+                NotAttemptedDiagnostics(ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse));
+
+        public static ERacuniInvoiceLookupResult Unknown(
+            string error,
+            ERacuniInvoiceLookupDiagnostics diagnostics) =>
+            new(
+                ERacuniInvoiceLookupOutcome.Unknown,
+                null,
+                error,
+                diagnostics ?? NotAttemptedDiagnostics(ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse));
+
+        private static ERacuniInvoiceLookupDiagnostics NotAttemptedDiagnostics(
+            ERacuniInvoiceLookupFailureCategory category) =>
+            new(false, category, null, ERacuniInvoiceLookupResponseShape.NotAvailable);
     }
 }
