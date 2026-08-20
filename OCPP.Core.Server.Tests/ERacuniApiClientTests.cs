@@ -95,61 +95,62 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsFoundOnlyForOneExactMatch()
+        public void LookupSalesInvoice_ReturnsFoundOnlyForOneExactOrderReferenceMatch()
         {
             var handler = new RecordingHttpMessageHandler
             {
                 Response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
-                        "{\"status\":\"ok\",\"result\":[{\"apiTransactionId\":\"exact-ref\",\"documentId\":\"doc-1\",\"number\":\"INV-1\"},{\"apiTransactionId\":\"another-ref\",\"documentId\":\"doc-2\"}]}",
+                        "[{\"orderReference\":\"exact-ref\",\"documentId\":\"doc-1\",\"number\":\"INV-1\"},{\"orderReference\":\"another-ref\",\"documentId\":\"doc-2\"}]",
                         Encoding.UTF8,
                         "application/json")
                 }
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(new ERacuniApiRequestEnvelope
+            var result = client.LookupSalesInvoiceByOrderReference(new ERacuniApiRequestEnvelope
             {
                 Username = "api-user",
                 SecretKey = "secret-1234",
                 Token = "token-9876",
                 Method = "SalesInvoiceList",
-                Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
+                Parameters = new ERacuniSalesInvoiceLookupParameters { OrderReference = "exact-ref" }
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Found, result.Outcome);
             Assert.True(result.Diagnostics.RequestAttempted);
             Assert.Equal(ERacuniInvoiceLookupFailureCategory.None, result.Diagnostics.FailureCategory);
             Assert.Equal(200, result.Diagnostics.HttpStatusCode);
-            Assert.Equal(ERacuniInvoiceLookupResponseShape.ResultArray, result.Diagnostics.ResponseShape);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.JsonArray, result.Diagnostics.ResponseShape);
             Assert.Equal("doc-1", result.ProviderResult!.ParsedBody!["documentId"]?.ToString());
             Assert.Contains("\"method\":\"SalesInvoiceList\"", handler.LastRequestBody!);
-            Assert.Contains("\"apiTransactionId\":\"exact-ref\"", handler.LastRequestBody!);
+            Assert.Contains("\"orderReference\":\"exact-ref\"", handler.LastRequestBody!);
+            Assert.DoesNotContain("\"apiTransactionId\"", handler.LastRequestBody!);
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsUnknown_ForDuplicateExactMatches()
+        public void LookupSalesInvoice_ReturnsUnknown_ForDuplicateExactOrderReferenceMatches()
         {
             var handler = new RecordingHttpMessageHandler
             {
                 Response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
-                        "[{\"apiTransactionId\":\"same-ref\",\"documentId\":\"doc-1\"},{\"apiTransactionId\":\"same-ref\",\"documentId\":\"doc-2\"}]",
+                        "[{\"orderReference\":\"same-ref\",\"documentId\":\"doc-1\"},{\"orderReference\":\"same-ref\",\"documentId\":\"doc-2\"}]",
                         Encoding.UTF8,
                         "application/json")
                 }
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(new ERacuniApiRequestEnvelope
+            var result = client.LookupSalesInvoiceByOrderReference(new ERacuniApiRequestEnvelope
             {
                 Username = "api-user",
                 SecretKey = "secret-1234",
                 Token = "token-9876",
                 Method = "SalesInvoiceList",
-                Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "same-ref" }
+                Parameters = new ERacuniSalesInvoiceLookupParameters { OrderReference = "same-ref" }
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
@@ -160,9 +161,10 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Theory]
-        [InlineData("[{\"apiTransactionId\":\"another-ref\",\"documentId\":\"doc-1\"}]")]
-        [InlineData("{\"status\":\"ok\",\"result\":[{\"apiTransactionId\":\"another-ref\",\"documentId\":\"doc-1\"}]}")]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsUnknown_ForNonEmptyUnmatchedResults(string body)
+        [InlineData("[{\"orderReference\":\"another-ref\",\"documentId\":\"doc-1\"}]")]
+        [InlineData("{\"status\":\"ok\",\"result\":[{\"orderReference\":\"exact-ref\",\"documentId\":\"doc-1\"}]}")]
+        [InlineData("{\"response\":{\"orderReference\":\"exact-ref\",\"documentId\":\"doc-1\"}}")]
+        public void LookupSalesInvoice_ReturnsUnknown_ForNonEmptyOrObjectEnvelopeResults(string body)
         {
             var handler = new RecordingHttpMessageHandler
             {
@@ -173,13 +175,13 @@ namespace OCPP.Core.Server.Tests
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(new ERacuniApiRequestEnvelope
+            var result = client.LookupSalesInvoiceByOrderReference(new ERacuniApiRequestEnvelope
             {
                 Username = "api-user",
                 SecretKey = "secret-1234",
                 Token = "token-9876",
                 Method = "SalesInvoiceList",
-                Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
+                Parameters = new ERacuniSalesInvoiceLookupParameters { OrderReference = "exact-ref" }
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
@@ -188,10 +190,39 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(200, result.Diagnostics.HttpStatusCode);
         }
 
+        [Fact]
+        public void LookupSalesInvoice_ReturnsNotFound_OnlyForEmptyRootArray()
+        {
+            var handler = new RecordingHttpMessageHandler
+            {
+                Response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("[]", Encoding.UTF8, "application/json")
+                }
+            };
+            var client = CreateClient(handler);
+
+            var result = client.LookupSalesInvoiceByOrderReference(new ERacuniApiRequestEnvelope
+            {
+                Username = "api-user",
+                SecretKey = "secret-1234",
+                Token = "token-9876",
+                Method = "SalesInvoiceList",
+                Parameters = new ERacuniSalesInvoiceLookupParameters { OrderReference = "exact-ref" }
+            });
+
+            Assert.Equal(ERacuniInvoiceLookupOutcome.NotFound, result.Outcome);
+            Assert.True(result.Diagnostics.RequestAttempted);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.None, result.Diagnostics.FailureCategory);
+            Assert.Equal(200, result.Diagnostics.HttpStatusCode);
+            Assert.Equal(ERacuniInvoiceLookupResponseShape.JsonArray, result.Diagnostics.ResponseShape);
+        }
+
         [Theory]
-        [InlineData("[]")]
         [InlineData("{\"status\":\"ok\",\"result\":[]}")]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsNotFound_OnlyForRecognizedEmptyResults(string body)
+        [InlineData("{\"response\":{\"status\":\"ok\"}}")]
+        [InlineData("{\"error\":\"synthetic\"}")]
+        public void LookupSalesInvoice_ReturnsUnknown_ForHttp200ObjectEnvelopes(string body)
         {
             var handler = new RecordingHttpMessageHandler
             {
@@ -202,31 +233,25 @@ namespace OCPP.Core.Server.Tests
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(new ERacuniApiRequestEnvelope
-            {
-                Username = "api-user",
-                SecretKey = "secret-1234",
-                Token = "token-9876",
-                Method = "SalesInvoiceList",
-                Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
-            });
+            var result = client.LookupSalesInvoiceByOrderReference(CreateLookupRequest());
 
-            Assert.Equal(ERacuniInvoiceLookupOutcome.NotFound, result.Outcome);
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
             Assert.True(result.Diagnostics.RequestAttempted);
-            Assert.Equal(ERacuniInvoiceLookupFailureCategory.None, result.Diagnostics.FailureCategory);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse, result.Diagnostics.FailureCategory);
             Assert.Equal(200, result.Diagnostics.HttpStatusCode);
+            Assert.NotEqual(ERacuniInvoiceLookupResponseShape.JsonArray, result.Diagnostics.ResponseShape);
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsStructuredPreflightFailureWithoutSending()
+        public void LookupSalesInvoiceByOrderReference_ReturnsStructuredPreflightFailureWithoutSending()
         {
             var handler = new RecordingHttpMessageHandler();
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(new ERacuniApiRequestEnvelope
+            var result = client.LookupSalesInvoiceByOrderReference(new ERacuniApiRequestEnvelope
             {
                 Method = "SalesInvoiceList",
-                Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
+                Parameters = new ERacuniSalesInvoiceLookupParameters { OrderReference = "exact-ref" }
             });
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
@@ -239,7 +264,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsSanitizedTransportFailureAfterAttempt()
+        public void LookupSalesInvoiceByOrderReference_ReturnsSanitizedTransportFailureAfterAttempt()
         {
             var handler = new RecordingHttpMessageHandler
             {
@@ -247,7 +272,7 @@ namespace OCPP.Core.Server.Tests
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+            var result = client.LookupSalesInvoiceByOrderReference(CreateLookupRequest());
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
             Assert.True(result.Diagnostics.RequestAttempted);
@@ -258,7 +283,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsStructuredHttpFailureWithoutBody()
+        public void LookupSalesInvoiceByOrderReference_ReturnsStructuredHttpFailureWithoutBody()
         {
             var handler = new RecordingHttpMessageHandler
             {
@@ -269,7 +294,7 @@ namespace OCPP.Core.Server.Tests
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+            var result = client.LookupSalesInvoiceByOrderReference(CreateLookupRequest());
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
             Assert.True(result.Diagnostics.RequestAttempted);
@@ -280,7 +305,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_ReturnsStructuredNonJsonFailureWithoutBody()
+        public void LookupSalesInvoiceByOrderReference_ReturnsStructuredNonJsonFailureWithoutBody()
         {
             var handler = new RecordingHttpMessageHandler
             {
@@ -291,7 +316,7 @@ namespace OCPP.Core.Server.Tests
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+            var result = client.LookupSalesInvoiceByOrderReference(CreateLookupRequest());
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
             Assert.True(result.Diagnostics.RequestAttempted);
@@ -302,7 +327,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_PreservesStatusWhenResponseBodyReadFails()
+        public void LookupSalesInvoiceByOrderReference_PreservesStatusWhenResponseBodyReadFails()
         {
             var handler = new RecordingHttpMessageHandler
             {
@@ -313,7 +338,7 @@ namespace OCPP.Core.Server.Tests
             };
             var client = CreateClient(handler);
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+            var result = client.LookupSalesInvoiceByOrderReference(CreateLookupRequest());
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
             Assert.True(result.Diagnostics.RequestAttempted);
@@ -323,7 +348,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void LookupSalesInvoiceByApiTransactionId_BoundsResponseBodyReadWithHttpClientTimeout()
+        public void LookupSalesInvoiceByOrderReference_BoundsResponseBodyReadWithHttpClientTimeout()
         {
             var content = new CancellationAwareSlowHttpContent();
             var handler = new RecordingHttpMessageHandler
@@ -336,7 +361,7 @@ namespace OCPP.Core.Server.Tests
             var client = CreateClient(handler, TimeSpan.FromMilliseconds(100));
             var stopwatch = Stopwatch.StartNew();
 
-            var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
+            var result = client.LookupSalesInvoiceByOrderReference(CreateLookupRequest());
 
             stopwatch.Stop();
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
@@ -352,7 +377,7 @@ namespace OCPP.Core.Server.Tests
             SecretKey = "secret-1234",
             Token = "token-9876",
             Method = "SalesInvoiceList",
-            Parameters = new ERacuniSalesInvoiceLookupParameters { ApiTransactionId = "exact-ref" }
+            Parameters = new ERacuniSalesInvoiceLookupParameters { OrderReference = "exact-ref" }
         };
 
         private static ERacuniApiClient CreateClient(

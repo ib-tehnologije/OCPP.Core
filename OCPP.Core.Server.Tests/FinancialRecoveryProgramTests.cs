@@ -91,6 +91,8 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(1, result.ExitCode);
             Assert.Single(provider.RequestBodies);
             Assert.Contains("\"method\":\"SalesInvoiceList\"", provider.RequestBodies[0], StringComparison.Ordinal);
+            Assert.Contains("\"orderReference\"", provider.RequestBodies[0], StringComparison.Ordinal);
+            Assert.DoesNotContain("\"apiTransactionId\"", provider.RequestBodies[0], StringComparison.Ordinal);
             Assert.DoesNotContain("SalesInvoiceCreate", provider.RequestBodies[0], StringComparison.Ordinal);
             using var verificationContext = scenario.CreateContext();
             var audit = Assert.Single(verificationContext.InvoiceSubmissionLogs);

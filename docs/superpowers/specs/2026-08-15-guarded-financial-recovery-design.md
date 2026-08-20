@@ -78,7 +78,7 @@ Any exception after a provider call may have crossed the network boundary. Such 
 
 ## Provider lookup boundary
 
-The e-racuni client exposes an exact `apiTransactionId` lookup. The adapter treats transport errors, non-success status, schema drift, duplicate exact matches, and missing required identifiers as `Unknown`. Only one exact match is `Found`; an unambiguous empty successful result is `NotFound`. Request and response logging stays sanitized according to the existing invoice integration rules.
+The e-racuni client queries `SalesInvoiceList` by the invoice draft's deterministic `orderReference`. The adapter recognizes only the documented root-array response and treats transport errors, non-success status, object/error envelopes, schema drift, duplicate exact matches, and missing required identifiers as `Unknown`. Only one exact `orderReference` match is `Found`; an empty root array is `NotFound`. Request and response logging stays sanitized according to the existing invoice integration rules.
 
 ## Operator command and reporting
 

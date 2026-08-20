@@ -413,6 +413,34 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void RecoverCompletedReservation_UsesCreateDraftOrderReferenceForProviderLookup()
+        {
+            var draft = CreateDraft();
+            var apiClient = new StubERacuniApiClient
+            {
+                LookupResultToReturn = ERacuniInvoiceLookupResult.Unknown("synthetic stop after request capture")
+            };
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+
+            using var dbContext = CreateContext();
+            Assert.Throws<InvalidOperationException>(() =>
+                service.RecoverCompletedReservation(
+                    dbContext,
+                    new ChargePaymentReservation(),
+                    new Transaction(),
+                    new Session()));
+
+            var lookupPayload = Newtonsoft.Json.JsonConvert.SerializeObject(apiClient.LastLookupRequest?.Parameters);
+            Assert.Contains($"\"orderReference\":\"{draft.TransactionId}\"", lookupPayload, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"apiTransactionId\"", lookupPayload, StringComparison.Ordinal);
+            Assert.Equal(0, apiClient.CreateCount);
+        }
+
+        [Fact]
         public void HandleCompletedReservation_MarksProviderUnknown_WhenCreateThrows()
         {
             var draft = CreateDraft();
@@ -599,7 +627,10 @@ namespace OCPP.Core.Server.Tests
                     Parameters = new ERacuniSalesInvoiceCreateParameters
                     {
                         ApiTransactionId = draft.ReservationId.ToString("N"),
-                        SalesInvoice = new ERacuniSalesInvoice()
+                        SalesInvoice = new ERacuniSalesInvoice
+                        {
+                            OrderReference = draft.TransactionId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        }
                     }
                 };
             }
@@ -623,6 +654,7 @@ namespace OCPP.Core.Server.Tests
             public bool BlockFirstCreate { get; set; }
             public ManualResetEventSlim FirstCreateEntered { get; } = new(false);
             public ManualResetEventSlim ReleaseFirstCreate { get; } = new(false);
+            public ERacuniApiRequestEnvelope? LastLookupRequest { get; private set; }
 
             public ERacuniApiResult CreateSalesInvoice(ERacuniApiRequestEnvelope request)
             {
@@ -648,9 +680,10 @@ namespace OCPP.Core.Server.Tests
                 };
             }
 
-            public ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request)
+            public ERacuniInvoiceLookupResult LookupSalesInvoiceByOrderReference(ERacuniApiRequestEnvelope request)
             {
                 Interlocked.Increment(ref _lookupCount);
+                LastLookupRequest = request;
                 return LookupResultToReturn ?? ERacuniInvoiceLookupResult.Unknown("Synthetic lookup was not configured.");
             }
         }

@@ -40,8 +40,8 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
 
     public class ERacuniSalesInvoiceLookupParameters
     {
-        [JsonProperty("apiTransactionId")]
-        public string ApiTransactionId { get; set; }
+        [JsonProperty("orderReference")]
+        public string OrderReference { get; set; }
     }
 
     public class ERacuniSalesInvoice

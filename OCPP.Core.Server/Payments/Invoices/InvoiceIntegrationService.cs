@@ -170,8 +170,8 @@ namespace OCPP.Core.Server.Payments.Invoices
                         throw new InvoiceSubmissionInProgressException();
                     }
 
-                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
-                        BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    var lookup = _eracuniApiClient.LookupSalesInvoiceByOrderReference(
+                        BuildLookupRequest(request));
                     providerLookupCompleted = true;
                     ApplyProviderLookupEvidence(auditLog, lookup);
                     if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
@@ -231,8 +231,8 @@ namespace OCPP.Core.Server.Payments.Invoices
 
                 if (requireProviderPreflight && !providerLookupCompleted)
                 {
-                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
-                        BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    var lookup = _eracuniApiClient.LookupSalesInvoiceByOrderReference(
+                        BuildLookupRequest(request));
                     ApplyProviderLookupEvidence(auditLog, lookup);
                     if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
                     {
@@ -528,9 +528,11 @@ namespace OCPP.Core.Server.Payments.Invoices
         }
 
         private static ERacuniApiRequestEnvelope BuildLookupRequest(
-            ERacuniApiRequestEnvelope createRequest,
-            string apiTransactionId)
+            ERacuniApiRequestEnvelope createRequest)
         {
+            var orderReference = (createRequest?.Parameters as ERacuniSalesInvoiceCreateParameters)?
+                .SalesInvoice?
+                .OrderReference;
             return new ERacuniApiRequestEnvelope
             {
                 Username = createRequest.Username,
@@ -539,7 +541,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 Method = "SalesInvoiceList",
                 Parameters = new ERacuniSalesInvoiceLookupParameters
                 {
-                    ApiTransactionId = apiTransactionId
+                    OrderReference = orderReference
                 }
             };
         }

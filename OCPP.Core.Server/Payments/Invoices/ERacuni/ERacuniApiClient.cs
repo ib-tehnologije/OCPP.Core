@@ -14,7 +14,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
     public interface IERacuniApiClient
     {
         ERacuniApiResult CreateSalesInvoice(ERacuniApiRequestEnvelope request);
-        ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request) =>
+        ERacuniInvoiceLookupResult LookupSalesInvoiceByOrderReference(ERacuniApiRequestEnvelope request) =>
             ERacuniInvoiceLookupResult.Unknown("Provider lookup is not implemented.");
     }
 
@@ -43,11 +43,11 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             return Send(request);
         }
 
-        public ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request)
+        public ERacuniInvoiceLookupResult LookupSalesInvoiceByOrderReference(ERacuniApiRequestEnvelope request)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             if (request.Parameters is not ERacuniSalesInvoiceLookupParameters parameters ||
-                string.IsNullOrWhiteSpace(parameters.ApiTransactionId))
+                string.IsNullOrWhiteSpace(parameters.OrderReference))
             {
                 return Unknown(
                     "Exact provider transaction reference is missing.",
@@ -105,13 +105,21 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                     responseShape);
             }
 
-            var exactMatches = response.ParsedBody
-                .SelectTokens("$..apiTransactionId")
-                .Select(token => token.Parent?.Parent)
+            if (response.ParsedBody is not JArray rootArray)
+            {
+                return Unknown(
+                    "Provider lookup returned a non-empty or unrecognized response without one exact match.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse,
+                    status,
+                    responseShape);
+            }
+
+            var exactMatches = rootArray
                 .OfType<JObject>()
                 .Where(candidate => string.Equals(
-                    candidate.GetValue("apiTransactionId", StringComparison.OrdinalIgnoreCase)?.ToString(),
-                    parameters.ApiTransactionId,
+                    candidate.GetValue("orderReference", StringComparison.OrdinalIgnoreCase)?.ToString(),
+                    parameters.OrderReference,
                     StringComparison.Ordinal))
                 .ToList();
 
@@ -152,14 +160,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                     responseShape));
             }
 
-            var isRecognizedEmptyResult = response.ParsedBody is JArray rootArray && rootArray.Count == 0;
-            if (response.ParsedBody is JObject rootObject &&
-                rootObject.GetValue("result", StringComparison.OrdinalIgnoreCase) is JArray resultArray)
-            {
-                isRecognizedEmptyResult = resultArray.Count == 0;
-            }
-
-            return isRecognizedEmptyResult
+            return rootArray.Count == 0
                 ? ERacuniInvoiceLookupResult.NotFound(Diagnostics(
                     requestAttempted,
                     ERacuniInvoiceLookupFailureCategory.None,
