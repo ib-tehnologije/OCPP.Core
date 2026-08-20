@@ -25,7 +25,7 @@ No new configuration source, key, service lifetime, provider operation, recovery
 Add Program-level integration tests that call the real `OCPP.Core.Recovery.Program.Main` entry point with isolated temporary manifests and SQLite databases:
 
 - A valid empty manifest must return success and print the dry-run manifest digest.
-- A valid synthetic `recover-invoice` manifest must reach the real assessment path, print `DryRunEligibleProviderLookupRequired`, and leave the database unchanged.
+- A valid synthetic `recover-invoice` manifest must reach the real assessment path, print `DryRunEligibleProviderCreateReplayRequired`, and leave the database unchanged.
 
 The tests use the real startup registrations and real EF Core SQLite context. They disable real payment and invoice integrations through local environment configuration and never provide production credentials or endpoints. Console streams, environment variables, database files, and manifest files are restored or removed in `finally` cleanup.
 

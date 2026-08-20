@@ -49,7 +49,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 reservation,
                 transaction,
                 checkoutSession,
-                requireProviderPreflight: false);
+                replayProviderCreate: false);
         }
 
         public void RecoverCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
@@ -69,7 +69,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 reservation,
                 transaction,
                 checkoutSession,
-                requireProviderPreflight: true);
+                replayProviderCreate: true);
         }
 
         private void HandleCompletedReservationCore(
@@ -77,7 +77,7 @@ namespace OCPP.Core.Server.Payments.Invoices
             ChargePaymentReservation reservation,
             Transaction transaction,
             Session checkoutSession,
-            bool requireProviderPreflight)
+            bool replayProviderCreate)
         {
             if (!_options.Enabled || reservation == null || transaction == null)
             {
@@ -89,7 +89,6 @@ namespace OCPP.Core.Server.Payments.Invoices
             var provider = (_options.Provider ?? "ERacuni").Trim();
             var auditLog = CreateAuditLog(draft, reservation, provider, mode);
             var providerCallStarted = false;
-            var providerLookupCompleted = false;
 
             _logger.LogInformation(
                 "Invoice/Integration => Prepared draft provider={Provider} mode={Mode} reservation={ReservationId} transaction={TransactionId} kind={InvoiceKind} total={TotalAmount} currency={Currency} lines={LineCount}",
@@ -170,30 +169,32 @@ namespace OCPP.Core.Server.Payments.Invoices
                         throw new InvoiceSubmissionInProgressException();
                     }
 
-                    var lookup = _eracuniApiClient.LookupSalesInvoiceByOrderReference(
-                        BuildLookupRequest(request));
-                    providerLookupCompleted = true;
-                    ApplyProviderLookupEvidence(auditLog, lookup);
-                    if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
+                    if (!replayProviderCreate)
                     {
-                        ApplyProviderResult(auditLog, lookup.ProviderResult);
-                        auditLog.Status = "Submitted";
-                        auditLog.CompletedAtUtc = DateTime.UtcNow;
-                        auditLog.Error = null;
-                        ClearSubmissionLease(auditLog);
-                        PersistAuditLog(dbContext, auditLog);
-                        return;
-                    }
+                        var lookup = _eracuniApiClient.LookupSalesInvoiceByOrderReference(
+                            BuildLookupRequest(request));
+                        ApplyProviderLookupEvidence(auditLog, lookup);
+                        if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
+                        {
+                            ApplyProviderResult(auditLog, lookup.ProviderResult);
+                            auditLog.Status = "Submitted";
+                            auditLog.CompletedAtUtc = DateTime.UtcNow;
+                            auditLog.Error = null;
+                            ClearSubmissionLease(auditLog);
+                            PersistAuditLog(dbContext, auditLog);
+                            return;
+                        }
 
-                    if (lookup.Outcome != ERacuniInvoiceLookupOutcome.NotFound)
-                    {
-                        auditLog.Status = "ProviderUnknown";
-                        auditLog.CompletedAtUtc = DateTime.UtcNow;
-                        auditLog.Error = Truncate(lookup.Error, 4000);
-                        ClearSubmissionLease(auditLog);
-                        PersistAuditLog(dbContext, auditLog);
-                        throw new InvalidOperationException(
-                            "Invoice provider state is unknown; create was not attempted.");
+                        if (lookup.Outcome != ERacuniInvoiceLookupOutcome.NotFound)
+                        {
+                            auditLog.Status = "ProviderUnknown";
+                            auditLog.CompletedAtUtc = DateTime.UtcNow;
+                            auditLog.Error = Truncate(lookup.Error, 4000);
+                            ClearSubmissionLease(auditLog);
+                            PersistAuditLog(dbContext, auditLog);
+                            throw new InvalidOperationException(
+                                "Invoice provider state is unknown; create was not attempted.");
+                        }
                     }
 
                     if (!TryAcquireSubmissionLease(dbContext, auditLog, DateTime.UtcNow))
@@ -229,40 +230,13 @@ namespace OCPP.Core.Server.Payments.Invoices
                     }
                 }
 
-                if (requireProviderPreflight && !providerLookupCompleted)
-                {
-                    var lookup = _eracuniApiClient.LookupSalesInvoiceByOrderReference(
-                        BuildLookupRequest(request));
-                    ApplyProviderLookupEvidence(auditLog, lookup);
-                    if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
-                    {
-                        ApplyProviderResult(auditLog, lookup.ProviderResult);
-                        auditLog.Status = "Submitted";
-                        auditLog.CompletedAtUtc = DateTime.UtcNow;
-                        auditLog.Error = null;
-                        ClearSubmissionLease(auditLog);
-                        PersistAuditLog(dbContext, auditLog);
-                        return;
-                    }
-
-                    if (lookup.Outcome != ERacuniInvoiceLookupOutcome.NotFound)
-                    {
-                        auditLog.Status = "ProviderUnknown";
-                        auditLog.CompletedAtUtc = DateTime.UtcNow;
-                        auditLog.Error = Truncate(lookup.Error, 4000);
-                        ClearSubmissionLease(auditLog);
-                        PersistAuditLog(dbContext, auditLog);
-                        throw new InvalidOperationException(
-                            "Invoice provider state is unknown; create was not attempted.");
-                    }
-                }
-
                 auditLog.Status = "Submitting";
                 auditLog.CompletedAtUtc = null;
                 auditLog.Error = null;
                 auditLog.ProviderOperation = request.Method;
                 auditLog.HttpStatusCode = null;
                 auditLog.ProviderResponseStatus = null;
+                auditLog.ResponseBody = null;
                 PersistAuditLog(dbContext, auditLog);
 
                 providerCallStarted = true;
@@ -291,6 +265,10 @@ namespace OCPP.Core.Server.Payments.Invoices
                     result.Body);
             }
             catch (InvoiceSubmissionInProgressException)
+            {
+                throw;
+            }
+            catch (InvoiceSubmissionLineageConflictException)
             {
                 throw;
             }
@@ -432,38 +410,46 @@ namespace OCPP.Core.Server.Payments.Invoices
             OCPPCoreContext dbContext,
             InvoiceSubmissionLog candidate)
         {
-            var exact = dbContext.InvoiceSubmissionLogs
-                .OrderByDescending(log => log.CreatedAtUtc)
-                .FirstOrDefault(log => log.SubmissionKey == candidate.SubmissionKey);
-            if (exact != null)
-            {
-                return exact;
-            }
-
-            var historical = dbContext.InvoiceSubmissionLogs
-                .Where(log => log.SubmissionKey == null &&
-                    (log.ReservationId == candidate.ReservationId ||
-                     (!string.IsNullOrWhiteSpace(candidate.ApiTransactionId) &&
-                      log.ApiTransactionId == candidate.ApiTransactionId)))
+            var lineages = dbContext.InvoiceSubmissionLogs
+                .Where(log =>
+                    log.SubmissionKey == candidate.SubmissionKey ||
+                    log.ReservationId == candidate.ReservationId ||
+                    (!string.IsNullOrWhiteSpace(candidate.ApiTransactionId) &&
+                     log.ApiTransactionId == candidate.ApiTransactionId))
                 .OrderByDescending(log => log.CreatedAtUtc)
                 .Take(2)
                 .ToList();
-            if (historical.Count > 1)
+            if (lineages.Count > 1)
             {
-                throw new InvalidOperationException(
+                throw new InvoiceSubmissionLineageConflictException(
                     "Multiple historical invoice submission lineages require manual reconciliation.");
             }
 
-            var adopted = historical.SingleOrDefault();
-            if (adopted == null)
+            var existing = lineages.SingleOrDefault();
+            if (existing == null)
             {
                 return null;
             }
 
-            adopted.SubmissionKey = candidate.SubmissionKey;
-            adopted.ApiTransactionId ??= candidate.ApiTransactionId;
-            PersistAuditLog(dbContext, adopted);
-            return adopted;
+            if (existing.ReservationId != candidate.ReservationId ||
+                existing.TransactionId != candidate.TransactionId ||
+                !string.Equals(existing.Provider?.Trim(), candidate.Provider?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(existing.Mode?.Trim(), candidate.Mode?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(existing.ApiTransactionId?.Trim(), candidate.ApiTransactionId?.Trim(), StringComparison.Ordinal) ||
+                (!string.IsNullOrWhiteSpace(existing.SubmissionKey) &&
+                 !string.Equals(existing.SubmissionKey, candidate.SubmissionKey, StringComparison.Ordinal)))
+            {
+                throw new InvoiceSubmissionLineageConflictException(
+                    "Invoice submission lineage conflicts with deterministic provider, reservation, transaction, or API identifiers.");
+            }
+
+            if (string.IsNullOrWhiteSpace(existing.SubmissionKey))
+            {
+                existing.SubmissionKey = candidate.SubmissionKey;
+                PersistAuditLog(dbContext, existing);
+            }
+
+            return existing;
         }
 
         private static bool HasActiveSubmissionLease(InvoiceSubmissionLog auditLog, DateTime nowUtc) =>
@@ -687,6 +673,14 @@ namespace OCPP.Core.Server.Payments.Invoices
         {
             public InvoiceSubmissionInProgressException()
                 : base("Invoice submission is already in progress for this deterministic lineage.")
+            {
+            }
+        }
+
+        private sealed class InvoiceSubmissionLineageConflictException : InvalidOperationException
+        {
+            public InvoiceSubmissionLineageConflictException(string message)
+                : base(message)
             {
             }
         }

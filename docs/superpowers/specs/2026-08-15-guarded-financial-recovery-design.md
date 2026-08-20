@@ -24,7 +24,7 @@ The implementation has three independently guarded operations:
 
 - `recover-settlement` derives the final energy and billable breakdown from the linked persisted transaction, reservation pricing snapshot, timestamps, and fee configuration. It refuses missing meter-stop, negative or reversed meter readings, missing or contradictory reservation linkage, incomplete timing evidence, prior capture inconsistencies, or any value that would need estimation.
 - `release-authorization` accepts only a terminal `Abandoned` or `Failed` reservation with no transaction, no delivered energy, no captured amount, no invoice evidence, and a provider payment intent currently reporting a positive capturable amount. Execution arms and invokes the existing durable authorization-release state machine; the recovery layer does not bypass its ownership, idempotency, retry, or provider-state guards.
-- `recover-invoice` accepts only a completed, captured reservation with a complete persisted billing breakdown and linked terminal transaction. It uses a deterministic submission key and exact provider transaction reference. Local history is checked first; an existing submitted/external result is returned, while an unfinished or unknown attempt triggers provider lookup before any create.
+- `recover-invoice` accepts only a completed, captured reservation with a complete persisted billing breakdown and linked terminal transaction. It uses a deterministic submission key, API transaction identifier, and order reference. Local history is checked first; an existing submitted/external result is returned, while an unfinished or unknown attempt can only reacquire the durable lease before replaying the ordinary create request with the same API transaction identifier.
 
 No mode automatically discovers candidates. Each reservation must appear in the manifest, and an operation can only affect that reservation.
 
@@ -63,7 +63,7 @@ Recovery may arm only an otherwise eligible terminal row. It does not cancel che
 
 `InvoiceSubmissionLog.SubmissionKey` is a deterministic value scoped to provider and reservation. A filtered unique database index makes a single local submission lineage authoritative without rewriting historical logs.
 
-Submit-mode processing follows this order:
+Ordinary submit-mode completion processing follows this order:
 
 1. build and validate the invoice draft;
 2. derive the exact provider transaction reference and submission key;
@@ -71,14 +71,16 @@ Submit-mode processing follows this order:
 4. acquire the unique local submission lineage and a time-bounded database lease before a create attempt;
 5. for an existing unfinished, failed, or provider-unknown lineage, perform an exact provider lookup;
 6. if exactly one provider record matches, persist its identifiers and mark the lineage submitted;
-7. if the lookup is definitively not found, a recovery execution may attempt create using the same deterministic provider reference;
+7. if the lookup is definitively not found, an ordinary completion retry may attempt create using the same deterministic provider reference;
 8. if lookup fails, is ambiguous, or returns an unrecognized response, mark the lineage `ProviderUnknown` and stop.
 
-Any exception after a provider call may have crossed the network boundary. Such an attempt is `ProviderUnknown`, never automatically safe to retry. A current lease blocks concurrent creation; an expired lease can only be reacquired atomically after provider lookup. Repeated calls, concurrent processes, process restart, a successful provider response followed by local persistence failure, and provider timeout all converge on lookup-before-create.
+Any exception after a provider call may have crossed the network boundary. Such an attempt is `ProviderUnknown`, never automatically safe to retry. A current lease blocks concurrent creation; an ordinary automatic retry can only reacquire an expired lease after provider lookup.
+
+Explicit allowlisted invoice recovery is a separate operator-authorized replay path. It repeats the same local submitted/external-history checks, adopts the same unique lineage, and atomically reacquires the same time-bounded lease. It then calls `SalesInvoiceCreate` directly with the unchanged reservation-derived `apiTransactionId` and transaction-derived `orderReference`; it does not use `SalesInvoiceList` as a prerequisite. A successful response updates that same audit lineage to `Submitted`. An ambiguous failure remains `ProviderUnknown` with the stable identifier, while active leases, conflicting lineages, and prior submitted/external evidence stop before provider create.
 
 ## Provider lookup boundary
 
-The e-racuni client queries `SalesInvoiceList` by the invoice draft's deterministic `orderReference`. The adapter recognizes only the documented root-array response and treats transport errors, non-success status, object/error envelopes, schema drift, duplicate exact matches, and missing required identifiers as `Unknown`. Only one exact `orderReference` match is `Found`; an empty root array is `NotFound`. Request and response logging stays sanitized according to the existing invoice integration rules.
+The ordinary completion retry path queries `SalesInvoiceList` by the invoice draft's deterministic `orderReference`. The adapter recognizes only the documented root-array response and treats transport errors, non-success status, object/error envelopes, schema drift, duplicate exact matches, and missing required identifiers as `Unknown`. Only one exact `orderReference` match is `Found`; an empty root array is `NotFound`. Request and response logging stays sanitized according to the existing invoice integration rules. The explicit recovery replay does not call this lookup adapter.
 
 ## Operator command and reporting
 

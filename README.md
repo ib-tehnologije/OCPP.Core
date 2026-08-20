@@ -141,6 +141,8 @@ make sqlite-reset
 
 `OCPP.Core.Recovery` is an operator-only, allowlist-driven command for exceptional terminal settlement, authorization release, and invoice reconciliation. It is dry-run by default; mutation requires `--execute` plus the SHA-256 digest of the exact manifest. Keep real manifests outside the repository and start from the synthetic shape in `examples/financial-recovery-manifest.example.json`.
 
+Invoice recovery reuses the ordinary `SalesInvoiceCreate` request with the reservation-derived API transaction identifier. Local submitted/external history, the unique submission lineage, and the database lease are checked before that deterministic provider replay; the recovery command does not require a `SalesInvoiceList` lookup.
+
 ```sh
 dotnet run --project OCPP.Core.Recovery -- --manifest /private/path/recovery.json
 dotnet run --project OCPP.Core.Recovery -- --manifest /private/path/recovery.json --execute --confirm-sha256 '<dry-run digest>'

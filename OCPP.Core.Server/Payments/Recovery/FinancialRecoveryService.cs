@@ -218,7 +218,7 @@ namespace OCPP.Core.Server.Payments.Recovery
                 _invoiceIntegrationService.RecoverCompletedReservation(dbContext, reservation, transaction, checkoutSession: null);
             }
 
-            return Eligible(entry, execute ? "Executed" : "DryRunEligibleProviderLookupRequired");
+            return Eligible(entry, execute ? "Executed" : "DryRunEligibleProviderCreateReplayRequired");
         }
 
         private static FinancialRecoveryReportItem Eligible(

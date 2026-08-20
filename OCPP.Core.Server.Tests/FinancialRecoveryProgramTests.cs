@@ -47,7 +47,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Main_DryRunWithEligibleInvoice_RequiresOnlyProviderLookup()
+        public void Main_DryRunWithEligibleInvoice_ReportsProviderCreateReplayRequired()
         {
             const string reservationId = "66666666-6666-6666-6666-666666666666";
             using var scenario = _fixture.CreateScenario($$"""
@@ -65,17 +65,17 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0, result.ExitCode);
             Assert.Contains("operation=recover-invoice", result.StdOut, StringComparison.Ordinal);
             Assert.Contains("eligible=True", result.StdOut, StringComparison.Ordinal);
-            Assert.Contains("outcome=DryRunEligibleProviderLookupRequired", result.StdOut, StringComparison.Ordinal);
+            Assert.Contains("outcome=DryRunEligibleProviderCreateReplayRequired", result.StdOut, StringComparison.Ordinal);
             using var verificationContext = scenario.CreateContext();
             Assert.Empty(verificationContext.InvoiceSubmissionLogs);
         }
 
         [Fact]
-        public void Main_ExecuteWithUnknownLookup_PreservesSanitizedAuditAndNeverCreates()
+        public void Main_ExecuteReplaysSalesInvoiceCreateWithStableIdWithoutLookup()
         {
             const string reservationId = "77777777-7777-7777-7777-777777777777";
             using var provider = new SyntheticInvoiceProviderServer(
-                "{\"status\":\"ok\",\"unexpected\":[{\"private\":\"provider-payload\"}]}");
+                "{\"status\":\"ok\",\"result\":{\"documentId\":\"doc-replayed\",\"number\":\"INV-REPLAYED\"}}");
             using var scenario = _fixture.CreateScenario($$"""
                 {
                   "schemaVersion": 1,
@@ -88,23 +88,23 @@ namespace OCPP.Core.Server.Tests
 
             var result = scenario.RunExecute(provider.BaseUrl);
 
-            Assert.Equal(1, result.ExitCode);
+            Assert.Equal(0, result.ExitCode);
             Assert.Single(provider.RequestBodies);
-            Assert.Contains("\"method\":\"SalesInvoiceList\"", provider.RequestBodies[0], StringComparison.Ordinal);
-            Assert.Contains("\"orderReference\"", provider.RequestBodies[0], StringComparison.Ordinal);
-            Assert.DoesNotContain("\"apiTransactionId\"", provider.RequestBodies[0], StringComparison.Ordinal);
-            Assert.DoesNotContain("SalesInvoiceCreate", provider.RequestBodies[0], StringComparison.Ordinal);
+            Assert.Contains("\"method\":\"SalesInvoiceCreate\"", provider.RequestBodies[0], StringComparison.Ordinal);
+            Assert.Contains(
+                "\"apiTransactionId\":\"77777777777777777777777777777777\"",
+                provider.RequestBodies[0],
+                StringComparison.Ordinal);
+            Assert.Contains("\"orderReference\":\"EVSE-66\"", provider.RequestBodies[0], StringComparison.Ordinal);
+            Assert.DoesNotContain("SalesInvoiceList", provider.RequestBodies[0], StringComparison.Ordinal);
             using var verificationContext = scenario.CreateContext();
             var audit = Assert.Single(verificationContext.InvoiceSubmissionLogs);
-            Assert.Equal("ProviderUnknown", audit.Status);
-            Assert.Equal("SalesInvoiceList", audit.ProviderOperation);
+            Assert.Equal("Submitted", audit.Status);
+            Assert.Equal("SalesInvoiceCreate", audit.ProviderOperation);
+            Assert.Equal("77777777777777777777777777777777", audit.ApiTransactionId);
             Assert.Equal(200, audit.HttpStatusCode);
-            Assert.Equal("Unknown:UnrecognizedResponse:JsonObject:attempted", audit.ProviderResponseStatus);
-            Assert.Equal(
-                "Provider lookup returned a non-empty or unrecognized response without one exact match.",
-                audit.Error);
-            Assert.Null(audit.ResponseBody);
-            Assert.DoesNotContain("provider-payload", audit.Error, StringComparison.Ordinal);
+            Assert.Equal("doc-replayed", audit.ExternalDocumentId);
+            Assert.Equal("INV-REPLAYED", audit.ExternalInvoiceNumber);
         }
     }
 
