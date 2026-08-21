@@ -125,7 +125,7 @@ Known behavior:
 - Stripe can be enabled/disabled by configuration.
 - Mock Stripe services are available for local/test flows.
 - Payment reservations lock connectors during pending/authorized/start windows.
-- Hosted cleanup abandons stale pending reservations and marks start timeouts.
+- Hosted cleanup abandons stale pending reservations, marks start timeouts, and retries a stuck `Charging` reservation only when its exact linked transaction is already stopped and the same connector has remained `Available` since at least the stop time for the configured grace period.
 - Public payment status exposes reservation and transaction state.
 - Idle fee calculation and idle warning emails are supported.
 - Sessions with missing, inconsistent, or below-threshold delivered energy are treated as no-charge sessions under `Payments:MinimumSessionFeeKwh` (default `1.0` kWh). The uncaptured payment intent is cancelled, billable line amounts are zeroed, and invoice integration plus paid-completion emails are skipped.

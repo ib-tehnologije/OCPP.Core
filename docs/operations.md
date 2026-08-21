@@ -127,7 +127,7 @@ Unknown / verify:
 Server app:
 
 - `StartupMaintenance.Run` executes on startup to repair reservation active keys, abandon stale pending reservations, and release stale connector statuses.
-- `PaymentReservationCleanupService` runs periodically to abandon stale pending reservations, time out starts, recover open transactions on available connectors, complete waiting-for-disconnect reservations, and retry due authorization releases that were explicitly armed by the application.
+- `PaymentReservationCleanupService` runs periodically to abandon stale pending reservations, time out starts, recover open transactions on available connectors, retry stuck `Charging` completion when an exact linked transaction is already stopped and the same connector has remained `Available` at or after that stop for the configured grace period, complete waiting-for-disconnect reservations, and retry due authorization releases that were explicitly armed by the application. Missing, older, non-available, cross-connector, or still-within-grace evidence is ignored.
 - `IdleFeeWarningEmailService` periodically sends customer idle-fee warning emails when notifications and Stripe are configured.
 - `MessageLogRetentionService` is disabled by default. When explicitly enabled,
   it assesses rows older than the configured cutoff and either reports them in
