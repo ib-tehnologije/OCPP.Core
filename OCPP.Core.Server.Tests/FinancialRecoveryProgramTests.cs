@@ -122,6 +122,7 @@ namespace OCPP.Core.Server.Tests
         private const string SqlServerConnectionStringOverride = " ";
         private const string StripeEnabledVariable = "Stripe__Enabled";
         private const string StripeUseMockServicesVariable = "Stripe__UseMockServices";
+        private const string StripeMockDiagnosticsDirectoryVariable = "Stripe__MockDiagnosticsDirectory";
         private const string InvoicesEnabledVariable = "Invoices__Enabled";
         private const string InvoicesProviderVariable = "Invoices__Provider";
         private const string InvoicesModeVariable = "Invoices__Mode";
@@ -174,6 +175,8 @@ namespace OCPP.Core.Server.Tests
 
         public void SeedInvoiceRecovery(Guid reservationId)
         {
+            const string checkoutSessionId = "mock_sess_invoice_recovery";
+            const string paymentIntentId = "mock_pi_invoice_recovery";
             using var context = CreateContext();
             context.ChargePoints.Add(new ChargePoint
             {
@@ -188,6 +191,8 @@ namespace OCPP.Core.Server.Tests
                 OcppIdTag = "TAG-SYNTHETIC",
                 TransactionId = 66,
                 Status = PaymentReservationStatus.Completed,
+                StripeCheckoutSessionId = checkoutSessionId,
+                StripePaymentIntentId = paymentIntentId,
                 CapturedAtUtc = new DateTime(2026, 1, 1, 11, 1, 0, DateTimeKind.Utc),
                 CapturedAmountCents = 300,
                 Currency = "EUR"
@@ -205,6 +210,31 @@ namespace OCPP.Core.Server.Tests
                 UserSessionFeeAmount = 0.50m
             });
             context.SaveChanges();
+            File.WriteAllText(
+                Path.Combine(_temporaryDirectory, "mock-stripe-store.json"),
+                $$"""
+                {
+                  "sessions": [
+                    {
+                      "id": "{{checkoutSessionId}}",
+                      "url": "https://example.test/mock-checkout",
+                      "paymentIntentId": "{{paymentIntentId}}",
+                      "status": "complete",
+                      "paymentStatus": "paid",
+                      "metadata": {}
+                    }
+                  ],
+                  "paymentIntents": [
+                    {
+                      "id": "{{paymentIntentId}}",
+                      "status": "succeeded",
+                      "amount": 300,
+                      "amountReceived": 300,
+                      "metadata": {}
+                    }
+                  ]
+                }
+                """);
         }
 
         public FinancialRecoveryProgramResult Run() => RunCore(execute: false, providerBaseUrl: null);
@@ -220,6 +250,7 @@ namespace OCPP.Core.Server.Tests
             var originalSqliteConnectionString = Environment.GetEnvironmentVariable(SqliteConnectionStringVariable);
             var originalStripeEnabled = Environment.GetEnvironmentVariable(StripeEnabledVariable);
             var originalStripeUseMockServices = Environment.GetEnvironmentVariable(StripeUseMockServicesVariable);
+            var originalStripeMockDiagnosticsDirectory = Environment.GetEnvironmentVariable(StripeMockDiagnosticsDirectoryVariable);
             var originalInvoicesEnabled = Environment.GetEnvironmentVariable(InvoicesEnabledVariable);
             var invoiceVariables = new[]
             {
@@ -262,6 +293,7 @@ namespace OCPP.Core.Server.Tests
                 Environment.SetEnvironmentVariable(SqliteConnectionStringVariable, $"Data Source={_databasePath}");
                 Environment.SetEnvironmentVariable(StripeEnabledVariable, "false");
                 Environment.SetEnvironmentVariable(StripeUseMockServicesVariable, "true");
+                Environment.SetEnvironmentVariable(StripeMockDiagnosticsDirectoryVariable, _temporaryDirectory);
                 Environment.SetEnvironmentVariable(InvoicesEnabledVariable, execute ? "true" : "false");
                 if (execute)
                 {
@@ -310,6 +342,7 @@ namespace OCPP.Core.Server.Tests
                 Environment.SetEnvironmentVariable(SqliteConnectionStringVariable, originalSqliteConnectionString);
                 Environment.SetEnvironmentVariable(StripeEnabledVariable, originalStripeEnabled);
                 Environment.SetEnvironmentVariable(StripeUseMockServicesVariable, originalStripeUseMockServices);
+                Environment.SetEnvironmentVariable(StripeMockDiagnosticsDirectoryVariable, originalStripeMockDiagnosticsDirectory);
                 Environment.SetEnvironmentVariable(InvoicesEnabledVariable, originalInvoicesEnabled);
                 foreach (var original in originalInvoiceValues)
                 {

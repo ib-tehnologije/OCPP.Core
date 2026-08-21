@@ -116,15 +116,19 @@ namespace OCPP.Core.Server
             {
                 services.AddSingleton<Payments.MockStripeStore>();
             }
-            services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
-                sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
-                sp.GetRequiredService<IOptions<Payments.PaymentFlowOptions>>(),
-                sp.GetRequiredService<ILogger<StripePaymentCoordinator>>(),
+            services.AddSingleton<Payments.IStripeSessionService>(sp =>
                 useMockStripeServices
                     ? new Payments.MockStripeSessionService(
                         sp.GetRequiredService<Payments.MockStripeStore>(),
                         sp.GetRequiredService<IConfiguration>())
-                    : new Payments.StripeSessionServiceWrapper(),
+                    : new Payments.StripeSessionServiceWrapper());
+            services.AddSingleton<Payments.IStripeCheckoutSessionReader>(sp =>
+                sp.GetRequiredService<Payments.IStripeSessionService>());
+            services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
+                sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
+                sp.GetRequiredService<IOptions<Payments.PaymentFlowOptions>>(),
+                sp.GetRequiredService<ILogger<StripePaymentCoordinator>>(),
+                sp.GetRequiredService<Payments.IStripeSessionService>(),
                 useMockStripeServices
                     ? new Payments.MockStripePaymentIntentService(sp.GetRequiredService<Payments.MockStripeStore>())
                     : new Payments.StripePaymentIntentServiceWrapper(),

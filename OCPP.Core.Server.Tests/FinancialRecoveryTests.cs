@@ -3,7 +3,9 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Invoices;
 using OCPP.Core.Server.Payments.Recovery;
+using Stripe.Checkout;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -270,6 +272,94 @@ namespace OCPP.Core.Server.Tests
     public class FinancialRecoveryServiceTests
     {
         [Fact]
+        public void Run_ExecuteRecoverInvoicePreservesStoredCheckoutContext()
+        {
+            using var dbContext = CreateContext();
+            var reservation = CreateInvoiceReservation();
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.Transactions.Add(CreateInvoiceTransaction());
+            dbContext.SaveChanges();
+            var manifest = CreateInvoiceManifest(reservation.ReservationId);
+            var sessions = new RecoverySessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = reservation.StripeCheckoutSessionId,
+                    PaymentIntentId = reservation.StripePaymentIntentId,
+                    CustomerDetails = new SessionCustomerDetails
+                    {
+                        Email = "billing@example.test",
+                        Name = "Synthetic Buyer"
+                    }
+                }
+            };
+            var invoiceIntegration = new ContextRecordingInvoiceIntegrationService();
+            var service = CreateService(invoiceIntegration, sessions);
+
+            var report = service.Run(dbContext, manifest, execute: true, manifest.Sha256);
+
+            Assert.True(report.Succeeded);
+            Assert.Equal(reservation.StripeCheckoutSessionId, sessions.LastGetId);
+            Assert.Equal("Retail", invoiceIntegration.LastDraft?.InvoiceKind);
+            Assert.Equal("billing@example.test", invoiceIntegration.LastDraft?.BuyerEmail);
+            Assert.Equal("Synthetic Buyer", invoiceIntegration.LastDraft?.BuyerPersonalName);
+        }
+
+        [Theory]
+        [InlineData("checkout-session")]
+        [InlineData("payment-intent")]
+        public void Run_ExecuteRecoverInvoiceBlocksMismatchedCheckoutContext(string mismatch)
+        {
+            using var dbContext = CreateContext();
+            var reservation = CreateInvoiceReservation();
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.Transactions.Add(CreateInvoiceTransaction());
+            dbContext.SaveChanges();
+            var manifest = CreateInvoiceManifest(reservation.ReservationId);
+            var sessions = new RecoverySessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = mismatch == "checkout-session" ? "cs_conflict" : reservation.StripeCheckoutSessionId,
+                    PaymentIntentId = mismatch == "payment-intent" ? "pi_conflict" : reservation.StripePaymentIntentId
+                }
+            };
+            var invoiceIntegration = new ContextRecordingInvoiceIntegrationService();
+            var service = CreateService(invoiceIntegration, sessions);
+
+            var report = service.Run(dbContext, manifest, execute: true, manifest.Sha256);
+
+            var item = Assert.Single(report.Items);
+            Assert.False(item.Eligible);
+            Assert.Contains("checkout session", item.Outcome, StringComparison.OrdinalIgnoreCase);
+            Assert.Null(invoiceIntegration.LastDraft);
+        }
+
+        [Fact]
+        public void Run_ExecuteRecoverInvoiceBlocksCheckoutContextRetrievalFailure()
+        {
+            using var dbContext = CreateContext();
+            var reservation = CreateInvoiceReservation();
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.Transactions.Add(CreateInvoiceTransaction());
+            dbContext.SaveChanges();
+            var manifest = CreateInvoiceManifest(reservation.ReservationId);
+            var sessions = new RecoverySessionService
+            {
+                GetException = new InvalidOperationException("synthetic Stripe retrieval failure")
+            };
+            var invoiceIntegration = new ContextRecordingInvoiceIntegrationService();
+            var service = CreateService(invoiceIntegration, sessions);
+
+            var report = service.Run(dbContext, manifest, execute: true, manifest.Sha256);
+
+            var item = Assert.Single(report.Items);
+            Assert.False(item.Eligible);
+            Assert.Contains("checkout session", item.Outcome, StringComparison.OrdinalIgnoreCase);
+            Assert.Null(invoiceIntegration.LastDraft);
+        }
+
+        [Fact]
         public void Run_DryRunDoesNotArmAuthorizationRelease()
         {
             using var dbContext = CreateContext();
@@ -509,6 +599,87 @@ namespace OCPP.Core.Server.Tests
                 StartDeadlineAtUtc = authorizedAt.AddMinutes(10),
                 UpdatedAtUtc = authorizedAt.AddMinutes(20)
             };
+        }
+
+        private static ChargePaymentReservation CreateInvoiceReservation() => new()
+        {
+            ReservationId = Guid.Parse("60606060-6060-6060-6060-606060606060"),
+            TransactionId = 6060,
+            ChargePointId = "CP-RECOVERY-CONTEXT",
+            ConnectorId = 1,
+            ChargeTagId = "TAG-RECOVERY-CONTEXT",
+            OcppIdTag = "TAG-RECOVERY-CONTEXT",
+            Status = PaymentReservationStatus.Completed,
+            StripeCheckoutSessionId = "cs_recovery_context",
+            StripePaymentIntentId = "pi_recovery_context",
+            CapturedAtUtc = new DateTime(2026, 1, 1, 11, 1, 0, DateTimeKind.Utc),
+            CapturedAmountCents = 300,
+            Currency = "EUR"
+        };
+
+        private static Transaction CreateInvoiceTransaction() => new()
+        {
+            TransactionId = 6060,
+            ChargePointId = "CP-RECOVERY-CONTEXT",
+            ConnectorId = 1,
+            StartTagId = "TAG-RECOVERY-CONTEXT",
+            StartTime = new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc),
+            StopTime = new DateTime(2026, 1, 1, 11, 0, 0, DateTimeKind.Utc),
+            Currency = "EUR",
+            EnergyKwh = 5,
+            EnergyCost = 2.50m,
+            UserSessionFeeAmount = 0.50m
+        };
+
+        private static FinancialRecoveryManifest CreateInvoiceManifest(Guid reservationId) =>
+            FinancialRecoveryManifest.Parse($$"""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "recover-invoice", "reservationId": "{{reservationId}}" }
+                  ]
+                }
+                """);
+
+        private static FinancialRecoveryService CreateService(
+            IInvoiceIntegrationService invoiceIntegration,
+            IStripeCheckoutSessionReader sessions) =>
+            new(paymentCoordinator: null!, invoiceIntegration, sessions);
+
+        private sealed class ContextRecordingInvoiceIntegrationService : IInvoiceIntegrationService
+        {
+            public InvoiceDraft? LastDraft { get; private set; }
+
+            public void HandleCompletedReservation(
+                OCPPCoreContext dbContext,
+                ChargePaymentReservation reservation,
+                Transaction transaction,
+                Session checkoutSession) =>
+                LastDraft = new InvoiceDraftBuilder().Build(reservation, transaction, checkoutSession);
+
+            public void RecoverCompletedReservation(
+                OCPPCoreContext dbContext,
+                ChargePaymentReservation reservation,
+                Transaction transaction,
+                Session checkoutSession) =>
+                LastDraft = new InvoiceDraftBuilder().Build(reservation, transaction, checkoutSession);
+        }
+
+        private sealed class RecoverySessionService : IStripeCheckoutSessionReader
+        {
+            public string? LastGetId { get; private set; }
+            public Session GetResponse { get; set; } = new();
+            public Exception? GetException { get; set; }
+
+            public Session Get(string id)
+            {
+                LastGetId = id;
+                if (GetException != null)
+                {
+                    throw GetException;
+                }
+                return GetResponse;
+            }
         }
 
         private static void RemoveTransactionLinkageEvidence(

@@ -2553,10 +2553,9 @@ namespace OCPP.Core.Server.Payments
         }
     }
 
-    internal interface IStripeSessionService
+    internal interface IStripeSessionService : IStripeCheckoutSessionReader
     {
         Session Create(SessionCreateOptions options, RequestOptions requestOptions = null);
-        Session Get(string id);
         Session Update(string id, SessionUpdateOptions options, RequestOptions requestOptions = null);
     }
 

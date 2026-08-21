@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments.Invoices;
+using Stripe.Checkout;
 
 namespace OCPP.Core.Server.Payments.Recovery
 {
@@ -11,13 +12,16 @@ namespace OCPP.Core.Server.Payments.Recovery
     {
         private readonly IPaymentCoordinator _paymentCoordinator;
         private readonly IInvoiceIntegrationService _invoiceIntegrationService;
+        private readonly IStripeCheckoutSessionReader _stripeSessionReader;
 
         public FinancialRecoveryService(
             IPaymentCoordinator paymentCoordinator,
-            IInvoiceIntegrationService invoiceIntegrationService)
+            IInvoiceIntegrationService invoiceIntegrationService,
+            IStripeCheckoutSessionReader stripeSessionReader = null)
         {
             _paymentCoordinator = paymentCoordinator;
             _invoiceIntegrationService = invoiceIntegrationService;
+            _stripeSessionReader = stripeSessionReader;
         }
 
         public FinancialRecoveryReport Run(
@@ -215,10 +219,40 @@ namespace OCPP.Core.Server.Payments.Recovery
                     return Blocked(entry, "Invoice integration service is unavailable.");
                 }
 
-                _invoiceIntegrationService.RecoverCompletedReservation(dbContext, reservation, transaction, checkoutSession: null);
+                var checkoutSession = GetVerifiedCheckoutSession(reservation);
+                if (checkoutSession == null)
+                {
+                    return Blocked(entry, "Stored checkout session context is unavailable or does not match the reservation.");
+                }
+
+                _invoiceIntegrationService.RecoverCompletedReservation(dbContext, reservation, transaction, checkoutSession);
             }
 
             return Eligible(entry, execute ? "Executed" : "DryRunEligibleProviderCreateReplayRequired");
+        }
+
+        private Session GetVerifiedCheckoutSession(ChargePaymentReservation reservation)
+        {
+            if (_stripeSessionReader == null ||
+                string.IsNullOrWhiteSpace(reservation.StripeCheckoutSessionId) ||
+                string.IsNullOrWhiteSpace(reservation.StripePaymentIntentId))
+            {
+                return null;
+            }
+
+            try
+            {
+                var session = _stripeSessionReader.Get(reservation.StripeCheckoutSessionId);
+                return session != null &&
+                       string.Equals(session.Id, reservation.StripeCheckoutSessionId, StringComparison.Ordinal) &&
+                       string.Equals(session.PaymentIntentId, reservation.StripePaymentIntentId, StringComparison.Ordinal)
+                    ? session
+                    : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static FinancialRecoveryReportItem Eligible(

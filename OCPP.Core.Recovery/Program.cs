@@ -32,7 +32,8 @@ internal static class Program
 
             var recovery = new FinancialRecoveryService(
                 scope.ServiceProvider.GetRequiredService<IPaymentCoordinator>(),
-                scope.ServiceProvider.GetRequiredService<IInvoiceIntegrationService>());
+                scope.ServiceProvider.GetRequiredService<IInvoiceIntegrationService>(),
+                scope.ServiceProvider.GetRequiredService<IStripeCheckoutSessionReader>());
             var report = recovery.Run(
                 scope.ServiceProvider.GetRequiredService<OCPPCoreContext>(),
                 manifest,
