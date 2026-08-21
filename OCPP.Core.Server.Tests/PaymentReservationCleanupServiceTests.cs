@@ -928,59 +928,134 @@ namespace OCPP.Core.Server.Tests
             var now = new DateTime(2026, 8, 16, 12, 0, 0, DateTimeKind.Utc);
             var stoppedAt = now.AddMinutes(-5);
             var availableAt = stoppedAt.AddSeconds(3);
-            var coordinator = new IdempotentPersistenceFailurePaymentCoordinator();
-            var databaseFullOnce = new FailFirstAsyncSaveChangesInterceptor();
+            var settings = new Dictionary<string, string?>
+            {
+                ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                ["Maintenance:CleanupIntervalSeconds"] = "30",
+                ["Maintenance:AvailableStatusOpenTransactionGraceMinutes"] = "1"
+            };
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+            var paymentIntents = new IdempotentCapturePaymentIntentService
+            {
+                Current = new PaymentIntent
+                {
+                    Id = "pi_disk_full",
+                    Status = "requires_capture",
+                    Amount = 1_000,
+                    AmountCapturable = 1_000,
+                    Currency = "eur"
+                }
+            };
+            var coordinator = new StripePaymentCoordinator(
+                Options.Create(new StripeOptions
+                {
+                    Enabled = true,
+                    ApiKey = "test",
+                    ReturnBaseUrl = "https://return"
+                }),
+                Options.Create(new PaymentFlowOptions
+                {
+                    MinimumSessionFeeKwh = 1.0m,
+                    MinimumChargeAmountCents = 50
+                }),
+                NullLogger<StripePaymentCoordinator>.Instance,
+                new FakeSessionService(),
+                paymentIntents,
+                new FakeEventFactory(),
+                () => now,
+                configuration: configuration);
+            var databaseFull = new DatabaseFullAfterProviderCaptureInterceptor();
             using var provider = BuildProvider(
                 coordinator,
-                new Dictionary<string, string?>
-                {
-                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
-                    ["Maintenance:CleanupIntervalSeconds"] = "30",
-                    ["Maintenance:AvailableStatusOpenTransactionGraceMinutes"] = "1"
-                },
-                databaseFullOnce);
+                settings,
+                databaseFull);
 
             var reservationId = Guid.NewGuid();
+            var activeReservationId = Guid.NewGuid();
             using (var scope = provider.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
-                db.Transactions.Add(new Transaction
-                {
-                    TransactionId = 9009,
-                    ChargePointId = "CP-DISK-FULL",
-                    ConnectorId = 1,
-                    StartTagId = "TAG-DISK-FULL",
-                    StartTime = stoppedAt.AddHours(-1),
-                    StopTime = stoppedAt,
-                    StopReason = "Local",
-                    MeterStart = 10.0,
-                    MeterStop = 12.0
-                });
-                db.ConnectorStatuses.Add(new ConnectorStatus
-                {
-                    ChargePointId = "CP-DISK-FULL",
-                    ConnectorId = 1,
-                    LastStatus = OcppConnectorStatus.Available,
-                    LastStatusTime = availableAt,
-                    LastMeter = 12.0,
-                    LastMeterTime = availableAt
-                });
-                db.ChargePaymentReservations.Add(new ChargePaymentReservation
-                {
-                    ReservationId = reservationId,
-                    ChargePointId = "CP-DISK-FULL",
-                    ConnectorId = 1,
-                    ChargeTagId = "TAG-DISK-FULL",
-                    OcppIdTag = "TAG-DISK-FULL",
-                    StripePaymentIntentId = "pi_disk_full",
-                    Status = PaymentReservationStatus.Charging,
-                    TransactionId = 9009,
-                    Currency = "eur",
-                    CreatedAtUtc = stoppedAt.AddHours(-1),
-                    UpdatedAtUtc = stoppedAt
-                });
+                db.Transactions.AddRange(
+                    new Transaction
+                    {
+                        TransactionId = 9009,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-DISK-FULL",
+                        StartTime = stoppedAt.AddHours(-1),
+                        StopTime = stoppedAt,
+                        StopReason = "Local",
+                        MeterStart = 10.0,
+                        MeterStop = 12.0
+                    },
+                    new Transaction
+                    {
+                        TransactionId = 9010,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 2,
+                        StartTagId = "TAG-STILL-ACTIVE",
+                        StartTime = now.AddMinutes(-10),
+                        MeterStart = 20.0
+                    });
+                db.ConnectorStatuses.AddRange(
+                    new ConnectorStatus
+                    {
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 1,
+                        LastStatus = OcppConnectorStatus.Available,
+                        LastStatusTime = availableAt,
+                        LastMeter = 12.0,
+                        LastMeterTime = availableAt
+                    },
+                    new ConnectorStatus
+                    {
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 2,
+                        LastStatus = "Occupied",
+                        LastStatusTime = now.AddMinutes(-1),
+                        LastMeter = 21.0,
+                        LastMeterTime = now.AddMinutes(-1)
+                    });
+                db.ChargePaymentReservations.AddRange(
+                    new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-DISK-FULL",
+                        OcppIdTag = "TAG-DISK-FULL",
+                        StripePaymentIntentId = "pi_disk_full",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = 9009,
+                        PricePerKwh = 0.50m,
+                        UserSessionFee = 0m,
+                        UsageFeePerMinute = 0m,
+                        StartUsageFeeAfterMinutes = 0,
+                        MaxUsageFeeMinutes = 0,
+                        UsageFeeAnchorMinutes = 0,
+                        Currency = "eur",
+                        CreatedAtUtc = stoppedAt.AddHours(-1),
+                        UpdatedAtUtc = stoppedAt
+                    },
+                    new ChargePaymentReservation
+                    {
+                        ReservationId = activeReservationId,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 2,
+                        ChargeTagId = "TAG-STILL-ACTIVE",
+                        OcppIdTag = "TAG-STILL-ACTIVE",
+                        StripePaymentIntentId = "pi_still_active",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = 9010,
+                        PricePerKwh = 0.50m,
+                        Currency = "eur",
+                        CreatedAtUtc = now.AddMinutes(-10),
+                        UpdatedAtUtc = now.AddMinutes(-1)
+                    });
                 db.SaveChanges();
             }
+
+            databaseFull.Arm();
 
             var service = new CleanupServiceHarness(
                 provider.GetRequiredService<IServiceScopeFactory>(),
@@ -989,7 +1064,20 @@ namespace OCPP.Core.Server.Tests
 
             var exception = await Assert.ThrowsAsync<DbUpdateException>(() => service.RunOnce());
             Assert.Contains("database or disk is full", exception.Message, StringComparison.Ordinal);
+            Assert.Equal(1, paymentIntents.CaptureCalls);
+            Assert.Equal(1, paymentIntents.ProviderCaptureEffects);
+            Assert.Contains(reservationId.ToString(), paymentIntents.CaptureIdempotencyKeys.Single(), StringComparison.Ordinal);
 
+            using (var failedScope = provider.CreateScope())
+            {
+                var failedReservation = failedScope.ServiceProvider
+                    .GetRequiredService<OCPPCoreContext>()
+                    .ChargePaymentReservations
+                    .Single(r => r.ReservationId == reservationId);
+                Assert.Equal(PaymentReservationStatus.Charging, failedReservation.Status);
+            }
+
+            databaseFull.AllowSaves();
             await service.RunOnce();
 
             using var verificationScope = provider.CreateScope();
@@ -998,10 +1086,23 @@ namespace OCPP.Core.Server.Tests
                 .ChargePaymentReservations
                 .Single(r => r.ReservationId == reservationId);
             Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
-            Assert.Equal(stoppedAt, reservation.StopTransactionAtUtc);
-            Assert.Equal(stoppedAt, reservation.DisconnectedAtUtc);
-            Assert.Equal(2, coordinator.CompletionAttempts);
-            Assert.Equal(1, coordinator.ProviderCompletionCalls);
+            Assert.Equal(100, reservation.CapturedAmountCents);
+            Assert.Equal(2, paymentIntents.GetCalls);
+            Assert.Equal(1, paymentIntents.CaptureCalls);
+            Assert.Equal(1, paymentIntents.ProviderCaptureEffects);
+            Assert.Equal(
+                PaymentReservationStatus.Charging,
+                verificationScope.ServiceProvider
+                    .GetRequiredService<OCPPCoreContext>()
+                    .ChargePaymentReservations
+                    .Single(r => r.ReservationId == activeReservationId)
+                    .Status);
+            Assert.Null(
+                verificationScope.ServiceProvider
+                    .GetRequiredService<OCPPCoreContext>()
+                    .Transactions
+                    .Single(t => t.TransactionId == 9010)
+                    .StopTime);
         }
 
         [Fact]
@@ -1413,50 +1514,99 @@ namespace OCPP.Core.Server.Tests
             throw new NotImplementedException();
     }
 
-    internal sealed class IdempotentPersistenceFailurePaymentCoordinator : RecordingPaymentCoordinator
+    internal sealed class IdempotentCapturePaymentIntentService : IStripePaymentIntentService
     {
-        private readonly HashSet<int> _providerCompletedTransactions = new();
+        public PaymentIntent Current { get; set; } = new();
+        public int GetCalls { get; private set; }
+        public int CaptureCalls { get; private set; }
+        public int ProviderCaptureEffects { get; private set; }
+        public List<string> CaptureIdempotencyKeys { get; } = new();
 
-        public int CompletionAttempts { get; private set; }
-        public int ProviderCompletionCalls { get; private set; }
-
-        public override void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
+        public PaymentIntent Get(string id)
         {
-            CompletionAttempts++;
-            if (_providerCompletedTransactions.Add(transaction.TransactionId))
-            {
-                ProviderCompletionCalls++;
-            }
-
-            var reservation = dbContext.ChargePaymentReservations
-                .SingleOrDefault(r => r.TransactionId == transaction.TransactionId);
-            if (reservation == null)
-            {
-                return;
-            }
-
-            reservation.Status = PaymentReservationStatus.Completed;
-            reservation.StopTransactionAtUtc = transaction.StopTime;
-            reservation.DisconnectedAtUtc = transaction.StopTime;
-            reservation.UpdatedAtUtc = transaction.StopTime ?? DateTime.UtcNow;
+            GetCalls++;
+            return Current;
         }
+
+        public PaymentIntent Update(
+            string id,
+            PaymentIntentUpdateOptions options,
+            RequestOptions requestOptions = null!)
+        {
+            Current.Metadata = options?.Metadata ?? Current.Metadata;
+            return Current;
+        }
+
+        public PaymentIntent Capture(
+            string id,
+            PaymentIntentCaptureOptions options,
+            RequestOptions requestOptions = null!)
+        {
+            CaptureCalls++;
+            CaptureIdempotencyKeys.Add(requestOptions?.IdempotencyKey ?? string.Empty);
+
+            if (string.Equals(Current.Status, "requires_capture", StringComparison.OrdinalIgnoreCase))
+            {
+                ProviderCaptureEffects++;
+                Current = new PaymentIntent
+                {
+                    Id = id,
+                    Status = "succeeded",
+                    Amount = Current.Amount,
+                    AmountReceived = options.AmountToCapture ?? 0,
+                    Currency = Current.Currency
+                };
+            }
+
+            return Current;
+        }
+
+        public PaymentIntent Cancel(string id, RequestOptions requestOptions = null!) =>
+            throw new InvalidOperationException("Cancellation is outside this completion regression.");
     }
 
-    internal sealed class FailFirstAsyncSaveChangesInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    internal sealed class DatabaseFullAfterProviderCaptureInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
     {
-        private int _failNextSave = 1;
+        private bool _armed;
+        private int _synchronousSaves;
+
+        public void Arm()
+        {
+            _armed = true;
+            _synchronousSaves = 0;
+        }
+
+        public void AllowSaves()
+        {
+            _armed = false;
+        }
+
+        public override Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> SavingChanges(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result)
+        {
+            if (_armed && ++_synchronousSaves >= 2)
+            {
+                throw DatabaseFullException();
+            }
+
+            return base.SavingChanges(eventData, result);
+        }
 
         public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
             Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
             Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
         {
-            if (Interlocked.Exchange(ref _failNextSave, 0) == 1)
+            if (_armed)
             {
-                throw new DbUpdateException("SQLite Error 13: 'database or disk is full'.");
+                throw DatabaseFullException();
             }
 
             return base.SavingChangesAsync(eventData, result, cancellationToken);
         }
+
+        private static DbUpdateException DatabaseFullException() =>
+            new("SQLite Error 13: 'database or disk is full'.");
     }
 }
