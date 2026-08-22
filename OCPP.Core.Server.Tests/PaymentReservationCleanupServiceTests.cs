@@ -558,6 +558,554 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task CleanupAsync_CompletesChargingReservation_WhenMatchingTransactionAlreadyStoppedAndConnectorLaterAvailable()
+        {
+            var now = new DateTime(2026, 8, 16, 12, 0, 0, DateTimeKind.Utc);
+            var stoppedAt = now.AddMinutes(-5);
+            var availableAt = stoppedAt.AddSeconds(3);
+            var coordinator = new RecordingPaymentCoordinator();
+            var logger = new RecordingLogger<PaymentReservationCleanupService>();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30",
+                    ["Maintenance:AvailableStatusOpenTransactionGraceMinutes"] = "1"
+                });
+
+            var reservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.Transactions.Add(new Transaction
+                {
+                    TransactionId = 9004,
+                    ChargePointId = "CP-CLOSED",
+                    ConnectorId = 1,
+                    StartTagId = "TAG-CLOSED",
+                    StartTime = stoppedAt.AddHours(-1),
+                    StopTime = stoppedAt,
+                    StopReason = "Local",
+                    MeterStart = 10.0,
+                    MeterStop = 12.0,
+                    ChargingEndedAtUtc = stoppedAt
+                });
+                db.ConnectorStatuses.Add(new ConnectorStatus
+                {
+                    ChargePointId = "CP-CLOSED",
+                    ConnectorId = 1,
+                    LastStatus = OcppConnectorStatus.Available,
+                    LastStatusTime = availableAt,
+                    LastMeter = 12.0,
+                    LastMeterTime = availableAt
+                });
+                db.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP-CLOSED",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG-CLOSED",
+                    OcppIdTag = "TAG-CLOSED",
+                    StripePaymentIntentId = "pi_closed",
+                    Status = PaymentReservationStatus.Charging,
+                    TransactionId = 9004,
+                    Currency = "eur",
+                    CreatedAtUtc = stoppedAt.AddHours(-1),
+                    UpdatedAtUtc = stoppedAt
+                });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>(),
+                logger,
+                utcNow: now);
+
+            await service.RunOnce();
+
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                var reservation = db.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                var transaction = db.Transactions.Single(t => t.TransactionId == 9004);
+
+                Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+                Assert.Equal(stoppedAt, reservation.StopTransactionAtUtc);
+                Assert.Equal(stoppedAt, reservation.DisconnectedAtUtc);
+                Assert.Equal(stoppedAt, transaction.StopTime);
+                Assert.Equal("Local", transaction.StopReason);
+            }
+
+            Assert.Equal(new[] { 9004 }, coordinator.CompleteCalls);
+            Assert.Contains(logger.Entries, entry =>
+                entry.Level == LogLevel.Warning &&
+                entry.Message.Contains("Completed Charging recovery candidate", StringComparison.Ordinal) &&
+                entry.Message.Contains("cp=CP-CLOSED", StringComparison.Ordinal) &&
+                entry.Message.Contains("connector=1", StringComparison.Ordinal) &&
+                entry.Message.Contains("tx=9004", StringComparison.Ordinal) &&
+                entry.Message.Contains("reservation=", StringComparison.Ordinal) &&
+                !entry.Message.Contains("TAG-CLOSED", StringComparison.Ordinal) &&
+                !entry.Message.Contains("pi_closed", StringComparison.Ordinal));
+        }
+
+        [Theory]
+        [InlineData("CP-OTHER", 1)]
+        [InlineData("CP-IDENTITY", 2)]
+        public async Task CleanupAsync_DoesNotCompleteClosedChargingReservation_WhenTransactionIdentityDoesNotMatch(
+            string transactionChargePointId,
+            int transactionConnectorId)
+        {
+            var now = new DateTime(2026, 8, 16, 12, 0, 0, DateTimeKind.Utc);
+            var stoppedAt = now.AddMinutes(-5);
+            var coordinator = new RecordingPaymentCoordinator();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30",
+                    ["Maintenance:AvailableStatusOpenTransactionGraceMinutes"] = "1"
+                });
+
+            var reservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.Transactions.Add(new Transaction
+                {
+                    TransactionId = 9005,
+                    ChargePointId = transactionChargePointId,
+                    ConnectorId = transactionConnectorId,
+                    StartTagId = "TAG-IDENTITY",
+                    StartTime = stoppedAt.AddHours(-1),
+                    StopTime = stoppedAt,
+                    StopReason = "Local",
+                    MeterStart = 10.0,
+                    MeterStop = 12.0
+                });
+                db.ConnectorStatuses.Add(new ConnectorStatus
+                {
+                    ChargePointId = "CP-IDENTITY",
+                    ConnectorId = 1,
+                    LastStatus = OcppConnectorStatus.Available,
+                    LastStatusTime = stoppedAt.AddSeconds(3)
+                });
+                db.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP-IDENTITY",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG-IDENTITY",
+                    OcppIdTag = "TAG-IDENTITY",
+                    StripePaymentIntentId = "pi_identity",
+                    Status = PaymentReservationStatus.Charging,
+                    TransactionId = 9005,
+                    Currency = "eur",
+                    CreatedAtUtc = stoppedAt.AddHours(-1),
+                    UpdatedAtUtc = stoppedAt
+                });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>(),
+                utcNow: now);
+
+            await service.RunOnce();
+
+            using var verificationScope = provider.CreateScope();
+            var reservation = verificationScope.ServiceProvider
+                .GetRequiredService<OCPPCoreContext>()
+                .ChargePaymentReservations
+                .Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentReservationStatus.Charging, reservation.Status);
+            Assert.Empty(coordinator.CompleteCalls);
+        }
+
+        [Theory]
+        [InlineData(PaymentReservationStatus.Charging, "Occupied", 297)]
+        [InlineData(PaymentReservationStatus.Charging, OcppConnectorStatus.Available, null)]
+        [InlineData(PaymentReservationStatus.Charging, OcppConnectorStatus.Available, 301)]
+        [InlineData(PaymentReservationStatus.Charging, OcppConnectorStatus.Available, 30)]
+        [InlineData(PaymentReservationStatus.Completed, OcppConnectorStatus.Available, 297)]
+        public async Task CleanupAsync_DoesNotCompleteClosedChargingReservation_WithoutAllRecoveryEvidence(
+            string reservationStatus,
+            string connectorStatus,
+            int? connectorStatusAgeSeconds)
+        {
+            var now = new DateTime(2026, 8, 16, 12, 0, 0, DateTimeKind.Utc);
+            var stoppedAt = now.AddMinutes(-5);
+            var coordinator = new RecordingPaymentCoordinator();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30",
+                    ["Maintenance:AvailableStatusOpenTransactionGraceMinutes"] = "1"
+                });
+
+            var reservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.Transactions.Add(new Transaction
+                {
+                    TransactionId = 9006,
+                    ChargePointId = "CP-GUARD",
+                    ConnectorId = 1,
+                    StartTagId = "TAG-GUARD",
+                    StartTime = stoppedAt.AddHours(-1),
+                    StopTime = stoppedAt,
+                    StopReason = "Local",
+                    MeterStart = 10.0,
+                    MeterStop = 12.0
+                });
+                db.ConnectorStatuses.Add(new ConnectorStatus
+                {
+                    ChargePointId = "CP-GUARD",
+                    ConnectorId = 1,
+                    LastStatus = connectorStatus,
+                    LastStatusTime = connectorStatusAgeSeconds.HasValue
+                        ? now.AddSeconds(-connectorStatusAgeSeconds.Value)
+                        : null
+                });
+                db.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP-GUARD",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG-GUARD",
+                    OcppIdTag = "TAG-GUARD",
+                    StripePaymentIntentId = "pi_guard",
+                    Status = reservationStatus,
+                    TransactionId = 9006,
+                    Currency = "eur",
+                    CreatedAtUtc = stoppedAt.AddHours(-1),
+                    UpdatedAtUtc = stoppedAt
+                });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>(),
+                utcNow: now);
+
+            await service.RunOnce();
+
+            using var verificationScope = provider.CreateScope();
+            var reservation = verificationScope.ServiceProvider
+                .GetRequiredService<OCPPCoreContext>()
+                .ChargePaymentReservations
+                .Single(r => r.ReservationId == reservationId);
+            Assert.Equal(reservationStatus, reservation.Status);
+            Assert.Empty(coordinator.CompleteCalls);
+        }
+
+        [Fact]
+        public async Task CleanupAsync_RecoversOnlyAvailableConnector_WhenAnotherConnectorHasOpenTransaction()
+        {
+            var now = new DateTime(2026, 8, 16, 12, 0, 0, DateTimeKind.Utc);
+            var stoppedAt = now.AddMinutes(-5);
+            var availableAt = stoppedAt.AddSeconds(3);
+            var coordinator = new RecordingPaymentCoordinator();
+            using var provider = BuildProvider(
+                coordinator,
+                new Dictionary<string, string?>
+                {
+                    ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                    ["Maintenance:CleanupIntervalSeconds"] = "30",
+                    ["Maintenance:AvailableStatusOpenTransactionGraceMinutes"] = "1"
+                });
+
+            var recoveredReservationId = Guid.NewGuid();
+            var activeReservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.Transactions.AddRange(
+                    new Transaction
+                    {
+                        TransactionId = 9007,
+                        ChargePointId = "CP-MULTI",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-RECOVERED",
+                        StartTime = stoppedAt.AddHours(-1),
+                        StopTime = stoppedAt,
+                        StopReason = "Local",
+                        MeterStart = 10.0,
+                        MeterStop = 12.0
+                    },
+                    new Transaction
+                    {
+                        TransactionId = 9008,
+                        ChargePointId = "CP-MULTI",
+                        ConnectorId = 2,
+                        StartTagId = "TAG-ACTIVE",
+                        StartTime = now.AddMinutes(-10),
+                        MeterStart = 20.0
+                    });
+                db.ConnectorStatuses.AddRange(
+                    new ConnectorStatus
+                    {
+                        ChargePointId = "CP-MULTI",
+                        ConnectorId = 1,
+                        LastStatus = OcppConnectorStatus.Available,
+                        LastStatusTime = availableAt,
+                        LastMeter = 12.0,
+                        LastMeterTime = availableAt
+                    },
+                    new ConnectorStatus
+                    {
+                        ChargePointId = "CP-MULTI",
+                        ConnectorId = 2,
+                        LastStatus = "Occupied",
+                        LastStatusTime = now.AddMinutes(-1),
+                        LastMeter = 21.0,
+                        LastMeterTime = now.AddMinutes(-1)
+                    });
+                db.ChargePaymentReservations.AddRange(
+                    new ChargePaymentReservation
+                    {
+                        ReservationId = recoveredReservationId,
+                        ChargePointId = "CP-MULTI",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-RECOVERED",
+                        OcppIdTag = "TAG-RECOVERED",
+                        StripePaymentIntentId = "pi_recovered",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = 9007,
+                        Currency = "eur",
+                        CreatedAtUtc = stoppedAt.AddHours(-1),
+                        UpdatedAtUtc = stoppedAt
+                    },
+                    new ChargePaymentReservation
+                    {
+                        ReservationId = activeReservationId,
+                        ChargePointId = "CP-MULTI",
+                        ConnectorId = 2,
+                        ChargeTagId = "TAG-ACTIVE",
+                        OcppIdTag = "TAG-ACTIVE",
+                        StripePaymentIntentId = "pi_active",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = 9008,
+                        Currency = "eur",
+                        CreatedAtUtc = now.AddMinutes(-10),
+                        UpdatedAtUtc = now.AddMinutes(-1)
+                    });
+                db.SaveChanges();
+            }
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>(),
+                utcNow: now);
+
+            await service.RunOnce();
+
+            using var verificationScope = provider.CreateScope();
+            var verificationDb = verificationScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+            Assert.Equal(
+                PaymentReservationStatus.Completed,
+                verificationDb.ChargePaymentReservations.Single(r => r.ReservationId == recoveredReservationId).Status);
+            Assert.Equal(
+                PaymentReservationStatus.Charging,
+                verificationDb.ChargePaymentReservations.Single(r => r.ReservationId == activeReservationId).Status);
+            Assert.Null(verificationDb.Transactions.Single(t => t.TransactionId == 9008).StopTime);
+            Assert.Equal(
+                "Occupied",
+                verificationDb.ConnectorStatuses.Single(c => c.ChargePointId == "CP-MULTI" && c.ConnectorId == 2).LastStatus);
+            Assert.Equal(new[] { 9007 }, coordinator.CompleteCalls);
+        }
+
+        [Fact]
+        public async Task CleanupAsync_RetriesClosedChargingRecoveryAfterDatabaseFull_WithoutDuplicateProviderCompletion()
+        {
+            var now = new DateTime(2026, 8, 16, 12, 0, 0, DateTimeKind.Utc);
+            var stoppedAt = now.AddMinutes(-5);
+            var availableAt = stoppedAt.AddSeconds(3);
+            var settings = new Dictionary<string, string?>
+            {
+                ["Maintenance:PendingPaymentTimeoutMinutes"] = "15",
+                ["Maintenance:CleanupIntervalSeconds"] = "30",
+                ["Maintenance:AvailableStatusOpenTransactionGraceMinutes"] = "1"
+            };
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+            var paymentIntents = new IdempotentCapturePaymentIntentService
+            {
+                Current = new PaymentIntent
+                {
+                    Id = "pi_disk_full",
+                    Status = "requires_capture",
+                    Amount = 1_000,
+                    AmountCapturable = 1_000,
+                    Currency = "eur"
+                }
+            };
+            var coordinator = new StripePaymentCoordinator(
+                Options.Create(new StripeOptions
+                {
+                    Enabled = true,
+                    ApiKey = "test",
+                    ReturnBaseUrl = "https://return"
+                }),
+                Options.Create(new PaymentFlowOptions
+                {
+                    MinimumSessionFeeKwh = 1.0m,
+                    MinimumChargeAmountCents = 50
+                }),
+                NullLogger<StripePaymentCoordinator>.Instance,
+                new FakeSessionService(),
+                paymentIntents,
+                new FakeEventFactory(),
+                () => now,
+                configuration: configuration);
+            var databaseFull = new DatabaseFullAfterProviderCaptureInterceptor();
+            using var provider = BuildProvider(
+                coordinator,
+                settings,
+                databaseFull);
+
+            var reservationId = Guid.NewGuid();
+            var activeReservationId = Guid.NewGuid();
+            using (var scope = provider.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                db.Transactions.AddRange(
+                    new Transaction
+                    {
+                        TransactionId = 9009,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 1,
+                        StartTagId = "TAG-DISK-FULL",
+                        StartTime = stoppedAt.AddHours(-1),
+                        StopTime = stoppedAt,
+                        StopReason = "Local",
+                        MeterStart = 10.0,
+                        MeterStop = 12.0
+                    },
+                    new Transaction
+                    {
+                        TransactionId = 9010,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 2,
+                        StartTagId = "TAG-STILL-ACTIVE",
+                        StartTime = now.AddMinutes(-10),
+                        MeterStart = 20.0
+                    });
+                db.ConnectorStatuses.AddRange(
+                    new ConnectorStatus
+                    {
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 1,
+                        LastStatus = OcppConnectorStatus.Available,
+                        LastStatusTime = availableAt,
+                        LastMeter = 12.0,
+                        LastMeterTime = availableAt
+                    },
+                    new ConnectorStatus
+                    {
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 2,
+                        LastStatus = "Occupied",
+                        LastStatusTime = now.AddMinutes(-1),
+                        LastMeter = 21.0,
+                        LastMeterTime = now.AddMinutes(-1)
+                    });
+                db.ChargePaymentReservations.AddRange(
+                    new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-DISK-FULL",
+                        OcppIdTag = "TAG-DISK-FULL",
+                        StripePaymentIntentId = "pi_disk_full",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = 9009,
+                        PricePerKwh = 0.50m,
+                        UserSessionFee = 0m,
+                        UsageFeePerMinute = 0m,
+                        StartUsageFeeAfterMinutes = 0,
+                        MaxUsageFeeMinutes = 0,
+                        UsageFeeAnchorMinutes = 0,
+                        Currency = "eur",
+                        CreatedAtUtc = stoppedAt.AddHours(-1),
+                        UpdatedAtUtc = stoppedAt
+                    },
+                    new ChargePaymentReservation
+                    {
+                        ReservationId = activeReservationId,
+                        ChargePointId = "CP-DISK-FULL",
+                        ConnectorId = 2,
+                        ChargeTagId = "TAG-STILL-ACTIVE",
+                        OcppIdTag = "TAG-STILL-ACTIVE",
+                        StripePaymentIntentId = "pi_still_active",
+                        Status = PaymentReservationStatus.Charging,
+                        TransactionId = 9010,
+                        PricePerKwh = 0.50m,
+                        Currency = "eur",
+                        CreatedAtUtc = now.AddMinutes(-10),
+                        UpdatedAtUtc = now.AddMinutes(-1)
+                    });
+                db.SaveChanges();
+            }
+
+            databaseFull.Arm();
+
+            var service = new CleanupServiceHarness(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredService<IConfiguration>(),
+                utcNow: now);
+
+            var exception = await Assert.ThrowsAsync<DbUpdateException>(() => service.RunOnce());
+            Assert.Contains("database or disk is full", exception.Message, StringComparison.Ordinal);
+            Assert.Equal(1, paymentIntents.CaptureCalls);
+            Assert.Equal(1, paymentIntents.ProviderCaptureEffects);
+            Assert.Contains(reservationId.ToString(), paymentIntents.CaptureIdempotencyKeys.Single(), StringComparison.Ordinal);
+
+            using (var failedScope = provider.CreateScope())
+            {
+                var failedReservation = failedScope.ServiceProvider
+                    .GetRequiredService<OCPPCoreContext>()
+                    .ChargePaymentReservations
+                    .Single(r => r.ReservationId == reservationId);
+                Assert.Equal(PaymentReservationStatus.Charging, failedReservation.Status);
+            }
+
+            databaseFull.AllowSaves();
+            await service.RunOnce();
+
+            using var verificationScope = provider.CreateScope();
+            var reservation = verificationScope.ServiceProvider
+                .GetRequiredService<OCPPCoreContext>()
+                .ChargePaymentReservations
+                .Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.Equal(100, reservation.CapturedAmountCents);
+            Assert.Equal(2, paymentIntents.GetCalls);
+            Assert.Equal(1, paymentIntents.CaptureCalls);
+            Assert.Equal(1, paymentIntents.ProviderCaptureEffects);
+            Assert.Equal(
+                PaymentReservationStatus.Charging,
+                verificationScope.ServiceProvider
+                    .GetRequiredService<OCPPCoreContext>()
+                    .ChargePaymentReservations
+                    .Single(r => r.ReservationId == activeReservationId)
+                    .Status);
+            Assert.Null(
+                verificationScope.ServiceProvider
+                    .GetRequiredService<OCPPCoreContext>()
+                    .Transactions
+                    .Single(t => t.TransactionId == 9010)
+                    .StopTime);
+        }
+
+        [Fact]
         public async Task CleanupAsync_CompletesWaitingForDisconnectReservation_WhenConnectorPersistedAvailable()
         {
             var coordinator = new RecordingPaymentCoordinator();
@@ -799,7 +1347,8 @@ namespace OCPP.Core.Server.Tests
 
         private static ServiceProvider BuildProvider(
             IPaymentCoordinator coordinator,
-            IDictionary<string, string?> configurationData)
+            IDictionary<string, string?> configurationData,
+            Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor? saveChangesInterceptor = null)
         {
             var dbName = Guid.NewGuid().ToString();
             var services = new ServiceCollection();
@@ -809,7 +1358,13 @@ namespace OCPP.Core.Server.Tests
                     .AddInMemoryCollection(configurationData)
                     .Build());
             services.AddDbContext<OCPPCoreContext>(options =>
-                options.UseInMemoryDatabase(dbName));
+            {
+                options.UseInMemoryDatabase(dbName);
+                if (saveChangesInterceptor != null)
+                {
+                    options.AddInterceptors(saveChangesInterceptor);
+                }
+            });
             services.AddSingleton<IPaymentCoordinator>(coordinator);
             return services.BuildServiceProvider();
         }
@@ -886,7 +1441,7 @@ namespace OCPP.Core.Server.Tests
         }
     }
 
-    internal sealed class RecordingPaymentCoordinator : IPaymentCoordinator
+    internal class RecordingPaymentCoordinator : IPaymentCoordinator
     {
         public bool IsEnabled => true;
         public List<(Guid ReservationId, string Reason)> CancelCalls { get; } = new();
@@ -935,7 +1490,7 @@ namespace OCPP.Core.Server.Tests
         public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) =>
             throw new NotImplementedException();
 
-        public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
+        public virtual void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction)
         {
             CompleteCalls.Add(transaction.TransactionId);
 
@@ -957,5 +1512,101 @@ namespace OCPP.Core.Server.Tests
 
         public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) =>
             throw new NotImplementedException();
+    }
+
+    internal sealed class IdempotentCapturePaymentIntentService : IStripePaymentIntentService
+    {
+        public PaymentIntent Current { get; set; } = new();
+        public int GetCalls { get; private set; }
+        public int CaptureCalls { get; private set; }
+        public int ProviderCaptureEffects { get; private set; }
+        public List<string> CaptureIdempotencyKeys { get; } = new();
+
+        public PaymentIntent Get(string id)
+        {
+            GetCalls++;
+            return Current;
+        }
+
+        public PaymentIntent Update(
+            string id,
+            PaymentIntentUpdateOptions options,
+            RequestOptions requestOptions = null!)
+        {
+            Current.Metadata = options?.Metadata ?? Current.Metadata;
+            return Current;
+        }
+
+        public PaymentIntent Capture(
+            string id,
+            PaymentIntentCaptureOptions options,
+            RequestOptions requestOptions = null!)
+        {
+            CaptureCalls++;
+            CaptureIdempotencyKeys.Add(requestOptions?.IdempotencyKey ?? string.Empty);
+
+            if (string.Equals(Current.Status, "requires_capture", StringComparison.OrdinalIgnoreCase))
+            {
+                ProviderCaptureEffects++;
+                Current = new PaymentIntent
+                {
+                    Id = id,
+                    Status = "succeeded",
+                    Amount = Current.Amount,
+                    AmountReceived = options.AmountToCapture ?? 0,
+                    Currency = Current.Currency
+                };
+            }
+
+            return Current;
+        }
+
+        public PaymentIntent Cancel(string id, RequestOptions requestOptions = null!) =>
+            throw new InvalidOperationException("Cancellation is outside this completion regression.");
+    }
+
+    internal sealed class DatabaseFullAfterProviderCaptureInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        private bool _armed;
+        private int _synchronousSaves;
+
+        public void Arm()
+        {
+            _armed = true;
+            _synchronousSaves = 0;
+        }
+
+        public void AllowSaves()
+        {
+            _armed = false;
+        }
+
+        public override Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> SavingChanges(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result)
+        {
+            if (_armed && ++_synchronousSaves >= 2)
+            {
+                throw DatabaseFullException();
+            }
+
+            return base.SavingChanges(eventData, result);
+        }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_armed)
+            {
+                throw DatabaseFullException();
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+
+        private static DbUpdateException DatabaseFullException() =>
+            new("SQLite Error 13: 'database or disk is full'.");
     }
 }

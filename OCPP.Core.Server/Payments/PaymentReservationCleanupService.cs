@@ -99,6 +99,7 @@ namespace OCPP.Core.Server.Payments
                 .ToListAsync(token);
 
             var availableOpenTransactions = await LoadAvailableOpenTransactionsAsync(db, now, token);
+            var completedChargingReservations = await LoadCompletedChargingAvailableReservationsAsync(db, now, token);
             var waitingForDisconnectReservations = await LoadWaitingForDisconnectAvailableReservationsAsync(db, now, token);
             var inProgressTimeoutMinutes = Math.Clamp(
                 _configuration.GetValue<int?>("Maintenance:AuthorizationReleaseInProgressTimeoutMinutes") ?? 5,
@@ -121,6 +122,7 @@ namespace OCPP.Core.Server.Payments
             if (!stale.Any() &&
                 !timedOutStarts.Any() &&
                 !availableOpenTransactions.Any() &&
+                !completedChargingReservations.Any() &&
                 !waitingForDisconnectReservations.Any() &&
                 !dueAuthorizationReleases.Any()) return;
 
@@ -209,6 +211,24 @@ namespace OCPP.Core.Server.Payments
                 }
             }
 
+            foreach (var completedCharging in completedChargingReservations)
+            {
+                LogCompletedChargingRecoveryCandidate(completedCharging, now);
+
+                try
+                {
+                    coordinator?.CompleteReservation(db, completedCharging.Transaction);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "PaymentReservationCleanup => CompleteReservation failed for completed Charging reservation={ReservationId} tx={TransactionId}",
+                        completedCharging.Reservation.ReservationId,
+                        completedCharging.Transaction.TransactionId);
+                }
+            }
+
             foreach (var waitingForDisconnect in waitingForDisconnectReservations)
             {
                 LogWaitingForDisconnectRecoveryCandidate(waitingForDisconnect, now);
@@ -272,6 +292,12 @@ namespace OCPP.Core.Server.Payments
                     "PaymentReservationCleanupService => recovered {Count} open transactions from persisted Available connector status",
                     availableOpenTransactions.Count);
             }
+            if (completedChargingReservations.Any())
+            {
+                _logger.LogWarning(
+                    "PaymentReservationCleanupService => retried completion for {Count} Charging reservations with completed transactions and persisted Available connector status",
+                    completedChargingReservations.Count);
+            }
             if (waitingForDisconnectReservations.Any())
             {
                 _logger.LogWarning(
@@ -316,6 +342,48 @@ namespace OCPP.Core.Server.Payments
                     item.ConnectorStatus.LastStatus == OcppConnectorStatus.Available &&
                     item.ConnectorStatus.LastStatusTime.HasValue &&
                     item.ConnectorStatus.LastStatusTime.Value >= item.Transaction.StartTime &&
+                    item.ConnectorStatus.LastStatusTime.Value <= cutoff)
+                .ToListAsync(token);
+        }
+
+        private async Task<List<AvailableOpenTransaction>> LoadCompletedChargingAvailableReservationsAsync(
+            OCPPCoreContext db,
+            DateTime now,
+            CancellationToken token)
+        {
+            if (_availableStatusCloseGrace <= TimeSpan.Zero)
+            {
+                return new List<AvailableOpenTransaction>();
+            }
+
+            DateTime cutoff = now.Subtract(_availableStatusCloseGrace);
+
+            return await db.ChargePaymentReservations
+                .Where(r =>
+                    r.Status == PaymentReservationStatus.Charging &&
+                    r.TransactionId.HasValue)
+                .Join(
+                    db.Transactions,
+                    reservation => reservation.TransactionId.Value,
+                    transaction => transaction.TransactionId,
+                    (reservation, transaction) => new { Reservation = reservation, Transaction = transaction })
+                .Join(
+                    db.ConnectorStatuses,
+                    joined => new { joined.Reservation.ChargePointId, joined.Reservation.ConnectorId },
+                    connectorStatus => new { connectorStatus.ChargePointId, connectorStatus.ConnectorId },
+                    (joined, connectorStatus) => new AvailableOpenTransaction
+                    {
+                        Reservation = joined.Reservation,
+                        Transaction = joined.Transaction,
+                        ConnectorStatus = connectorStatus
+                    })
+                .Where(item =>
+                    item.Transaction.StopTime.HasValue &&
+                    item.Transaction.ChargePointId == item.Reservation.ChargePointId &&
+                    item.Transaction.ConnectorId == item.Reservation.ConnectorId &&
+                    item.ConnectorStatus.LastStatus == OcppConnectorStatus.Available &&
+                    item.ConnectorStatus.LastStatusTime.HasValue &&
+                    item.ConnectorStatus.LastStatusTime.Value >= item.Transaction.StopTime.Value &&
                     item.ConnectorStatus.LastStatusTime.Value <= cutoff)
                 .ToListAsync(token);
         }
@@ -395,6 +463,32 @@ namespace OCPP.Core.Server.Payments
                 connectorStatus.LastMeterTime.HasValue ? WholeMinutes(now - connectorStatus.LastMeterTime.Value) : (int?)null,
                 reservation?.ReservationId,
                 reservation?.Status,
+                reservation?.UpdatedAtUtc);
+        }
+
+        private void LogCompletedChargingRecoveryCandidate(AvailableOpenTransaction item, DateTime now)
+        {
+            if (item?.Transaction == null || item.ConnectorStatus == null)
+            {
+                return;
+            }
+
+            var transaction = item.Transaction;
+            var connectorStatus = item.ConnectorStatus;
+            var reservation = item.Reservation;
+
+            _logger.LogWarning(
+                "PaymentReservationCleanup => Completed Charging recovery candidate cp={ChargePointId} connector={ConnectorId} tx={TransactionId} txStart={TransactionStart:u} txStop={TransactionStop:u} stopReason={StopReason} connectorStatus={ConnectorStatus} connectorStatusAt={ConnectorStatusAt:u} statusAgeMinutes={StatusAgeMinutes} reservation={ReservationId} reservationUpdatedAt={ReservationUpdatedAt:u}",
+                transaction.ChargePointId,
+                transaction.ConnectorId,
+                transaction.TransactionId,
+                transaction.StartTime,
+                transaction.StopTime,
+                transaction.StopReason,
+                connectorStatus.LastStatus,
+                connectorStatus.LastStatusTime,
+                connectorStatus.LastStatusTime.HasValue ? WholeMinutes(now - connectorStatus.LastStatusTime.Value) : (int?)null,
+                reservation?.ReservationId,
                 reservation?.UpdatedAtUtc);
         }
 
