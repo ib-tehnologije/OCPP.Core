@@ -368,7 +368,7 @@
       "start.idleFee": "Idle fee",
       "start.chargedAfterChargingEnds": "Charged after charging ends",
       "start.chargedFromSessionStart": "Charged from session start",
-      "start.grace": "toleranca",
+      "start.grace": "grace",
       "start.max": "max",
       "start.maxEnergy": "Max. energy",
       "start.preAuthorization": "Pre-authorization (est.)",

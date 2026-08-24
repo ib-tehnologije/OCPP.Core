@@ -100,6 +100,7 @@ Known behavior:
 - Public stop request path.
 - R1/company invoice data submission with OIB validation.
 - Public map, start, payment result, and status pages support the language selector for visible step, connector, pricing, session-status, known validation/error, recovery-copy, and default portal-branding text.
+- The idle-fee grace label follows the selected language; English renders `grace` while the existing non-English labels remain localized.
 - Configurable branding, SEO, QR scanner, light theme, support, and footer settings.
 - The checked PWA manifest and favicon assets use the public `EV.Charge` app name and icon.
 - Customer notification emails use bilingual Croatian/English templates and are not currently tied to the public portal language selector.

@@ -94,6 +94,56 @@ test("public portal translations localize default branding copy", async ({ page 
   await expect(page.locator("#footer-tagline")).toHaveText("Usa le colonnine rapide con prezzi chiari e avvio immediato della sessione.");
 });
 
+test("public start defaults the idle-fee grace label to English", async ({ page }) => {
+  const publicPortalScript = fs.readFileSync(publicPortalScriptPath, "utf8");
+
+  await page.route("http://public.local/Public/Start", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: `<!doctype html>
+        <html lang="en">
+          <body>
+            <span id="idle-fee-grace" data-i18n="start.grace">grace</span>
+            <script>${publicPortalScript}</script>
+          </body>
+        </html>`,
+    });
+  });
+
+  await page.goto("http://public.local/Public/Start");
+
+  await expect(page.locator("#idle-fee-grace")).toHaveText("grace");
+});
+
+test("selecting English stores and renders the English grace label", async ({ page }) => {
+  const publicPortalScript = fs.readFileSync(publicPortalScriptPath, "utf8");
+
+  await page.route("http://public.local/Public/Start?lang=it", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: `<!doctype html>
+        <html lang="en">
+          <body>
+            <button type="button" data-public-lang="it">Italiano</button>
+            <button type="button" data-public-lang="en">English</button>
+            <span id="idle-fee-grace" data-i18n="start.grace">grace</span>
+            <script>${publicPortalScript}</script>
+          </body>
+        </html>`,
+    });
+  });
+
+  await page.goto("http://public.local/Public/Start?lang=it");
+  await expect(page.locator("#idle-fee-grace")).toHaveText("tolleranza");
+
+  await page.locator('[data-public-lang="en"]').click();
+
+  await expect(page.locator("#idle-fee-grace")).toHaveText("grace");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("publicPortalLang"))).toBe("en");
+});
+
 test("public portal translations localize Italian start-flow labels", async ({ page }) => {
   const publicPortalScript = fs.readFileSync(publicPortalScriptPath, "utf8");
 
