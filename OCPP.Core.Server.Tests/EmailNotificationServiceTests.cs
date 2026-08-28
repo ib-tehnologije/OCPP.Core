@@ -14,6 +14,59 @@ namespace OCPP.Core.Server.Tests
     public class EmailNotificationServiceTests
     {
         [Fact]
+        public void SendR1InvoiceRequested_UsesSelfServiceEditCallToAction()
+        {
+            string sinkDirectory = Path.Combine(Path.GetTempPath(), $"ocpp-email-sink-{Guid.NewGuid():N}");
+
+            try
+            {
+                var service = new EmailNotificationService(
+                    Options.Create(new NotificationOptions
+                    {
+                        EnableCustomerEmails = true,
+                        SinkDirectory = sinkDirectory
+                    }),
+                    NullLogger<EmailNotificationService>.Instance);
+                var reservation = new ChargePaymentReservation
+                {
+                    ReservationId = Guid.NewGuid(),
+                    ChargePointId = "CP-R1",
+                    ConnectorId = 1,
+                    Currency = "eur"
+                };
+                const string statusUrl = "https://example.test/Payments/Status?reservationId=edit&origin=public";
+
+                service.SendR1InvoiceRequested(
+                    "billing@example.com",
+                    reservation,
+                    new ChargePoint { ChargePointId = "CP-R1", Name = "Station R1" },
+                    statusUrl,
+                    "Example d.o.o.",
+                    "12345678903");
+
+                string sinkFile = Assert.Single(Directory.GetFiles(sinkDirectory, "*.json"));
+                using var payload = JsonDocument.Parse(File.ReadAllText(sinkFile));
+                var root = payload.RootElement;
+                string? htmlBody = root.GetProperty("htmlBody").GetString();
+
+                Assert.Equal("R1InvoiceRequested", root.GetProperty("eventName").GetString());
+                Assert.Equal("Review or edit invoice details", root.GetProperty("actionText").GetString());
+                Assert.Equal(statusUrl, root.GetProperty("actionUrl").GetString());
+                Assert.Contains("Provjeri ili ispravi podatke za račun", htmlBody, StringComparison.Ordinal);
+                Assert.Contains("Review or edit invoice details", htmlBody, StringComparison.Ordinal);
+                Assert.DoesNotContain("reply before", htmlBody, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("odgovorite prije", htmlBody, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                if (Directory.Exists(sinkDirectory))
+                {
+                    Directory.Delete(sinkDirectory, recursive: true);
+                }
+            }
+        }
+
+        [Fact]
         public void SendPaymentAuthorized_WritesSinkWithOpenSessionLink()
         {
             string sinkDirectory = Path.Combine(Path.GetTempPath(), $"ocpp-email-sink-{Guid.NewGuid():N}");

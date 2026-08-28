@@ -7,17 +7,26 @@ namespace OCPP.Core.Server.Tests
     public class PublicStatusInvoiceViewTests
     {
         [Fact]
-        public void PublicStatusView_DoesNotOfferLateInvoiceBuyerEntry()
+        public void PublicStatusView_OffersPrefilledBuyerEditingAndIssuedInvoiceLock()
         {
             var view = ReadView();
 
-            Assert.DoesNotContain("id=\"r1-submit\"", view);
-            Assert.DoesNotContain("submitR1Details", view);
-            Assert.DoesNotContain("submit company details now or later", view, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("requestR1InvoiceUrl", view);
+            Assert.Contains("id=\"r1-edit-section\"", view);
+            Assert.Contains("id=\"buyerCompanyName\"", view);
+            Assert.Contains("id=\"buyerTaxIdentifier\"", view);
+            Assert.Contains("id=\"buyerDataVersion\"", view);
+            Assert.Contains("id=\"r1-submit\"", view);
+            Assert.Contains("submitR1Details", view);
+            Assert.Contains("requestR1InvoiceUrl", view);
+            Assert.Contains("data?.invoiceBuyer", view);
+            Assert.Contains("buyer.editable", view);
             Assert.Contains("id=\"done-invoice-message\"", view);
             Assert.Contains("invoice.customerMessage", view);
             Assert.Contains("invoice.customerBuyerDataLocked", view);
+            Assert.Contains("statusRequestGeneration", view);
+            Assert.Contains("generation !== statusRequestGeneration", view);
+            Assert.Contains("id=\"r1-edit-support\"", view);
+            Assert.Contains("status.r1.savedMetadataPending", view);
         }
 
         [Fact]

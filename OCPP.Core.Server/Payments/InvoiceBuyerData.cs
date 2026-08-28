@@ -61,6 +61,11 @@ namespace OCPP.Core.Server.Payments
             return ValidateAndNormalize(request, requireCompleteBuyerDetails: false);
         }
 
+        public static InvoiceBuyerDataValidationResult ValidateAndNormalizeComplete(PaymentR1InvoiceRequest request)
+        {
+            return ValidateAndNormalize(request, requireCompleteBuyerDetails: true);
+        }
+
         private static InvoiceBuyerDataValidationResult ValidateAndNormalize(
             PaymentR1InvoiceRequest request,
             bool requireCompleteBuyerDetails)

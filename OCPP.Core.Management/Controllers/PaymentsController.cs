@@ -162,6 +162,8 @@ namespace OCPP.Core.Management.Controllers
         [HttpGet]
         public async Task<IActionResult> StatusData(Guid reservationId)
         {
+            Response.Headers.CacheControl = "no-store";
+
             if (reservationId == Guid.Empty)
             {
                 Response.StatusCode = (int)System.Net.HttpStatusCode.BadRequest;
@@ -256,7 +258,8 @@ namespace OCPP.Core.Management.Controllers
                 buyerTaxIdentifier = (request.BuyerTaxIdentifier ?? string.Empty).Trim(),
                 buyerRegistrationNumber = (request.BuyerRegistrationNumber ?? string.Empty).Trim(),
                 buyerIdentifierIsVatRegistration = request.BuyerIdentifierIsVatRegistration,
-                buyerDataConfirmed = request.BuyerDataConfirmed
+                buyerDataConfirmed = request.BuyerDataConfirmed,
+                buyerDataVersion = request.BuyerDataVersion
             });
 
             var status = ExtractStatus(apiResult.Payload) ?? "Error";
@@ -275,7 +278,9 @@ namespace OCPP.Core.Management.Controllers
             {
                 success = true,
                 status,
-                message = "R1 invoice details were saved successfully.",
+                message = string.Equals(status, "UpdatedMetadataPending", StringComparison.OrdinalIgnoreCase)
+                    ? "R1 invoice details were saved. Payment metadata synchronization is pending."
+                    : "R1 invoice details were saved successfully.",
                 buyerCountry = (request.BuyerCountry ?? string.Empty).Trim().ToUpperInvariant(),
                 buyerTaxIdentifier = (request.BuyerTaxIdentifier ?? request.BuyerOib ?? string.Empty).Trim(),
                 buyerCompanyName = (request.BuyerCompanyName ?? string.Empty).Trim()
@@ -574,6 +579,7 @@ namespace OCPP.Core.Management.Controllers
             public string BuyerRegistrationNumber { get; set; }
             public bool BuyerIdentifierIsVatRegistration { get; set; }
             public bool BuyerDataConfirmed { get; set; }
+            public DateTime? BuyerDataVersion { get; set; }
         }
     }
 }

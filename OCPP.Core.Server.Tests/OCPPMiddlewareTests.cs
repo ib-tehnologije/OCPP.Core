@@ -133,6 +133,11 @@ namespace OCPP.Core.Server.Tests
                         Status = PaymentReservationStatus.Completed,
                         MaxAmountCents = 1000,
                         CapturedAmountCents = 450,
+                        InvoiceBuyerCountry = "HR",
+                        InvoiceBuyerCompanyName = "Issued Company d.o.o.",
+                        InvoiceBuyerTaxIdentifier = "12345678903",
+                        InvoiceBuyerOriginalTaxIdentifier = "12345678903",
+                        InvoiceBuyerConfirmedAtUtc = new DateTime(2026, 7, 28, 11, 45, 0, DateTimeKind.Utc),
                         InvoiceBuyerVatValidationStatus = "Valid",
                         InvoiceBuyerVatVerificationStatus = "Invalid",
                         InvoiceBuyerVatVerificationCheckedAtUtc =
@@ -184,6 +189,142 @@ namespace OCPP.Core.Server.Tests
                     new DateTime(2026, 7, 28, 12, 0, 0, DateTimeKind.Utc),
                     payload["invoiceBuyerVatVerificationCheckedAtUtc"]?.Value<DateTime>());
                 Assert.Null(payload["invoiceBuyerVatVerificationReference"]);
+                Assert.False(payload["invoiceBuyer"]?["editable"]?.Value<bool>() ?? true);
+                Assert.Equal("Issued Company d.o.o.", payload["invoiceBuyer"]?["companyName"]?.Value<string>());
+                Assert.Equal("no-store", httpContext.Response.Headers.CacheControl.ToString());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task HandlePaymentStatusAsync_IncludesEditableConfirmedBuyerSnapshotBeforeInvoiceSubmission()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-editable-buyer-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            var buyerVersion = new DateTime(2026, 8, 28, 8, 15, 0, DateTimeKind.Utc);
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-STATUS",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-STATUS",
+                        StripeCheckoutSessionId = "sess_editable_buyer",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Authorized,
+                        InvoiceBuyerCountry = "SK",
+                        InvoiceBuyerCompanyName = "Editable s.r.o.",
+                        InvoiceBuyerStreet = "Hlavná 1",
+                        InvoiceBuyerPostalCode = "811 01",
+                        InvoiceBuyerCity = "Bratislava",
+                        InvoiceBuyerEmail = "billing@example.sk",
+                        InvoiceBuyerTaxIdentifier = "SK2020102293",
+                        InvoiceBuyerOriginalTaxIdentifier = "SK 2020102293",
+                        InvoiceBuyerNormalizedVatIdentifier = "SK2020102293",
+                        InvoiceBuyerRegistrationNumber = "12345678",
+                        InvoiceBuyerIdentifierIsVatRegistration = true,
+                        InvoiceBuyerConfirmedAtUtc = buyerVersion,
+                        CreatedAtUtc = buyerVersion.AddHours(-1),
+                        UpdatedAtUtc = buyerVersion
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.Method = "GET";
+                httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                httpContext.Response.Body = new MemoryStream();
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                }
+
+                httpContext.Response.Body.Position = 0;
+                var payload = JObject.Parse(await new StreamReader(httpContext.Response.Body).ReadToEndAsync());
+                var buyer = payload["invoiceBuyer"];
+
+                Assert.True(buyer?["editable"]?.Value<bool>());
+                Assert.Equal(buyerVersion, buyer?["version"]?.Value<DateTime>());
+                Assert.Equal("SK", buyer?["country"]?.Value<string>());
+                Assert.Equal("Editable s.r.o.", buyer?["companyName"]?.Value<string>());
+                Assert.Equal("Hlavná 1", buyer?["street"]?.Value<string>());
+                Assert.Equal("SK 2020102293", buyer?["taxIdentifier"]?.Value<string>());
+                Assert.Equal("12345678", buyer?["registrationNumber"]?.Value<string>());
+                Assert.True(buyer?["identifierIsVatRegistration"]?.Value<bool>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("Submitting")]
+        [InlineData("ProviderUnknown")]
+        public async Task HandlePaymentStatusAsync_LocksBuyerEditingForIndeterminateInvoiceState(string invoiceStatus)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-locked-buyer-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-STATUS",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-STATUS",
+                        StripeCheckoutSessionId = "sess_locked_buyer",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Completed,
+                        InvoiceBuyerCountry = "HR",
+                        InvoiceBuyerCompanyName = "Locked d.o.o.",
+                        InvoiceBuyerStreet = "Ilica 1",
+                        InvoiceBuyerPostalCode = "10000",
+                        InvoiceBuyerCity = "Zagreb",
+                        InvoiceBuyerEmail = "racuni@example.hr",
+                        InvoiceBuyerTaxIdentifier = "12345678903",
+                        InvoiceBuyerConfirmedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-15),
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.InvoiceSubmissionLogs.Add(new InvoiceSubmissionLog
+                    {
+                        ReservationId = reservationId,
+                        Provider = "ERacuni",
+                        Mode = "Submit",
+                        Status = invoiceStatus,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-1)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.Method = "GET";
+                httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                httpContext.Response.Body = new MemoryStream();
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                }
+
+                httpContext.Response.Body.Position = 0;
+                var payload = JObject.Parse(await new StreamReader(httpContext.Response.Body).ReadToEndAsync());
+                Assert.False(payload["invoiceBuyer"]?["editable"]?.Value<bool>() ?? true);
+                Assert.True(payload["invoice"]?["customerBuyerDataLocked"]?.Value<bool>());
             }
             finally
             {

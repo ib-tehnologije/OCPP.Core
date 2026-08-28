@@ -163,9 +163,9 @@ namespace OCPP.Core.Server.Payments
                 "R1 invoice requested",
                 "You requested a company (R1) invoice for this charging session.",
                 details,
-                string.IsNullOrWhiteSpace(statusUrl) ? null : "Open session",
+                string.IsNullOrWhiteSpace(statusUrl) ? null : "Review or edit invoice details",
                 statusUrl,
-                "If any company data is missing or needs correction, reply before the session is finalized.",
+                "You can review or correct the buyer details through this link until the invoice is issued. After issuance, contact support for corrections.",
                 reservation?.ReservationId,
                 "R1InvoiceRequested");
         }
@@ -496,7 +496,7 @@ namespace OCPP.Core.Server.Payments
                         "#faf5ff",
                         "#e9d5ff",
                         "#7c3aed",
-                        "Ako neki podatak nedostaje ili ga treba ispraviti, odgovorite prije zaključenja računa. <span style=\"color:#64748b;\">/ If any company data is missing or needs correction, reply before the invoice is finalized.</span>",
+                        "Podatke kupca možete provjeriti ili ispraviti putem poveznice dok račun nije izdan. Nakon izdavanja obratite se podršci. <span style=\"color:#64748b;\">/ You can review or correct buyer details through the link until the invoice is issued. After issuance, contact support.</span>",
                         "#f8fafc",
                         "#e2e8f0",
                         "#64748b");
@@ -563,6 +563,7 @@ namespace OCPP.Core.Server.Payments
                 "Open invoice" => "Otvori račun / Open invoice",
                 "Open R1 invoice" => "Otvori R1 račun / Open R1 invoice",
                 "Open session" => "Otvori sesiju / Open session",
+                "Review or edit invoice details" => "Provjeri ili ispravi podatke za račun / Review or edit invoice details",
                 _ => Encode(actionText)
             };
         }

@@ -552,8 +552,9 @@ namespace OCPP.Core.Server.Tests
                 Assert.Contains("\"buyerCountry\":\"CZ\"", request.Body, StringComparison.Ordinal);
                 Assert.Contains("\"buyerStreet\":\"Pražská 1\"", request.Body, StringComparison.Ordinal);
                 Assert.Contains("\"buyerTaxIdentifier\":\"CZ 123-ABC\"", request.Body, StringComparison.Ordinal);
+                Assert.Contains("\"buyerDataVersion\":\"2026-08-28T08:15:00Z\"", request.Body, StringComparison.Ordinal);
                 Assert.Contains("\"buyerDataConfirmed\":true", request.Body, StringComparison.OrdinalIgnoreCase);
-                return TestHttpResponse.Json("{\"status\":\"Updated\",\"buyerCountry\":\"CZ\",\"buyerTaxIdentifier\":\"CZ 123-ABC\"}");
+                return TestHttpResponse.Json("{\"status\":\"UpdatedMetadataPending\",\"buyerCountry\":\"CZ\",\"buyerTaxIdentifier\":\"CZ 123-ABC\"}");
             });
             using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-r1-foreign-{Guid.NewGuid():N}.sqlite"));
             var controller = CreatePaymentsController(context, new Dictionary<string, string?>
@@ -564,6 +565,7 @@ namespace OCPP.Core.Server.Tests
             var result = await controller.RequestR1Invoice(new PaymentsController.R1InvoicePayload
             {
                 ReservationId = reservationId,
+                BuyerDataVersion = new DateTime(2026, 8, 28, 8, 15, 0, DateTimeKind.Utc),
                 BuyerCountry = "CZ",
                 BuyerCompanyName = "Example s.r.o.",
                 BuyerStreet = "Pražská 1",
@@ -578,6 +580,10 @@ namespace OCPP.Core.Server.Tests
 
             var json = Assert.IsType<JsonResult>(result);
             Assert.NotNull(json.Value);
+            Assert.Contains(
+                "metadata synchronization is pending",
+                Newtonsoft.Json.JsonConvert.SerializeObject(json.Value),
+                StringComparison.OrdinalIgnoreCase);
             Assert.Equal(StatusCodes.Status200OK, controller.Response.StatusCode);
         }
 
