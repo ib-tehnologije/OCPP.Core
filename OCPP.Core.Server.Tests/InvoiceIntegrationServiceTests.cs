@@ -423,9 +423,24 @@ namespace OCPP.Core.Server.Tests
                             new Session()));
                 });
 
-                await Task.Delay(100);
-                Assert.True(secondTask.IsCompleted);
-                var secondError = await secondTask;
+                Exception? secondError;
+                try
+                {
+                    secondError = await secondTask.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch
+                {
+                    apiClient.ReleaseFirstCreate.Set();
+                    try
+                    {
+                        await Task.WhenAll(firstTask, secondTask).WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                    catch
+                    {
+                        // Preserve the original bounded-wait failure after best-effort task cleanup.
+                    }
+                    throw;
+                }
                 apiClient.ReleaseFirstCreate.Set();
                 await firstTask;
 
