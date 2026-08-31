@@ -84,9 +84,28 @@ namespace OCPP.Core.Server.Payments.Invoices
                 return;
             }
 
-            var draft = _draftBuilder.Build(reservation, transaction, checkoutSession);
+            using var buyerMutationGate = dbContext == null || !dbContext.Database.IsRelational()
+                ? InvoiceBuyerMutationGate.Enter(reservation.ReservationId)
+                : null;
             var mode = (_options.Mode ?? "LogOnly").Trim();
             var provider = (_options.Provider ?? "ERacuni").Trim();
+            using var databaseMutationLock = string.Equals(mode, "Submit", StringComparison.OrdinalIgnoreCase)
+                ? InvoiceBuyerDatabaseMutationLock.Acquire(dbContext, reservation.ReservationId)
+                : null;
+            if (databaseMutationLock != null)
+            {
+                var durableReservation = dbContext.ChargePaymentReservations.Find(reservation.ReservationId);
+                if (durableReservation == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Reservation '{reservation.ReservationId}' was not found while acquiring invoice lineage.");
+                }
+
+                dbContext.Entry(durableReservation).Reload();
+                reservation = durableReservation;
+            }
+
+            var draft = _draftBuilder.Build(reservation, transaction, checkoutSession);
             var auditLog = CreateAuditLog(draft, reservation, provider, mode);
             var providerCallStarted = false;
             var providerLookupCompleted = false;
@@ -107,6 +126,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 auditLog.Status = "SkippedNoLines";
                 auditLog.CompletedAtUtc = DateTime.UtcNow;
                 PersistAuditLog(dbContext, auditLog);
+                databaseMutationLock?.Commit();
 
                 _logger.LogInformation(
                     "Invoice/Integration => Skipping provider payload because there are no billable lines reservation={ReservationId}",
@@ -170,32 +190,6 @@ namespace OCPP.Core.Server.Payments.Invoices
                         throw new InvoiceSubmissionInProgressException();
                     }
 
-                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
-                        BuildLookupRequest(request, auditLog.ApiTransactionId));
-                    providerLookupCompleted = true;
-                    ApplyProviderLookupEvidence(auditLog, lookup);
-                    if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
-                    {
-                        ApplyProviderResult(auditLog, lookup.ProviderResult);
-                        auditLog.Status = "Submitted";
-                        auditLog.CompletedAtUtc = DateTime.UtcNow;
-                        auditLog.Error = null;
-                        ClearSubmissionLease(auditLog);
-                        PersistAuditLog(dbContext, auditLog);
-                        return;
-                    }
-
-                    if (lookup.Outcome != ERacuniInvoiceLookupOutcome.NotFound)
-                    {
-                        auditLog.Status = "ProviderUnknown";
-                        auditLog.CompletedAtUtc = DateTime.UtcNow;
-                        auditLog.Error = Truncate(lookup.Error, 4000);
-                        ClearSubmissionLease(auditLog);
-                        PersistAuditLog(dbContext, auditLog);
-                        throw new InvalidOperationException(
-                            "Invoice provider state is unknown; create was not attempted.");
-                    }
-
                     if (!TryAcquireSubmissionLease(dbContext, auditLog, DateTime.UtcNow))
                     {
                         throw new InvoiceSubmissionInProgressException();
@@ -226,6 +220,37 @@ namespace OCPP.Core.Server.Payments.Invoices
                         }
 
                         throw new InvoiceSubmissionInProgressException();
+                    }
+                }
+
+                databaseMutationLock?.Commit();
+
+                if (existing != null)
+                {
+                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
+                        BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    providerLookupCompleted = true;
+                    ApplyProviderLookupEvidence(auditLog, lookup);
+                    if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
+                    {
+                        ApplyProviderResult(auditLog, lookup.ProviderResult);
+                        auditLog.Status = "Submitted";
+                        auditLog.CompletedAtUtc = DateTime.UtcNow;
+                        auditLog.Error = null;
+                        ClearSubmissionLease(auditLog);
+                        PersistAuditLog(dbContext, auditLog);
+                        return;
+                    }
+
+                    if (lookup.Outcome != ERacuniInvoiceLookupOutcome.NotFound)
+                    {
+                        auditLog.Status = "ProviderUnknown";
+                        auditLog.CompletedAtUtc = DateTime.UtcNow;
+                        auditLog.Error = Truncate(lookup.Error, 4000);
+                        ClearSubmissionLease(auditLog);
+                        PersistAuditLog(dbContext, auditLog);
+                        throw new InvalidOperationException(
+                            "Invoice provider state is unknown; create was not attempted.");
                     }
                 }
 
@@ -315,6 +340,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 }
                 ClearSubmissionLease(auditLog);
                 PersistAuditLog(dbContext, auditLog);
+                databaseMutationLock?.Commit();
                 throw;
             }
         }

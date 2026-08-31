@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
 using OCPP.Core.Server.Payments.Invoices.ERacuni;
 using Stripe.Checkout;
@@ -98,6 +99,208 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task HandleCompletedReservation_SerializesInvoiceSubmissionAgainstBuyerEdit()
+        {
+            var databaseName = Guid.NewGuid().ToString();
+            var reservationId = Guid.NewGuid();
+            var version = new DateTime(2026, 8, 28, 10, 30, 0, DateTimeKind.Utc);
+            using (var setup = CreateContext(databaseName))
+            {
+                setup.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP1",
+                    ConnectorId = 1,
+                    ChargeTagId = "TAG1",
+                    StripeCheckoutSessionId = "sess_invoice_edit_race",
+                    Status = PaymentReservationStatus.Completed,
+                    Currency = "eur",
+                    InvoiceBuyerCountry = "CZ",
+                    InvoiceBuyerCompanyName = "Original s.r.o.",
+                    InvoiceBuyerStreet = "Pražská 1",
+                    InvoiceBuyerPostalCode = "110 00",
+                    InvoiceBuyerCity = "Praha",
+                    InvoiceBuyerEmail = "billing@example.cz",
+                    InvoiceBuyerTaxIdentifier = "CZ12345678",
+                    InvoiceBuyerOriginalTaxIdentifier = "CZ12345678",
+                    InvoiceBuyerNormalizedVatIdentifier = "CZ12345678",
+                    InvoiceBuyerVatValidationStatus = VatValidationStatus.Valid,
+                    InvoiceBuyerVatVerificationStatus = ViesVerificationStatus.NotChecked,
+                    InvoiceBuyerIdentifierIsVatRegistration = true,
+                    InvoiceBuyerConfirmedAtUtc = version,
+                    CreatedAtUtc = version.AddHours(-1),
+                    UpdatedAtUtc = version
+                });
+                setup.SaveChanges();
+            }
+
+            var draft = CreateDraft();
+            draft.ReservationId = reservationId;
+            var apiClient = new StubERacuniApiClient { BlockFirstCreate = true };
+            var invoiceService = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient);
+            using var invoiceContext = CreateContext(databaseName);
+            using var editContext = CreateContext(databaseName);
+            var invoiceReservation = invoiceContext.ChargePaymentReservations.Find(reservationId)!;
+            var invoiceTask = Task.Run(() => invoiceService.HandleCompletedReservation(
+                invoiceContext,
+                invoiceReservation,
+                new Transaction(),
+                new Session()));
+            Assert.True(apiClient.FirstCreateEntered.Wait(TimeSpan.FromSeconds(5)));
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_invoice_edit_race",
+                    Metadata = new Dictionary<string, string>()
+                }
+            };
+            var coordinator = new StripePaymentCoordinator(
+                Options.Create(new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" }),
+                Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 }),
+                NullLogger<StripePaymentCoordinator>.Instance,
+                sessionService,
+                new FakePaymentIntentService(),
+                new FakeEventFactory(),
+                () => version.AddMinutes(1));
+            var editTask = coordinator.RequestR1InvoiceAsync(
+                editContext,
+                new PaymentR1InvoiceRequest
+                {
+                    ReservationId = reservationId,
+                    BuyerDataVersion = version,
+                    BuyerCountry = "CZ",
+                    BuyerCompanyName = "Too late s.r.o.",
+                    BuyerStreet = "Pražská 1",
+                    BuyerPostalCode = "110 00",
+                    BuyerCity = "Praha",
+                    BuyerEmail = "billing@example.cz",
+                    BuyerTaxIdentifier = "CZ12345678",
+                    BuyerIdentifierIsVatRegistration = true,
+                    BuyerDataConfirmed = true
+                },
+                CancellationToken.None);
+
+            await Task.Delay(100);
+            Assert.False(editTask.IsCompleted);
+            apiClient.ReleaseFirstCreate.Set();
+            await invoiceTask;
+            var editResult = await editTask;
+
+            Assert.False(editResult.Success);
+            Assert.Equal("InvoiceAlreadyIssued", editResult.Status);
+            Assert.Equal("Original s.r.o.", editContext.ChargePaymentReservations.Find(reservationId)?.InvoiceBuyerCompanyName);
+        }
+
+        [Fact]
+        public async Task HandleCompletedReservation_PersistsRelationalBarrierBeforeProviderCall()
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), $"invoice-buyer-barrier-{Guid.NewGuid():N}.sqlite");
+            var options = new DbContextOptionsBuilder<OCPPCoreContext>()
+                .UseSqlite($"Data Source={databasePath}")
+                .Options;
+            var reservationId = Guid.NewGuid();
+            var version = new DateTime(2026, 8, 28, 11, 30, 0, DateTimeKind.Utc);
+
+            try
+            {
+                using (var setup = new OCPPCoreContext(options))
+                {
+                    setup.Database.EnsureCreated();
+                    setup.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP1",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG1",
+                        StripeCheckoutSessionId = "sess_relational_barrier",
+                        Status = PaymentReservationStatus.Completed,
+                        Currency = "eur",
+                        InvoiceBuyerCountry = "CZ",
+                        InvoiceBuyerCompanyName = "Original s.r.o.",
+                        InvoiceBuyerStreet = "Pražská 1",
+                        InvoiceBuyerPostalCode = "110 00",
+                        InvoiceBuyerCity = "Praha",
+                        InvoiceBuyerEmail = "billing@example.cz",
+                        InvoiceBuyerTaxIdentifier = "CZ12345678",
+                        InvoiceBuyerOriginalTaxIdentifier = "CZ12345678",
+                        InvoiceBuyerNormalizedVatIdentifier = "CZ12345678",
+                        InvoiceBuyerVatValidationStatus = VatValidationStatus.Valid,
+                        InvoiceBuyerVatVerificationStatus = ViesVerificationStatus.NotChecked,
+                        InvoiceBuyerIdentifierIsVatRegistration = true,
+                        InvoiceBuyerConfirmedAtUtc = version,
+                        CreatedAtUtc = version.AddHours(-1),
+                        UpdatedAtUtc = version
+                    });
+                    setup.SaveChanges();
+                }
+
+                var draft = CreateDraft();
+                draft.ReservationId = reservationId;
+                var apiClient = new StubERacuniApiClient { BlockFirstCreate = true };
+                var invoiceService = CreateService(
+                    "Submit",
+                    new StubInvoiceDraftBuilder(draft),
+                    new StubERacuniInvoiceRequestFactory(),
+                    apiClient);
+                var invoiceTask = Task.Run(() =>
+                {
+                    using var invoiceContext = new OCPPCoreContext(options);
+                    invoiceService.HandleCompletedReservation(
+                        invoiceContext,
+                        invoiceContext.ChargePaymentReservations.Find(reservationId)!,
+                        new Transaction(),
+                        new Session());
+                });
+                Assert.True(apiClient.FirstCreateEntered.Wait(TimeSpan.FromSeconds(5)));
+
+                using var editContext = new OCPPCoreContext(options);
+                var coordinator = new StripePaymentCoordinator(
+                    Options.Create(new StripeOptions { Enabled = true, ApiKey = "test", ReturnBaseUrl = "https://return" }),
+                    Options.Create(new PaymentFlowOptions { StartWindowMinutes = 7 }),
+                    NullLogger<StripePaymentCoordinator>.Instance,
+                    new FakeSessionService(),
+                    new FakePaymentIntentService(),
+                    new FakeEventFactory(),
+                    () => version.AddMinutes(1));
+                var editResult = await coordinator.RequestR1InvoiceAsync(
+                    editContext,
+                    new PaymentR1InvoiceRequest
+                    {
+                        ReservationId = reservationId,
+                        BuyerDataVersion = version,
+                        BuyerCountry = "CZ",
+                        BuyerCompanyName = "Too late s.r.o.",
+                        BuyerStreet = "Pražská 1",
+                        BuyerPostalCode = "110 00",
+                        BuyerCity = "Praha",
+                        BuyerEmail = "billing@example.cz",
+                        BuyerTaxIdentifier = "CZ12345678",
+                        BuyerIdentifierIsVatRegistration = true,
+                        BuyerDataConfirmed = true
+                    },
+                    CancellationToken.None);
+
+                Assert.False(editResult.Success);
+                Assert.Equal("InvoiceStateUnavailable", editResult.Status);
+                Assert.False(invoiceTask.IsCompleted);
+                apiClient.ReleaseFirstCreate.Set();
+                await invoiceTask;
+            }
+            finally
+            {
+                if (File.Exists(databasePath)) File.Delete(databasePath);
+                if (File.Exists(databasePath + "-shm")) File.Delete(databasePath + "-shm");
+                if (File.Exists(databasePath + "-wal")) File.Delete(databasePath + "-wal");
+            }
+        }
+
+        [Fact]
         public void HandleCompletedReservation_DoesNotCreateAgain_WhenLocalSubmissionAlreadySucceeded()
         {
             var draft = CreateDraft();
@@ -158,6 +361,7 @@ namespace OCPP.Core.Server.Tests
         {
             var databasePath = Path.Combine(Path.GetTempPath(), $"invoice-lineage-{Guid.NewGuid():N}.sqlite");
             var connectionString = $"Data Source={databasePath}";
+            var draft = CreateDraft();
             try
             {
                 var setupOptions = new DbContextOptionsBuilder<OCPPCoreContext>()
@@ -166,9 +370,20 @@ namespace OCPP.Core.Server.Tests
                 using (var setupContext = new OCPPCoreContext(setupOptions))
                 {
                     setupContext.Database.EnsureCreated();
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = draft.ReservationId,
+                        ChargePointId = "CP1",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG1",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Completed,
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-10),
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
                 }
 
-                var draft = CreateDraft();
                 var apiClient = new StubERacuniApiClient
                 {
                     LookupResultToReturn = ERacuniInvoiceLookupResult.NotFound(),
@@ -188,23 +403,45 @@ namespace OCPP.Core.Server.Tests
                 var firstTask = Task.Run(() =>
                 {
                     using var firstContext = new OCPPCoreContext(setupOptions);
-                    firstService.HandleCompletedReservation(firstContext, new ChargePaymentReservation(), new Transaction(), new Session());
+                    firstService.HandleCompletedReservation(
+                        firstContext,
+                        firstContext.ChargePaymentReservations.Find(draft.ReservationId)!,
+                        new Transaction(),
+                        new Session());
                 });
 
                 Assert.True(apiClient.FirstCreateEntered.Wait(TimeSpan.FromSeconds(10)), "First provider create was not reached.");
 
-                Exception secondError;
-                try
+                var secondTask = Task.Run(() =>
                 {
                     using var secondContext = new OCPPCoreContext(setupOptions);
-                    secondError = Record.Exception(() =>
-                        secondService.HandleCompletedReservation(secondContext, new ChargePaymentReservation(), new Transaction(), new Session()));
+                    return Record.Exception(() =>
+                        secondService.HandleCompletedReservation(
+                            secondContext,
+                            secondContext.ChargePaymentReservations.Find(draft.ReservationId)!,
+                            new Transaction(),
+                            new Session()));
+                });
+
+                Exception? secondError;
+                try
+                {
+                    secondError = await secondTask.WaitAsync(TimeSpan.FromSeconds(5));
                 }
-                finally
+                catch
                 {
                     apiClient.ReleaseFirstCreate.Set();
+                    try
+                    {
+                        await Task.WhenAll(firstTask, secondTask).WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                    catch
+                    {
+                        // Preserve the original bounded-wait failure after best-effort task cleanup.
+                    }
+                    throw;
                 }
-
+                apiClient.ReleaseFirstCreate.Set();
                 await firstTask;
 
                 var inProgress = Assert.IsAssignableFrom<InvalidOperationException>(secondError);
@@ -557,10 +794,10 @@ namespace OCPP.Core.Server.Tests
             };
         }
 
-        private static OCPPCoreContext CreateContext()
+        private static OCPPCoreContext CreateContext(string? databaseName = null)
         {
             var options = new DbContextOptionsBuilder<OCPPCoreContext>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .UseInMemoryDatabase(databaseName ?? Guid.NewGuid().ToString())
                 .Options;
             return new OCPPCoreContext(options);
         }

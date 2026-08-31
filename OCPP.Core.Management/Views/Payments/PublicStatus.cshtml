@@ -11,6 +11,7 @@
     var startUrlBase = Url.Action("Start", "Public");
     var startPathTemplate = Url.RouteUrl("public-start-path", new { cp = "__cp__", conn = "__conn__" }) ?? string.Empty;
     var stopUrl = Url.Action("Stop", "Payments");
+    var requestR1InvoiceUrl = Url.Action("RequestR1Invoice", "Payments");
     ViewData["PublicPageTitle"] = "Charging status";
     ViewData["PublicPageDescription"] = "Track charger start, live charging, totals, and invoice details.";
     ViewData["PublicNav"] = "map";
@@ -282,6 +283,94 @@
                 </div>
             </div>
 
+            <div class="info-section" id="r1-edit-section" hidden>
+                <div class="divider"></div>
+                <div class="info-section-title" data-i18n="status.r1.title">R1 invoice (company)</div>
+                <p class="field-help" data-i18n="status.r1.subtitle">Review or correct the invoice buyer details until the invoice is issued.</p>
+
+                <form id="r1-edit-form">
+                    <input type="hidden" id="buyerDataVersion" />
+
+                    <label for="buyerCountry" class="field-label field-label--spaced" data-i18n="status.r1.country">Company country</label>
+                    <select class="field-input" id="buyerCountry" autocomplete="country">
+                        <option value="HR">Croatia (HR)</option>
+                        <option value="AT">Austria (AT)</option>
+                        <option value="BE">Belgium (BE)</option>
+                        <option value="BG">Bulgaria (BG)</option>
+                        <option value="CY">Cyprus (CY)</option>
+                        <option value="CZ">Czechia (CZ)</option>
+                        <option value="DE">Germany (DE)</option>
+                        <option value="DK">Denmark (DK)</option>
+                        <option value="EE">Estonia (EE)</option>
+                        <option value="GR">Greece (GR)</option>
+                        <option value="GB">Northern Ireland (GB / XI VAT)</option>
+                        <option value="ES">Spain (ES)</option>
+                        <option value="FI">Finland (FI)</option>
+                        <option value="FR">France (FR)</option>
+                        <option value="HU">Hungary (HU)</option>
+                        <option value="IE">Ireland (IE)</option>
+                        <option value="IT">Italy (IT)</option>
+                        <option value="LT">Lithuania (LT)</option>
+                        <option value="LU">Luxembourg (LU)</option>
+                        <option value="LV">Latvia (LV)</option>
+                        <option value="MT">Malta (MT)</option>
+                        <option value="NL">Netherlands (NL)</option>
+                        <option value="PL">Poland (PL)</option>
+                        <option value="PT">Portugal (PT)</option>
+                        <option value="RO">Romania (RO)</option>
+                        <option value="SE">Sweden (SE)</option>
+                        <option value="SI">Slovenia (SI)</option>
+                        <option value="SK">Slovakia (SK)</option>
+                    </select>
+
+                    <label for="buyerCompanyName" class="field-label field-label--spaced" data-i18n="status.r1.companyName">Legal company name</label>
+                    <input type="text" class="field-input" id="buyerCompanyName" autocomplete="organization" maxlength="200" required />
+
+                    <label for="buyerStreet" class="field-label field-label--spaced" data-i18n="status.r1.street">Street address</label>
+                    <input type="text" class="field-input" id="buyerStreet" autocomplete="street-address" maxlength="200" required />
+
+                    <label for="buyerPostalCode" class="field-label field-label--spaced" data-i18n="status.r1.postalCode">Postal code</label>
+                    <input type="text" class="field-input" id="buyerPostalCode" autocomplete="postal-code" maxlength="32" required />
+
+                    <label for="buyerCity" class="field-label field-label--spaced" data-i18n="status.r1.city">City</label>
+                    <input type="text" class="field-input" id="buyerCity" autocomplete="address-level2" maxlength="100" required />
+
+                    <label for="buyerEmail" class="field-label field-label--spaced" data-i18n="status.r1.email">Billing email</label>
+                    <input type="email" class="field-input" id="buyerEmail" autocomplete="email" maxlength="254" required />
+
+                    <label for="buyerTaxIdentifier" class="field-label field-label--spaced" data-i18n="status.r1.taxIdentifier">OIB / VAT / tax identifier</label>
+                    <input type="text" class="field-input" id="buyerTaxIdentifier" autocomplete="off" maxlength="64" required />
+                    <div class="field-help" data-i18n="status.r1.taxIdentifierHelp">Croatian OIB is checksum validated. Foreign VAT numbers are format-checked and normalized. Other foreign tax identifiers remain as entered.</div>
+
+                    <label for="buyerRegistrationNumber" class="field-label field-label--spaced" data-i18n="status.r1.registrationNumber">Legal registration number (optional)</label>
+                    <input type="text" class="field-input" id="buyerRegistrationNumber" autocomplete="off" maxlength="64" />
+
+                    <label class="field-label field-label--spaced">
+                        <input type="checkbox" id="buyerIdentifierIsVatRegistration" />
+                        <span data-i18n="status.r1.vatRegistration">The tax identifier is a VAT registration number</span>
+                    </label>
+
+                    <label class="field-label field-label--spaced">
+                        <input type="checkbox" id="buyerDataConfirmed" required />
+                        <span data-i18n="status.r1.confirm">I confirm these invoice details are correct and may be issued exactly as entered.</span>
+                    </label>
+
+                    <div class="field-help field-help--spaced" id="r1-edit-message" role="status" aria-live="polite"></div>
+                    <div class="alert-box info alert-box--section" id="r1-edit-locked" hidden>
+                        <span class="alert-icon">🔒</span>
+                        <span id="r1-edit-locked-text" data-i18n="status.r1.lockedAfterIssue">Buyer details cannot be changed after invoice submission. Contact support for a correction.</span>
+                        @if (!string.IsNullOrWhiteSpace(supportEmail))
+                        {
+                            <a id="r1-edit-support" href="mailto:@supportEmail">@supportEmail</a>
+                        }
+                    </div>
+
+                    <div class="form-section form-section--flush-top" id="r1-edit-actions">
+                        <button type="submit" class="btn-secondary" id="r1-submit" data-i18n="status.action.saveR1">Save R1 details</button>
+                    </div>
+                </form>
+            </div>
+
         </div>
     </div>
 
@@ -291,6 +380,7 @@
         const startUrlBase = "@startUrlBase";
         const startPathTemplate = "@startPathTemplate";
         const stopUrl = "@stopUrl";
+        const requestR1InvoiceUrl = "@requestR1InvoiceUrl";
         const reservationId = "@Model.ReservationId";
 
         const navButtons = Array.from(document.querySelectorAll(".public-session-nav [data-step]"));
@@ -348,6 +438,42 @@
         const doneInvoiceMessage = document.getElementById("done-invoice-message");
         const doneInvoiceActions = document.getElementById("done-invoice-actions");
         const doneInvoiceLink = document.getElementById("done-invoice-link");
+
+        const r1EditSection = document.getElementById("r1-edit-section");
+        const r1EditForm = document.getElementById("r1-edit-form");
+        const r1EditMessage = document.getElementById("r1-edit-message");
+        const r1EditLocked = document.getElementById("r1-edit-locked");
+        const r1EditLockedText = document.getElementById("r1-edit-locked-text");
+        const r1EditActions = document.getElementById("r1-edit-actions");
+        const r1SubmitButton = document.getElementById("r1-submit");
+        const buyerDataVersion = document.getElementById("buyerDataVersion");
+        const buyerCountry = document.getElementById("buyerCountry");
+        const buyerCompanyName = document.getElementById("buyerCompanyName");
+        const buyerStreet = document.getElementById("buyerStreet");
+        const buyerPostalCode = document.getElementById("buyerPostalCode");
+        const buyerCity = document.getElementById("buyerCity");
+        const buyerEmail = document.getElementById("buyerEmail");
+        const buyerTaxIdentifier = document.getElementById("buyerTaxIdentifier");
+        const buyerRegistrationNumber = document.getElementById("buyerRegistrationNumber");
+        const buyerIdentifierIsVatRegistration = document.getElementById("buyerIdentifierIsVatRegistration");
+        const buyerDataConfirmed = document.getElementById("buyerDataConfirmed");
+        const r1EditableInputs = [
+            buyerCountry,
+            buyerCompanyName,
+            buyerStreet,
+            buyerPostalCode,
+            buyerCity,
+            buyerEmail,
+            buyerTaxIdentifier,
+            buyerRegistrationNumber,
+            buyerIdentifierIsVatRegistration,
+            buyerDataConfirmed
+        ].filter(Boolean);
+        const r1BuyerFields = r1EditableInputs.filter(input => input !== buyerDataConfirmed);
+        let r1Dirty = false;
+        let r1Saving = false;
+        let r1RenderedVersion = null;
+        let statusRequestGeneration = 0;
 
         const errorTitle = document.getElementById("error-title");
         const errorDesc = document.getElementById("error-desc");
@@ -625,6 +751,60 @@
             }
         };
 
+        const fillBuyerForm = (buyer) => {
+            buyerDataVersion.value = buyer?.version || "";
+            buyerCountry.value = String(buyer?.country || "HR").toUpperCase();
+            buyerCompanyName.value = buyer?.companyName || "";
+            buyerStreet.value = buyer?.street || "";
+            buyerPostalCode.value = buyer?.postalCode || "";
+            buyerCity.value = buyer?.city || "";
+            buyerEmail.value = buyer?.email || "";
+            buyerTaxIdentifier.value = buyer?.taxIdentifier || "";
+            buyerRegistrationNumber.value = buyer?.registrationNumber || "";
+            buyerIdentifierIsVatRegistration.checked = buyer?.identifierIsVatRegistration === true;
+            buyerDataConfirmed.checked = false;
+            r1RenderedVersion = buyer?.version || null;
+        };
+
+        const renderInvoiceBuyer = (buyer) => {
+            if (!r1EditSection || !r1EditForm) return;
+
+            if (!buyer) {
+                r1EditSection.hidden = true;
+                return;
+            }
+
+            r1EditSection.hidden = false;
+            const serverVersion = buyer.version || null;
+            const editable = buyer.editable === true;
+            if (!editable) {
+                fillBuyerForm(buyer);
+                r1Dirty = false;
+                if (r1EditMessage) r1EditMessage.textContent = "";
+            } else if (!r1Dirty && r1RenderedVersion !== serverVersion) {
+                fillBuyerForm(buyer);
+            } else if (r1Dirty && r1RenderedVersion !== serverVersion && r1EditMessage) {
+                r1EditMessage.textContent = t("status.r1.changed");
+            }
+
+            r1EditableInputs.forEach(input => {
+                input.disabled = !editable || r1Saving;
+            });
+            r1EditActions.hidden = !editable;
+            r1EditLocked.hidden = editable;
+            if (!editable && r1EditLockedText) {
+                r1EditLockedText.textContent = buyer.lockedReason === "InvoiceStateUnavailable"
+                    ? t("status.r1.lockedUnavailable")
+                    : t("status.r1.lockedAfterIssue");
+            }
+            if (r1SubmitButton) {
+                r1SubmitButton.disabled = !editable || r1Saving;
+                r1SubmitButton.textContent = r1Saving
+                    ? t("status.action.savingR1")
+                    : t("status.action.saveR1");
+            }
+        };
+
         const renderMaxEnergyNotice = (state, data, maxEnergyKwh) => {
             if (!maxEnergyAlert || !maxEnergyAlertText) {
                 return;
@@ -810,6 +990,7 @@
             }
 
             renderInvoice(data?.invoice);
+            renderInvoiceBuyer(data?.invoiceBuyer);
 
             errorPaymentStatus.textContent = data?.status || "-";
             errorLastStatus.textContent = data?.liveOcppStatus || data?.liveStatus || data?.persistedStatus || "-";
@@ -884,14 +1065,113 @@
             stopChargingButton.addEventListener("click", submitStop);
         }
 
+        r1BuyerFields.forEach(input => {
+            const markDirty = () => {
+                r1Dirty = true;
+                if (buyerDataConfirmed) buyerDataConfirmed.checked = false;
+                if (r1EditMessage) r1EditMessage.textContent = "";
+            };
+            input.addEventListener("input", markDirty);
+            input.addEventListener("change", markDirty);
+        });
+
+        async function submitR1Details(event) {
+            event.preventDefault();
+            if (!r1EditForm || r1Saving) return;
+
+            if (!buyerDataConfirmed?.checked) {
+                if (r1EditMessage) r1EditMessage.textContent = t("status.r1.confirmRequired");
+                buyerDataConfirmed?.focus();
+                return;
+            }
+
+            if (!r1EditForm.reportValidity()) return;
+
+            r1Saving = true;
+            if (r1SubmitButton) {
+                r1SubmitButton.disabled = true;
+                r1SubmitButton.textContent = t("status.action.savingR1");
+            }
+            if (r1EditMessage) r1EditMessage.textContent = "";
+
+            try {
+                const response = await fetch(requestR1InvoiceUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        reservationId,
+                        buyerDataVersion: buyerDataVersion.value || null,
+                        buyerCountry: buyerCountry.value,
+                        buyerCompanyName: buyerCompanyName.value,
+                        buyerStreet: buyerStreet.value,
+                        buyerPostalCode: buyerPostalCode.value,
+                        buyerCity: buyerCity.value,
+                        buyerEmail: buyerEmail.value,
+                        buyerTaxIdentifier: buyerTaxIdentifier.value,
+                        buyerRegistrationNumber: buyerRegistrationNumber.value,
+                        buyerIdentifierIsVatRegistration: buyerIdentifierIsVatRegistration.checked,
+                        buyerDataConfirmed: true
+                    })
+                });
+
+                let result = null;
+                try {
+                    result = await response.json();
+                } catch (_) {
+                    result = null;
+                }
+
+                if (!response.ok || result?.success === false) {
+                    const error = new Error(result?.message || result?.status || String(response.status));
+                    error.status = result?.status;
+                    throw error;
+                }
+
+                r1Dirty = false;
+                await loadStatus();
+                if (r1EditMessage) {
+                    r1EditMessage.textContent = result?.status === "UpdatedMetadataPending"
+                        ? t("status.r1.savedMetadataPending")
+                        : t("status.r1.saved");
+                }
+            } catch (error) {
+                if (error?.status === "BuyerDataChanged") {
+                    r1Dirty = false;
+                    await loadStatus();
+                    if (r1EditMessage) r1EditMessage.textContent = t("status.r1.changed");
+                } else if (error?.status === "InvoiceAlreadyIssued" || error?.status === "InvoiceStateUnavailable") {
+                    await loadStatus();
+                    if (r1EditMessage) r1EditMessage.textContent = translateMessage(error.message);
+                } else if (r1EditMessage) {
+                    r1EditMessage.textContent = translateMessage(error?.message) || t("status.r1.failed");
+                }
+            } finally {
+                r1Saving = false;
+                r1EditableInputs.forEach(input => {
+                    if (!r1EditActions.hidden) input.disabled = false;
+                });
+                if (r1SubmitButton && !r1EditActions.hidden) {
+                    r1SubmitButton.disabled = false;
+                    r1SubmitButton.textContent = t("status.action.saveR1");
+                }
+            }
+        }
+
+        if (r1EditForm) {
+            r1EditForm.addEventListener("submit", submitR1Details);
+        }
+
         async function loadStatus() {
+            const generation = ++statusRequestGeneration;
             try {
                 const res = await fetch(apiUrl, { cache: "no-store" });
                 if (!res.ok) throw new Error(res.status);
                 const data = await res.json();
+                if (generation !== statusRequestGeneration) return;
                 const state = resolveState(data);
                 render(state, data);
             } catch (err) {
+                if (generation !== statusRequestGeneration) return;
                 setActiveTab("error");
                 setActiveView("error");
                 badge.className = "status-badge error";
@@ -903,6 +1183,7 @@
                 renderMaxEnergyNotice("error", null, NaN);
                 renderVatVerificationNotice(null);
                 renderInvoice(null);
+                renderInvoiceBuyer(null);
             }
         }
 

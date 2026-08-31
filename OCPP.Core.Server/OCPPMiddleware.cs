@@ -2571,7 +2571,10 @@ namespace OCPP.Core.Server
                 string.IsNullOrWhiteSpace(request.BuyerCountry) ? "(none)" : request.BuyerCountry.Trim().ToUpperInvariant(),
                 context.Connection.RemoteIpAddress?.ToString() ?? "(unknown)");
 
-            var updateResult = _paymentCoordinator.RequestR1Invoice(dbContext, request);
+            var updateResult = await _paymentCoordinator.RequestR1InvoiceAsync(
+                dbContext,
+                request,
+                context.RequestAborted);
             if (!updateResult.Success)
             {
                 context.Response.StatusCode = string.Equals(updateResult.Status, "NotFound", StringComparison.OrdinalIgnoreCase)
@@ -2595,12 +2598,15 @@ namespace OCPP.Core.Server
                 buyerCompanyName = updateResult.BuyerCompanyName,
                 buyerOib = updateResult.BuyerOib,
                 buyerCountry = updateResult.BuyerCountry,
-                buyerTaxIdentifier = updateResult.BuyerTaxIdentifier
+                buyerTaxIdentifier = updateResult.BuyerTaxIdentifier,
+                buyerDataVersion = updateResult.BuyerDataVersion
             }));
         }
 
         private async Task HandlePaymentStatusAsync(HttpContext context, OCPPCoreContext dbContext)
         {
+            context.Response.Headers.CacheControl = "no-store";
+
             // Accept GET for easy polling
             if (!HttpMethods.IsGet(context.Request.Method))
             {
@@ -2648,12 +2654,24 @@ namespace OCPP.Core.Server
                 "Payments/Status");
             var latestInvoiceUrl = InvoiceSubmissionLogLookup.GetPreferredDocumentUrl(latestInvoiceLog);
             var customerInvoiceMessage = InvoiceSubmissionLogLookup.GetCustomerSafeError(latestInvoiceLog);
-            var customerBuyerDataLocked = reservation.InvoiceBuyerConfirmedAtUtc.HasValue ||
-                InvoiceSubmissionLogLookup.HasSubmittedOrExternalInvoice(
-                    dbContext,
-                    reservation.ReservationId,
-                    _logger,
-                    "Payments/Status");
+            var submittedInvoiceStateKnown = InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
+                dbContext,
+                reservation.ReservationId,
+                _logger,
+                "Payments/Status",
+                out var hasSubmittedOrExternalInvoice);
+            var indeterminateInvoiceStateKnown = InvoiceSubmissionLogLookup.TryHasIndeterminateOrActiveInvoice(
+                dbContext,
+                reservation.ReservationId,
+                DateTime.UtcNow,
+                _logger,
+                "Payments/Status",
+                out var hasIndeterminateOrActiveInvoice);
+            var invoiceStateKnown = submittedInvoiceStateKnown && indeterminateInvoiceStateKnown;
+            var customerBuyerDataLocked =
+                !invoiceStateKnown ||
+                hasSubmittedOrExternalInvoice ||
+                hasIndeterminateOrActiveInvoice;
 
             TryResolveLiveChargePointStatus(reservation.ChargePointId, "Payments/Status", out var cpStatus, logIfMissing: false);
             if (cpStatus?.OnlineConnectors != null &&
@@ -2807,6 +2825,29 @@ namespace OCPP.Core.Server
                 invoiceBuyerVatVerificationStatus = reservation.InvoiceBuyerVatVerificationStatus,
                 invoiceBuyerVatVerificationCheckedAtUtc =
                     reservation.InvoiceBuyerVatVerificationCheckedAtUtc,
+                invoiceBuyer = !reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                    ? null
+                    : new
+                    {
+                        editable = !customerBuyerDataLocked,
+                        version = reservation.InvoiceBuyerConfirmedAtUtc,
+                        country = reservation.InvoiceBuyerCountry,
+                        companyName = reservation.InvoiceBuyerCompanyName,
+                        street = reservation.InvoiceBuyerStreet,
+                        postalCode = reservation.InvoiceBuyerPostalCode,
+                        city = reservation.InvoiceBuyerCity,
+                        email = reservation.InvoiceBuyerEmail,
+                        taxIdentifier = reservation.InvoiceBuyerOriginalTaxIdentifier ??
+                            reservation.InvoiceBuyerTaxIdentifier,
+                        registrationNumber = reservation.InvoiceBuyerRegistrationNumber,
+                        identifierIsVatRegistration = reservation.InvoiceBuyerIdentifierIsVatRegistration,
+                        confirmed = true,
+                        lockedReason = !invoiceStateKnown || hasIndeterminateOrActiveInvoice
+                            ? "InvoiceStateUnavailable"
+                            : hasSubmittedOrExternalInvoice
+                                ? "InvoiceAlreadyIssued"
+                                : null
+                    },
                 actualEnergyKwh = reservation.ActualEnergyKwh,
                 liveStatus,
                 liveOcppStatus,

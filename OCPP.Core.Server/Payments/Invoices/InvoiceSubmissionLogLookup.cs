@@ -114,6 +114,43 @@ namespace OCPP.Core.Server.Payments.Invoices
             }
         }
 
+        public static bool TryHasIndeterminateOrActiveInvoice(
+            OCPPCoreContext dbContext,
+            Guid reservationId,
+            DateTime nowUtc,
+            ILogger logger,
+            string reason,
+            out bool hasIndeterminateOrActiveInvoice)
+        {
+            hasIndeterminateOrActiveInvoice = false;
+            if (dbContext == null || reservationId == Guid.Empty)
+            {
+                return false;
+            }
+
+            try
+            {
+                hasIndeterminateOrActiveInvoice = dbContext.InvoiceSubmissionLogs.AsNoTracking().Any(log =>
+                    log.ReservationId == reservationId &&
+                    (log.Status == "Submitting" ||
+                     log.Status == "ProviderUnknown" ||
+                     (log.SubmissionLeaseId != null &&
+                      log.SubmissionLeaseExpiresAtUtc.HasValue &&
+                      log.SubmissionLeaseExpiresAtUtc > nowUtc)));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogDebug(
+                    ex,
+                    "Invoice/Lookup => Unable to determine active or indeterminate state reservation={ReservationId} reason={Reason}",
+                    reservationId,
+                    reason);
+                hasIndeterminateOrActiveInvoice = false;
+                return false;
+            }
+        }
+
         public static string GetCustomerSafeError(InvoiceSubmissionLog log)
         {
             if (log == null || !string.Equals(log.Status, "Failed", StringComparison.OrdinalIgnoreCase))

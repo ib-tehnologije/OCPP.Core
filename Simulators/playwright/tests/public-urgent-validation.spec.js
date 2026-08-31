@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 import {
   findMockStripeArtifactsByReservationId,
   readLatestInvoiceSubmissionLog,
+  runtimeInfo,
 } from "./helpers.mjs";
+import { runSqlite, sqlQuote } from "../../lib/sqlite_helpers.mjs";
 import {
   startPublicSession,
   withDriver,
@@ -95,6 +97,24 @@ async function completeChargingSession(page, driver) {
   });
 }
 
+async function markInvoiceSubmitted(reservationId) {
+  const completedAtUtc = new Date().toISOString();
+  await runSqlite(runtimeInfo().databasePath, `
+UPDATE InvoiceSubmissionLog
+SET Status = 'Submitted',
+    ExternalDocumentId = COALESCE(ExternalDocumentId, 'playwright-issued-document'),
+    ExternalInvoiceNumber = COALESCE(ExternalInvoiceNumber, 'PLAYWRIGHT-R1'),
+    CompletedAtUtc = ${sqlQuote(completedAtUtc)}
+WHERE InvoiceSubmissionLogId = (
+  SELECT InvoiceSubmissionLogId
+  FROM InvoiceSubmissionLog
+  WHERE UPPER(ReservationId) = UPPER(${sqlQuote(reservationId)})
+  ORDER BY COALESCE(CompletedAtUtc, CreatedAtUtc) DESC, InvoiceSubmissionLogId DESC
+  LIMIT 1
+);
+`);
+}
+
 test("public map shows mixed availability, offline normalization, and case-insensitive station status", async ({ page }) => {
   await page.goto("/Public/Map");
 
@@ -178,7 +198,7 @@ test("@invoice public start blocks incomplete Croatian buyer and invalidates sta
   await expect(page).toHaveURL(/\/Public\/Start/);
 });
 
-test("@invoice public start does not persist buyer details and keeps late status editing disabled", async ({ page }) => {
+test("@invoice public status edits the confirmed buyer until invoice submission and then locks it", async ({ page }) => {
   test.skip(!invoicesEnabled, "Invoice validation requires OCPP_PLAYWRIGHT_ENABLE_INVOICES=1");
 
   const buyerCompanyName = "Confirmed Buyer d.o.o.";
@@ -197,10 +217,30 @@ test("@invoice public start does not persist buyer details and keeps late status
     });
     expect(reservationId).toBeTruthy();
 
-    await expect(page.locator("#r1-submit")).toHaveCount(0);
+    await expect(page.locator("#r1-edit-section")).toBeVisible();
+    await expect(page.locator("#buyerCompanyName")).toHaveValue(buyerCompanyName);
+    await expect(page.locator("#buyerTaxIdentifier")).toHaveValue(buyerOib);
+    await expect(page.locator("#buyerEmail")).toHaveValue("confirmed@example.test");
+    await expect(page.locator("#r1-submit")).toBeEnabled();
     await expect.poll(() => page.evaluate(() => localStorage.getItem("ocpp.invoiceBuyer.v1"))).toBeNull();
     await waitForStripeMetadata(reservationId, buyerCompanyName, buyerOib);
+
+    const correctedBuyerCompanyName = "Corrected Buyer d.o.o.";
+    await page.locator("#buyerCompanyName").fill(correctedBuyerCompanyName);
+    await expect(page.locator("#buyerDataConfirmed")).not.toBeChecked();
+    await page.locator("#buyerDataConfirmed").check();
+    await page.locator("#r1-submit").click();
+    await expect(page.locator("#r1-edit-message")).toHaveText("R1 details saved successfully.");
+    await expect(page.locator("#buyerCompanyName")).toHaveValue(correctedBuyerCompanyName);
+    await waitForStripeMetadata(reservationId, correctedBuyerCompanyName, buyerOib);
+
     await completeChargingSession(page, driver);
+    await waitForInvoiceEvidence(reservationId, correctedBuyerCompanyName, buyerOib);
+    await markInvoiceSubmitted(reservationId);
+    await expect(page.locator("#r1-edit-locked")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("#r1-submit")).toBeHidden();
+    await expect(page.locator("#buyerCompanyName")).toBeDisabled();
+    await expect(page.locator("#buyerCompanyName")).toHaveValue(correctedBuyerCompanyName);
 
     await page.goto(`/Public/Start?cp=${encodeURIComponent(publicStatusInvoiceTarget.chargePointId)}&conn=${publicStatusInvoiceTarget.connectorId}`);
     await page.locator("#wantsR1").check();

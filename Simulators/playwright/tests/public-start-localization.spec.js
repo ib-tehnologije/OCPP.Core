@@ -228,12 +228,13 @@ test("public portal translations localize Italian result, status, map, and serve
           <body>
             <button data-i18n="status.step.wait">② Wait</button>
             <span id="status-waiting" data-i18n="status.badge.waiting">Waiting for charger...</span>
-            <span id="status-r1" data-i18n="status.r1.subtitle">R1 invoice buyer details are confirmed before checkout on the start page.</span>
+            <span id="status-r1" data-i18n="status.r1.subtitle">Review or correct the R1 invoice buyer details until the invoice is issued.</span>
             <span id="connector-fallback" data-i18n-template="status.connectorFallback" data-i18n-param-id="1">Connector 1</span>
             <span id="result-heading" data-i18n="result.paymentAuthorized">Payment authorized</span>
             <span id="result-message" data-i18n-message="Charging session will start shortly.">Charging session will start shortly.</span>
             <span id="start-message" data-i18n-message="This connector is currently in use. Please stop the active session first or choose another connector.">This connector is currently in use. Please stop the active session first or choose another connector.</span>
             <span id="r1-message" data-i18n-message="For an R1 (company) invoice, please enter your OIB (11 digits).">For an R1 (company) invoice, please enter your OIB (11 digits).</span>
+            <span id="r1-pending" data-i18n="status.r1.savedMetadataPending">R1 details were saved. Payment metadata synchronization is pending.</span>
             <span id="map-status" data-i18n-status="Offline">Offline</span>
             <span id="map-grace" data-i18n="map.grace">grace</span>
             <button id="gps" title="Center on your location" data-i18n-title="map.centerOnLocation">GPS</button>
@@ -248,12 +249,13 @@ test("public portal translations localize Italian result, status, map, and serve
 
   await expect(page.locator('[data-i18n="status.step.wait"]')).toHaveText("② Attesa");
   await expect(page.locator("#status-waiting")).toHaveText("In attesa del caricatore...");
-  await expect(page.locator("#status-r1")).toHaveText("I dati dell'acquirente per la fattura R1 vengono confermati prima del pagamento nella pagina iniziale.");
+  await expect(page.locator("#status-r1")).toHaveText("Puoi verificare o correggere i dati dell'acquirente della fattura R1 finché la fattura non viene emessa.");
   await expect(page.locator("#connector-fallback")).toHaveText("Connettore 1");
   await expect(page.locator("#result-heading")).toHaveText("Pagamento autorizzato");
   await expect(page.locator("#result-message")).toHaveText("La sessione di ricarica inizierà a breve.");
   await expect(page.locator("#start-message")).toHaveText("Questo connettore è attualmente in uso. Ferma prima la sessione attiva o scegli un altro connettore.");
   await expect(page.locator("#r1-message")).toHaveText("Per una fattura R1 (azienda), inserisci il tuo OIB (11 cifre).");
+  await expect(page.locator("#r1-pending")).toHaveText("I dati R1 sono stati salvati. La sincronizzazione dei metadati di pagamento è in sospeso.");
   await expect(page.locator("#map-status")).toHaveText("Offline");
   await expect(page.locator("#map-grace")).toHaveText("tolleranza");
   await expect(page.locator("#gps")).toHaveAttribute("title", "Centra sulla tua posizione");

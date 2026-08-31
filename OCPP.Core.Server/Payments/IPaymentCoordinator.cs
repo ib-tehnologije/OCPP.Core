@@ -23,6 +23,12 @@ namespace OCPP.Core.Server.Payments
         PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId);
         PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId);
         PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request);
+        Task<PaymentR1InvoiceResult> RequestR1InvoiceAsync(
+            OCPPCoreContext dbContext,
+            PaymentR1InvoiceRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(RequestR1Invoice(dbContext, request));
+        bool ReconcileR1BuyerMetadata(OCPPCoreContext dbContext, Guid reservationId) => false;
         void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason);
         void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason);
         PaymentAuthorizationReleaseResult ReconcileTerminalPaymentAuthorization(
@@ -98,6 +104,7 @@ namespace OCPP.Core.Server.Payments
         public string BuyerRegistrationNumber { get; set; }
         public bool BuyerIdentifierIsVatRegistration { get; set; }
         public bool BuyerDataConfirmed { get; set; }
+        public DateTime? BuyerDataVersion { get; set; }
     }
 
     public class PaymentR1InvoiceResult
@@ -109,6 +116,7 @@ namespace OCPP.Core.Server.Payments
         public string BuyerOib { get; set; }
         public string BuyerCountry { get; set; }
         public string BuyerTaxIdentifier { get; set; }
+        public DateTime? BuyerDataVersion { get; set; }
         public ChargePaymentReservation Reservation { get; set; }
     }
 

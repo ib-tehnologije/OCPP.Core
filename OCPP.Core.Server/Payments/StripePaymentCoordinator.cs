@@ -667,7 +667,17 @@ namespace OCPP.Core.Server.Payments
             }
         }
 
-        public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request)
+        public PaymentR1InvoiceResult RequestR1Invoice(
+            OCPPCoreContext dbContext,
+            PaymentR1InvoiceRequest request) =>
+            RequestR1InvoiceAsync(dbContext, request, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+
+        public async Task<PaymentR1InvoiceResult> RequestR1InvoiceAsync(
+            OCPPCoreContext dbContext,
+            PaymentR1InvoiceRequest request,
+            CancellationToken cancellationToken)
         {
             var result = new PaymentR1InvoiceResult
             {
@@ -691,14 +701,11 @@ namespace OCPP.Core.Server.Payments
                 return result;
             }
 
-            var buyerValidation = InvoiceBuyerDataValidator.ValidateAndNormalize(request);
-            if (!buyerValidation.Success)
-            {
-                result.Status = buyerValidation.Status;
-                result.Error = buyerValidation.Error;
-                return result;
-            }
-            var buyerData = buyerValidation.Data;
+            using var buyerMutationGate = dbContext.Database.IsRelational()
+                ? null
+                : await InvoiceBuyerMutationGate
+                    .EnterAsync(request.ReservationId, cancellationToken)
+                    .ConfigureAwait(false);
 
             var reservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
             if (reservation == null)
@@ -708,22 +715,85 @@ namespace OCPP.Core.Server.Payments
                 return result;
             }
 
-            if (InvoiceSubmissionLogLookup.HasSubmittedOrExternalInvoice(
+            var buyerValidation = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                ? InvoiceBuyerDataValidator.ValidateAndNormalizeComplete(request)
+                : InvoiceBuyerDataValidator.ValidateAndNormalize(request);
+            if (!buyerValidation.Success)
+            {
+                result.Status = buyerValidation.Status;
+                result.Error = buyerValidation.Error;
+                return result;
+            }
+            var buyerData = buyerValidation.Data;
+
+            if (!InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
                     dbContext,
                     reservation.ReservationId,
                     _logger,
-                    "Payments/RequestR1"))
+                    "Payments/RequestR1",
+                    out var hasSubmittedOrExternalInvoice))
+            {
+                result.Status = "InvoiceStateUnavailable";
+                result.Error = "Invoice status could not be verified. Try again later or contact support.";
+                result.Reservation = reservation;
+                result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                return result;
+            }
+
+            if (hasSubmittedOrExternalInvoice)
             {
                 result.Status = "InvoiceAlreadyIssued";
                 result.Error = "Invoice buyer data cannot be changed after submission. Use the supported provider correction, storno, or reissue process.";
                 result.Reservation = reservation;
+                result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
                 return result;
             }
 
-            if (reservation.InvoiceBuyerConfirmedAtUtc.HasValue && !MatchesConfirmedBuyer(reservation, buyerData))
+            if (!InvoiceSubmissionLogLookup.TryHasIndeterminateOrActiveInvoice(
+                    dbContext,
+                    reservation.ReservationId,
+                    _utcNow(),
+                    _logger,
+                    "Payments/RequestR1",
+                    out var hasIndeterminateOrActiveInvoice))
             {
-                result.Status = "BuyerDataLocked";
-                result.Error = "Confirmed invoice buyer data can no longer be changed in the customer flow.";
+                result.Status = "InvoiceStateUnavailable";
+                result.Error = "Invoice status could not be verified. Try again later or contact support.";
+                result.Reservation = reservation;
+                result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                return result;
+            }
+
+            if (hasIndeterminateOrActiveInvoice)
+            {
+                result.Status = "InvoiceStateUnavailable";
+                result.Error = "Invoice submission may be in progress or require reconciliation. Buyer details are temporarily locked; contact support if this persists.";
+                result.Reservation = reservation;
+                result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                return result;
+            }
+
+            bool buyerDataMatches = reservation.InvoiceBuyerConfirmedAtUtc.HasValue &&
+                MatchesConfirmedBuyer(reservation, buyerData);
+            bool buyerDataChanged = !buyerDataMatches;
+
+            if (buyerDataChanged &&
+                reservation.InvoiceBuyerConfirmedAtUtc.HasValue &&
+                request.BuyerDataVersion != reservation.InvoiceBuyerConfirmedAtUtc)
+            {
+                result.Status = "BuyerDataChanged";
+                result.Error = "Invoice buyer data changed in another session. Reload the latest details and try again.";
+                result.Reservation = reservation;
+                result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                return result;
+            }
+
+            if (buyerDataChanged &&
+                !reservation.InvoiceBuyerConfirmedAtUtc.HasValue &&
+                request.BuyerDataVersion.HasValue)
+            {
+                result.Status = "BuyerDataChanged";
+                result.Error = "Invoice buyer data changed in another session. Reload the latest details and try again.";
                 result.Reservation = reservation;
                 return result;
             }
@@ -736,13 +806,117 @@ namespace OCPP.Core.Server.Payments
                 return result;
             }
 
-            if (!reservation.InvoiceBuyerConfirmedAtUtc.HasValue)
+            if (buyerDataChanged)
             {
-                ApplyConfirmedBuyer(reservation, buyerData, _utcNow());
-                reservation.UpdatedAtUtc = _utcNow();
+                bool preserveVatVerification = reservation.InvoiceBuyerConfirmedAtUtc.HasValue &&
+                    string.Equals(reservation.InvoiceBuyerCountry, buyerData.Country, StringComparison.Ordinal) &&
+                    reservation.InvoiceBuyerIdentifierIsVatRegistration == buyerData.IdentifierIsVatRegistration &&
+                    (buyerData.IdentifierIsVatRegistration
+                        ? string.Equals(
+                            reservation.InvoiceBuyerNormalizedVatIdentifier,
+                            buyerData.NormalizedVatIdentifier,
+                            StringComparison.Ordinal)
+                        : string.Equals(
+                            reservation.InvoiceBuyerTaxIdentifier,
+                            buyerData.TaxIdentifier,
+                            StringComparison.Ordinal));
+                ViesVerificationResult viesVerification = null;
+                if (!preserveVatVerification &&
+                    !string.IsNullOrWhiteSpace(buyerData.NormalizedVatIdentifier) &&
+                    !string.IsNullOrWhiteSpace(buyerData.ViesCountryCode))
+                {
+                    var vatNumber = buyerData.NormalizedVatIdentifier.Substring(
+                        buyerData.ViesCountryCode.Length);
+                    viesVerification = await _viesVerificationService.VerifyAsync(
+                            buyerData.ViesCountryCode,
+                            vatNumber,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                using var databaseMutationLock = InvoiceBuyerDatabaseMutationLock.Acquire(
+                    dbContext,
+                    reservation.ReservationId);
+                if (databaseMutationLock != null)
+                {
+                    dbContext.Entry(reservation).Reload();
+                    buyerDataMatches = reservation.InvoiceBuyerConfirmedAtUtc.HasValue &&
+                        MatchesConfirmedBuyer(reservation, buyerData);
+                    buyerDataChanged = !buyerDataMatches;
+                    if (buyerDataChanged &&
+                        reservation.InvoiceBuyerConfirmedAtUtc.HasValue &&
+                        request.BuyerDataVersion != reservation.InvoiceBuyerConfirmedAtUtc)
+                    {
+                        result.Status = "BuyerDataChanged";
+                        result.Error = "Invoice buyer data changed in another session. Reload the latest details and try again.";
+                        result.Reservation = reservation;
+                        result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                        return result;
+                    }
+
+                    if (!buyerDataChanged)
+                    {
+                        databaseMutationLock.Commit();
+                        goto MirrorBuyerMetadata;
+                    }
+                }
+
+                if (!InvoiceSubmissionLogLookup.TryHasSubmittedOrExternalInvoice(
+                        dbContext,
+                        reservation.ReservationId,
+                        _logger,
+                        "Payments/RequestR1BeforeSave",
+                        out hasSubmittedOrExternalInvoice) ||
+                    !InvoiceSubmissionLogLookup.TryHasIndeterminateOrActiveInvoice(
+                        dbContext,
+                        reservation.ReservationId,
+                        _utcNow(),
+                        _logger,
+                        "Payments/RequestR1BeforeSave",
+                        out hasIndeterminateOrActiveInvoice))
+                {
+                    result.Status = "InvoiceStateUnavailable";
+                    result.Error = "Invoice status could not be verified. Try again later or contact support.";
+                    result.Reservation = reservation;
+                    result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                    return result;
+                }
+
+                if (hasSubmittedOrExternalInvoice || hasIndeterminateOrActiveInvoice)
+                {
+                    result.Status = hasSubmittedOrExternalInvoice
+                        ? "InvoiceAlreadyIssued"
+                        : "InvoiceStateUnavailable";
+                    result.Error = hasSubmittedOrExternalInvoice
+                        ? "Invoice buyer data cannot be changed after submission. Use the supported provider correction, storno, or reissue process."
+                        : "Invoice submission may be in progress or require reconciliation. Buyer details are temporarily locked; contact support if this persists.";
+                    result.Reservation = reservation;
+                    result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                    return result;
+                }
+
+                var existingVatVerificationStatus = reservation.InvoiceBuyerVatVerificationStatus;
+                var existingVatVerificationCheckedAtUtc = reservation.InvoiceBuyerVatVerificationCheckedAtUtc;
+                var existingVatVerificationReference = reservation.InvoiceBuyerVatVerificationReference;
+                var buyerDataVersion = NextBuyerDataVersion(
+                    reservation.InvoiceBuyerConfirmedAtUtc,
+                    _utcNow());
+                ApplyConfirmedBuyer(
+                    reservation,
+                    buyerData,
+                    buyerDataVersion,
+                    viesVerification);
+                if (preserveVatVerification)
+                {
+                    reservation.InvoiceBuyerVatVerificationStatus = existingVatVerificationStatus;
+                    reservation.InvoiceBuyerVatVerificationCheckedAtUtc = existingVatVerificationCheckedAtUtc;
+                    reservation.InvoiceBuyerVatVerificationReference = existingVatVerificationReference;
+                }
+                reservation.UpdatedAtUtc = buyerDataVersion;
                 try
                 {
                     dbContext.SaveChanges();
+                    databaseMutationLock?.Commit();
                 }
                 catch (DbUpdateConcurrencyException)
                 {
@@ -750,55 +924,155 @@ namespace OCPP.Core.Server.Payments
                     entry.Reload();
                     if (!reservation.InvoiceBuyerConfirmedAtUtc.HasValue || !MatchesConfirmedBuyer(reservation, buyerData))
                     {
-                        result.Status = "BuyerDataLocked";
-                        result.Error = "Confirmed invoice buyer data can no longer be changed in the customer flow.";
+                        result.Status = "BuyerDataChanged";
+                        result.Error = "Invoice buyer data changed in another session. Reload the latest details and try again.";
                         result.Reservation = reservation;
+                        result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
                         return result;
                     }
                 }
             }
 
-            var buyerCompanyName = buyerData.CompanyName;
-            var buyerTaxIdentifier = buyerData.TaxIdentifier;
-            var buyerOibForMetadata = string.Equals(buyerData.Country, "HR", StringComparison.OrdinalIgnoreCase)
-                ? TrimMetadataValue(buyerTaxIdentifier, 32)
-                : null;
-
+        MirrorBuyerMetadata:
+            dbContext.Entry(reservation).Reload();
+            bool alreadyRequested = false;
+            bool metadataMirrored = false;
+            Exception metadataMirrorError = null;
             try
             {
+                metadataMirrored = MirrorR1BuyerMetadata(
+                    dbContext,
+                    reservation,
+                    out alreadyRequested);
+            }
+            catch (Exception ex) when (ex is StripeException || ex is InvalidOperationException)
+            {
+                metadataMirrorError = ex;
+                _logger.LogWarning(
+                    ex,
+                    "Stripe/R1Request => Buyer snapshot saved but metadata mirror failed reservation={ReservationId}",
+                    request.ReservationId);
+            }
+
+            var reconciliationQueued = false;
+            if (!metadataMirrored)
+            {
+                reconciliationQueued = TryQueueR1BuyerMetadataReconciliation(reservation.ReservationId);
+                _logger.LogWarning(
+                    metadataMirrorError,
+                    "Stripe/R1Request => Database buyer snapshot remains authoritative; metadata mirror is pending reservation={ReservationId} reconciliationQueued={ReconciliationQueued}",
+                    reservation.ReservationId,
+                    reconciliationQueued);
+            }
+            else if (!alreadyRequested)
+            {
+                TrySendR1RequestedNotification(dbContext, reservation);
+            }
+
+            var finalBuyerTaxIdentifier = reservation.InvoiceBuyerTaxIdentifier;
+            var finalBuyerOib = string.Equals(reservation.InvoiceBuyerCountry, "HR", StringComparison.OrdinalIgnoreCase)
+                ? TrimMetadataValue(finalBuyerTaxIdentifier, 32)
+                : null;
+            var metadataRetryRequired = !metadataMirrored && !reconciliationQueued;
+            result.Success = !metadataRetryRequired;
+            result.Status = metadataMirrored
+                ? "Updated"
+                : reconciliationQueued
+                    ? "UpdatedMetadataPending"
+                    : "UpdatedMetadataRetryRequired";
+            result.Error = metadataRetryRequired
+                ? "Buyer details were saved, but payment metadata could not be synchronized or queued. Retry this save or contact support."
+                : null;
+            result.Reservation = reservation;
+            result.BuyerCompanyName = reservation.InvoiceBuyerCompanyName;
+            result.BuyerOib = finalBuyerOib;
+            result.BuyerCountry = reservation.InvoiceBuyerCountry;
+            result.BuyerTaxIdentifier = finalBuyerTaxIdentifier;
+            result.BuyerDataVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+
+            _logger.LogInformation(
+                "Stripe/R1Request => Saved authoritative buyer snapshot reservation={ReservationId} sessionId={SessionId} metadataMirrored={MetadataMirrored}",
+                reservation.ReservationId,
+                reservation.StripeCheckoutSessionId,
+                metadataMirrored);
+
+            return result;
+        }
+
+        public bool ReconcileR1BuyerMetadata(OCPPCoreContext dbContext, Guid reservationId)
+        {
+            if (!IsEnabled || dbContext == null || reservationId == Guid.Empty)
+            {
+                return false;
+            }
+
+            using var buyerMutationGate = dbContext.Database.IsRelational()
+                ? null
+                : InvoiceBuyerMutationGate.Enter(reservationId);
+            using var databaseMutationLock = InvoiceBuyerDatabaseMutationLock.Acquire(
+                dbContext,
+                reservationId);
+            var reservation = dbContext.ChargePaymentReservations.Find(reservationId);
+            if (reservation == null || !reservation.InvoiceBuyerConfirmedAtUtc.HasValue)
+            {
+                return false;
+            }
+
+            dbContext.Entry(reservation).Reload();
+            var mirrored = MirrorR1BuyerMetadata(
+                dbContext,
+                reservation,
+                out var alreadyRequested);
+            if (!mirrored)
+            {
+                return false;
+            }
+
+            databaseMutationLock?.Commit();
+            if (!alreadyRequested)
+            {
+                TrySendR1RequestedNotification(dbContext, reservation);
+            }
+
+            return true;
+        }
+
+        private bool MirrorR1BuyerMetadata(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            out bool alreadyRequested)
+        {
+            alreadyRequested = false;
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                var mirroredVersion = reservation.InvoiceBuyerConfirmedAtUtc;
+                var buyerCompanyName = reservation.InvoiceBuyerCompanyName;
+                var buyerTaxIdentifier = reservation.InvoiceBuyerTaxIdentifier;
+                var buyerCountry = reservation.InvoiceBuyerCountry;
+                var buyerOibForMetadata = string.Equals(buyerCountry, "HR", StringComparison.OrdinalIgnoreCase)
+                    ? TrimMetadataValue(buyerTaxIdentifier, 32)
+                    : null;
                 var session = _sessionService.Get(reservation.StripeCheckoutSessionId);
                 if (session == null)
                 {
-                    result.Status = "SessionNotFound";
-                    result.Error = "Stripe checkout session not found.";
-                    result.Reservation = reservation;
-                    return result;
+                    throw new InvalidOperationException(
+                        $"Stripe checkout session '{reservation.StripeCheckoutSessionId}' was not found.");
                 }
 
-                bool alreadyRequested = IsR1InvoiceRequested(session);
-
+                alreadyRequested |= IsR1InvoiceRequested(session);
                 var sessionMetadata = new Dictionary<string, string>(
                     session.Metadata ?? new Dictionary<string, string>(),
                     StringComparer.OrdinalIgnoreCase);
-                sessionMetadata["invoice_type"] = "R1";
-                SetOrRemoveMetadata(sessionMetadata, "buyer_oib", buyerOibForMetadata);
-                SetOrRemoveMetadata(sessionMetadata, "buyer_country", buyerData.Country);
-                SetOrRemoveMetadata(sessionMetadata, "buyer_tax_identifier", TrimMetadataValue(buyerTaxIdentifier, 64));
-                if (!string.IsNullOrWhiteSpace(buyerCompanyName))
-                {
-                    sessionMetadata["buyer_company"] = buyerCompanyName;
-                }
-                else
-                {
-                    sessionMetadata.Remove("buyer_company");
-                }
-
+                ApplyR1BuyerMetadata(
+                    sessionMetadata,
+                    buyerCompanyName,
+                    buyerCountry,
+                    buyerTaxIdentifier,
+                    buyerOibForMetadata,
+                    mirroredVersion);
                 _sessionService.Update(
                     reservation.StripeCheckoutSessionId,
-                    new SessionUpdateOptions
-                    {
-                        Metadata = sessionMetadata
-                    });
+                    new SessionUpdateOptions { Metadata = sessionMetadata });
 
                 var paymentIntentId = string.IsNullOrWhiteSpace(session.PaymentIntentId)
                     ? reservation.StripePaymentIntentId
@@ -809,60 +1083,57 @@ namespace OCPP.Core.Server.Payments
                     var intentMetadata = new Dictionary<string, string>(
                         paymentIntent?.Metadata ?? new Dictionary<string, string>(),
                         StringComparer.OrdinalIgnoreCase);
-                    intentMetadata["invoice_type"] = "R1";
-                    SetOrRemoveMetadata(intentMetadata, "buyer_oib", buyerOibForMetadata);
-                    SetOrRemoveMetadata(intentMetadata, "buyer_country", buyerData.Country);
-                    SetOrRemoveMetadata(intentMetadata, "buyer_tax_identifier", TrimMetadataValue(buyerTaxIdentifier, 64));
-                    if (!string.IsNullOrWhiteSpace(buyerCompanyName))
-                    {
-                        intentMetadata["buyer_company"] = buyerCompanyName;
-                    }
-                    else
-                    {
-                        intentMetadata.Remove("buyer_company");
-                    }
-
+                    ApplyR1BuyerMetadata(
+                        intentMetadata,
+                        buyerCompanyName,
+                        buyerCountry,
+                        buyerTaxIdentifier,
+                        buyerOibForMetadata,
+                        mirroredVersion);
                     _paymentIntentService.Update(
                         paymentIntentId,
-                        new PaymentIntentUpdateOptions
-                        {
-                            Metadata = intentMetadata
-                        });
-                    reservation.StripePaymentIntentId = paymentIntentId;
+                        new PaymentIntentUpdateOptions { Metadata = intentMetadata });
                 }
 
-                reservation.UpdatedAtUtc = _utcNow();
-                dbContext.SaveChanges();
-
-                if (!alreadyRequested)
+                dbContext.Entry(reservation).Reload();
+                if (reservation.InvoiceBuyerConfirmedAtUtc == mirroredVersion)
                 {
-                    TrySendR1RequestedNotification(dbContext, reservation);
+                    return true;
                 }
-
-                result.Success = true;
-                result.Status = "Updated";
-                result.Error = null;
-                result.Reservation = reservation;
-                result.BuyerCompanyName = buyerCompanyName;
-                result.BuyerOib = buyerOibForMetadata;
-                result.BuyerCountry = buyerData.Country;
-                result.BuyerTaxIdentifier = buyerTaxIdentifier;
-
-                _logger.LogInformation(
-                    "Stripe/R1Request => Updated metadata reservation={ReservationId} sessionId={SessionId} hasCompany={HasCompany}",
-                    reservation.ReservationId,
-                    reservation.StripeCheckoutSessionId,
-                    !string.IsNullOrWhiteSpace(buyerCompanyName));
-
-                return result;
             }
-            catch (StripeException sex)
+
+            throw new InvalidOperationException(
+                $"Stripe buyer metadata did not converge to the latest version for reservation '{reservation.ReservationId}'.");
+        }
+
+        private bool TryQueueR1BuyerMetadataReconciliation(Guid reservationId)
+        {
+            if (_backgroundJobClient == null)
             {
-                _logger.LogError(sex, "Stripe/R1Request => Failed updating metadata reservation={ReservationId}", request.ReservationId);
-                result.Status = "StripeError";
-                result.Error = sex.Message;
-                result.Reservation = reservation;
-                return result;
+                return false;
+            }
+
+            try
+            {
+                var job = Job.FromExpression<IStripeBuyerMetadataReconciliationJob>(reconciliationJob =>
+                    reconciliationJob.Reconcile(reservationId));
+                var queue = _configuration?.GetValue<string>("Hangfire:Queue")?.Trim();
+                if (string.IsNullOrWhiteSpace(queue))
+                {
+                    queue = PaymentAuthorizationEmailQueue;
+                }
+                var jobId = _backgroundJobClient.Create(
+                    job,
+                    new EnqueuedState(queue));
+                return !string.IsNullOrWhiteSpace(jobId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Stripe/R1Request => Failed to queue buyer metadata reconciliation reservation={ReservationId}",
+                    reservationId);
+                return false;
             }
         }
 
@@ -897,6 +1168,16 @@ namespace OCPP.Core.Server.Payments
             reservation.InvoiceBuyerConfirmedAtUtc = confirmedAtUtc;
         }
 
+        private static DateTime NextBuyerDataVersion(DateTime? currentVersion, DateTime utcNow)
+        {
+            if (!currentVersion.HasValue || utcNow > currentVersion.Value)
+            {
+                return utcNow;
+            }
+
+            return currentVersion.Value.AddMilliseconds(1);
+        }
+
         private static bool MatchesConfirmedBuyer(ChargePaymentReservation reservation, InvoiceBuyerData buyer)
         {
             return string.Equals(reservation.InvoiceBuyerCountry, buyer.Country, StringComparison.Ordinal) &&
@@ -922,6 +1203,22 @@ namespace OCPP.Core.Server.Payments
         {
             if (string.IsNullOrWhiteSpace(value)) metadata.Remove(key);
             else metadata[key] = value;
+        }
+
+        private static void ApplyR1BuyerMetadata(
+            IDictionary<string, string> metadata,
+            string buyerCompanyName,
+            string buyerCountry,
+            string buyerTaxIdentifier,
+            string buyerOib,
+            DateTime? buyerDataVersion)
+        {
+            metadata["invoice_type"] = "R1";
+            SetOrRemoveMetadata(metadata, "buyer_oib", buyerOib);
+            SetOrRemoveMetadata(metadata, "buyer_country", buyerCountry);
+            SetOrRemoveMetadata(metadata, "buyer_tax_identifier", TrimMetadataValue(buyerTaxIdentifier, 64));
+            SetOrRemoveMetadata(metadata, "buyer_company", buyerCompanyName);
+            SetOrRemoveMetadata(metadata, "buyer_data_version", buyerDataVersion?.ToString("O"));
         }
 
         public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason)

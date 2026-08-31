@@ -111,6 +111,8 @@ namespace OCPP.Core.Server
             services.AddSingleton<Payments.Invoices.IInvoiceIntegrationService, Payments.Invoices.InvoiceIntegrationService>();
             services.AddTransient<Payments.PaymentAuthorizationEmailJob>();
             services.AddTransient<IPaymentAuthorizationEmailJob, Payments.PaymentAuthorizationEmailJob>();
+            services.AddTransient<Payments.StripeBuyerMetadataReconciliationJob>();
+            services.AddTransient<IStripeBuyerMetadataReconciliationJob, Payments.StripeBuyerMetadataReconciliationJob>();
             bool useMockStripeServices = Configuration.GetValue<bool>("Stripe:UseMockServices");
             if (useMockStripeServices)
             {
