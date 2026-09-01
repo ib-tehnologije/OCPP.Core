@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace OCPP.Core.Management.Models
 {
@@ -25,6 +26,30 @@ namespace OCPP.Core.Management.Models
         public string PublicDisplayCode { get; set; }
         public double? Latitude { get; set; }
         public double? Longitude { get; set; }
+        public string NavigationUrl
+        {
+            get
+            {
+                if (!Latitude.HasValue || !Longitude.HasValue)
+                {
+                    return null;
+                }
+
+                double latitude = Latitude.Value;
+                double longitude = Longitude.Value;
+                if (!double.IsFinite(latitude)
+                    || !double.IsFinite(longitude)
+                    || latitude < -90
+                    || latitude > 90
+                    || longitude < -180
+                    || longitude > 180)
+                {
+                    return null;
+                }
+
+                return $"https://www.google.com/maps/dir/?api=1&destination={latitude.ToString("R", CultureInfo.InvariantCulture)},{longitude.ToString("R", CultureInfo.InvariantCulture)}";
+            }
+        }
         public string LocationDescription { get; set; }
         public decimal PricePerKwh { get; set; }
         public decimal UserSessionFee { get; set; }

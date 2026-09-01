@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import {
   findMockStripeArtifactsByReservationId,
@@ -136,6 +137,50 @@ test("public map shows mixed availability, offline normalization, and case-insen
 
   const caseMismatchCard = page.locator('.cp-card[data-cp-id="map-case-01"]');
   await expect(caseMismatchCard.locator(".cc-status")).toHaveText("Available");
+});
+
+test("public map keeps charging primary and offers navigation only for valid stored coordinates", async ({ page }) => {
+  const invalidCoordinateStationId = "MAP-OFFLINE-01";
+  const databasePath = process.env.SQLITE_DB_PATH ?? runtimeInfo().databasePath;
+  const originalLatitudeSql = execFileSync(
+    "sqlite3",
+    [databasePath, `SELECT quote(Latitude) FROM ChargePoint WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};`],
+    { encoding: "utf8" },
+  ).trim();
+
+  expect(originalLatitudeSql).toMatch(/^(?:NULL|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)$/);
+
+  await runSqlite(databasePath, `
+UPDATE ChargePoint
+SET Latitude = NULL
+WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};
+`);
+
+  try {
+    await page.goto("/Public/Map?lang=hr");
+
+    const validCard = page.locator('.cp-card[data-cp-id="MAP-MIXED-01"]');
+    const validActions = validCard.locator(".cc-actions a");
+    await expect(validActions.first()).toHaveAttribute("href", /\/cp\/MAP-MIXED-01$/);
+
+    const navigation = validCard.locator("a[data-station-navigation]");
+    await expect(navigation).toHaveText("Navigacija");
+    await expect(navigation).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/dir/?api=1&destination=44.8708,13.8538",
+    );
+    await expect(navigation).toHaveAttribute("target", "_blank");
+    await expect(navigation).toHaveAttribute("rel", /noopener/);
+
+    const invalidCard = page.locator(`.cp-card[data-cp-id="${invalidCoordinateStationId}"]`);
+    await expect(invalidCard.locator("a[data-station-navigation]")).toHaveCount(0);
+  } finally {
+    await runSqlite(databasePath, `
+UPDATE ChargePoint
+SET Latitude = ${originalLatitudeSql}
+WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};
+`);
+  }
 });
 
 test("public start page renders offline connectors without raw unknown status", async ({ page }) => {

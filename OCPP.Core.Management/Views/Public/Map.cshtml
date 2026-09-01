@@ -91,6 +91,7 @@
                                 : Url.RouteUrl("public-start-path", new { cp = cp.ChargePointId, conn = 1 })
                                     ?? Url.Action("Start", "Public", new { cp = cp.ChargePointId, conn = 1 });
                             var startLabel = cp.HasMultipleConnectors ? "Choose connector" : "Start session";
+                            var navigationUrl = cp.NavigationUrl;
                             var searchText = $"{cp.Name} {cp.LocationDescription} {publicStationCode}";
                             <div class="charger-card cp-card" data-search="@searchText" data-cp-id="@cp.ChargePointId">
                                 <div class="cc-top">
@@ -133,7 +134,11 @@
                                     </div>
                                 }
                                 <div class="cc-actions">
-                                    <a href="@startUrl" onclick="event.stopPropagation();" data-i18n="@(cp.HasMultipleConnectors ? "map.chooseConnector" : "map.startSession")">@startLabel</a>
+                                    <a class="cc-action--primary" href="@startUrl" onclick="event.stopPropagation();" data-i18n="@(cp.HasMultipleConnectors ? "map.chooseConnector" : "map.startSession")">@startLabel</a>
+                                    @if (navigationUrl != null)
+                                    {
+                                        <a class="cc-action--secondary" href="@navigationUrl" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" data-station-navigation data-i18n="map.navigate">Navigate</a>
+                                    }
                                 </div>
                             </div>
                         }
