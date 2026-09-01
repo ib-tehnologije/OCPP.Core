@@ -141,7 +141,7 @@ test("public map shows mixed availability, offline normalization, and case-insen
 
 test("public map keeps charging primary and offers navigation only for valid stored coordinates", async ({ page }) => {
   const invalidCoordinateStationId = "MAP-OFFLINE-01";
-  const databasePath = runtimeInfo().databasePath;
+  const databasePath = process.env.SQLITE_DB_PATH ?? runtimeInfo().databasePath;
   const originalLatitudeSql = execFileSync(
     "sqlite3",
     [databasePath, `SELECT quote(Latitude) FROM ChargePoint WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};`],
