@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import {
   findMockStripeArtifactsByReservationId,
@@ -140,8 +141,16 @@ test("public map shows mixed availability, offline normalization, and case-insen
 
 test("public map keeps charging primary and offers navigation only for valid stored coordinates", async ({ page }) => {
   const invalidCoordinateStationId = "MAP-OFFLINE-01";
+  const databasePath = runtimeInfo().databasePath;
+  const originalLatitudeSql = execFileSync(
+    "sqlite3",
+    [databasePath, `SELECT quote(Latitude) FROM ChargePoint WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};`],
+    { encoding: "utf8" },
+  ).trim();
 
-  await runSqlite(runtimeInfo().databasePath, `
+  expect(originalLatitudeSql).toMatch(/^(?:NULL|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)$/);
+
+  await runSqlite(databasePath, `
 UPDATE ChargePoint
 SET Latitude = NULL
 WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};
@@ -166,9 +175,9 @@ WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};
     const invalidCard = page.locator(`.cp-card[data-cp-id="${invalidCoordinateStationId}"]`);
     await expect(invalidCard.locator("a[data-station-navigation]")).toHaveCount(0);
   } finally {
-    await runSqlite(runtimeInfo().databasePath, `
+    await runSqlite(databasePath, `
 UPDATE ChargePoint
-SET Latitude = 44.8722
+SET Latitude = ${originalLatitudeSql}
 WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};
 `);
   }
