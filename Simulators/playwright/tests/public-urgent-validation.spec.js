@@ -138,6 +138,42 @@ test("public map shows mixed availability, offline normalization, and case-insen
   await expect(caseMismatchCard.locator(".cc-status")).toHaveText("Available");
 });
 
+test("public map keeps charging primary and offers navigation only for valid stored coordinates", async ({ page }) => {
+  const invalidCoordinateStationId = "MAP-OFFLINE-01";
+
+  await runSqlite(runtimeInfo().databasePath, `
+UPDATE ChargePoint
+SET Latitude = NULL
+WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};
+`);
+
+  try {
+    await page.goto("/Public/Map?lang=hr");
+
+    const validCard = page.locator('.cp-card[data-cp-id="MAP-MIXED-01"]');
+    const validActions = validCard.locator(".cc-actions a");
+    await expect(validActions.first()).toHaveAttribute("href", /\/cp\/MAP-MIXED-01$/);
+
+    const navigation = validCard.locator("a[data-station-navigation]");
+    await expect(navigation).toHaveText("Navigacija");
+    await expect(navigation).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/dir/?api=1&destination=44.8708,13.8538",
+    );
+    await expect(navigation).toHaveAttribute("target", "_blank");
+    await expect(navigation).toHaveAttribute("rel", /noopener/);
+
+    const invalidCard = page.locator(`.cp-card[data-cp-id="${invalidCoordinateStationId}"]`);
+    await expect(invalidCard.locator("a[data-station-navigation]")).toHaveCount(0);
+  } finally {
+    await runSqlite(runtimeInfo().databasePath, `
+UPDATE ChargePoint
+SET Latitude = 44.8722
+WHERE ChargePointId = ${sqlQuote(invalidCoordinateStationId)};
+`);
+  }
+});
+
 test("public start page renders offline connectors without raw unknown status", async ({ page }) => {
   await page.goto("/Public/Start?cp=MAP-OFFLINE-01&conn=1");
 

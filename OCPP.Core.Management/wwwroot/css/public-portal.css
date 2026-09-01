@@ -2535,6 +2535,11 @@ html.public-theme-light {
   color: var(--text);
 }
 
+.charger-card .cc-actions a.cc-action--secondary {
+  flex: 0 0 auto;
+  background: var(--surface-2);
+}
+
 /* Leaflet map overrides */
 
 .leaflet-control-zoom a {
