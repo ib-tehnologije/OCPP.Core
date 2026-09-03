@@ -39,6 +39,8 @@ dotnet run --project OCPP.Core.Management
 
 ## Tests and Checks
 
+The root `.wakatime-project` file intentionally pins all checkouts and worktrees to the canonical `OCPP.Core` tracking project. Keep that value stable so time-based reports do not fragment by directory name.
+
 Run the focused server test suite:
 
 ```sh
