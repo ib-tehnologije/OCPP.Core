@@ -766,8 +766,7 @@ namespace OCPP.Core.Management.Controllers
 
         private static bool IsAvailableStatus(string status)
         {
-            return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(status, "Preparing", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsOfflineLikeStatus(string status)

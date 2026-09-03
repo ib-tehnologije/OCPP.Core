@@ -139,6 +139,22 @@ test("public map shows mixed availability, offline normalization, and case-insen
   await expect(caseMismatchCard.locator(".cc-status")).toHaveText("Available");
 });
 
+test("public start treats Preparing as occupied and selects the available sibling", async ({ page }) => {
+  await page.goto("/Public/Start?cp=MAP-MIXED-01");
+
+  await expect(page.locator("#charger-sub")).toHaveText("Right connector");
+  await expect(page.locator("#connector-status-text")).toHaveText("Available");
+
+  const preparingConnector = page.locator('.connector-option[data-connector-id="1"]');
+  await expect(preparingConnector).toHaveAttribute("data-last-status", "Occupied");
+  await expect(preparingConnector).toContainText("Occupied");
+  await expect(preparingConnector).not.toHaveClass(/selected/);
+
+  const availableConnector = page.locator('.connector-option[data-connector-id="2"]');
+  await expect(availableConnector).toHaveAttribute("data-last-status", "Available");
+  await expect(availableConnector).toHaveClass(/selected/);
+});
+
 test("public map keeps charging primary and offers navigation only for valid stored coordinates", async ({ page }) => {
   const invalidCoordinateStationId = "MAP-OFFLINE-01";
   const databasePath = process.env.SQLITE_DB_PATH ?? runtimeInfo().databasePath;

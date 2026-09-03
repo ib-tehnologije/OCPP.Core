@@ -96,6 +96,7 @@ Known behavior:
 - Anonymous public map and start pages.
 - Routes include `cp/{cp}` and `cp/{cp}/{conn:int}`.
 - Connector selection, busy/offline handling, and recovery cookie handling.
+- Public availability exposes only genuine `Available` connector state; raw `Preparing` remains visible to operators but follows the existing public `Occupied` status, counts, messaging, and default-selection behavior.
 - Public payment redirect/status flow.
 - Public stop request path.
 - R1/company invoice data submission with OIB validation.

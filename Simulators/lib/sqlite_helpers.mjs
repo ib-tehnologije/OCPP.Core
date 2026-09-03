@@ -244,8 +244,8 @@ INSERT INTO ConnectorStatus (ChargePointId, ConnectorId, ConnectorName, LastStat
   (${sqlQuote(cp21Id)}, 3, 'Connector 3', 'Available', datetime('now')),
   (${sqlQuote(invoiceCp16Id)}, 1, 'Invoice connector 1', 'Available', datetime('now')),
   (${sqlQuote(invoiceCp20Id)}, 2, 'Invoice connector 2', 'Available', datetime('now')),
-  ('MAP-MIXED-01', 1, 'Left connector', 'Available', datetime('now')),
-  ('MAP-MIXED-01', 2, 'Right connector', 'Occupied', datetime('now')),
+  ('MAP-MIXED-01', 1, 'Left connector', 'Preparing', datetime('now')),
+  ('MAP-MIXED-01', 2, 'Right connector', 'Available', datetime('now')),
   ('MAP-OFFLINE-01', 1, 'Offline connector', 'Unknown', datetime('now')),
   ('MAP-OFFLINE-01', 2, 'Stale connector', 'Available', datetime('now', '-45 minutes')),
   ('map-case-01', 1, 'Case connector', 'Available', datetime('now'));

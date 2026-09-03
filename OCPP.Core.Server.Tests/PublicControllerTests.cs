@@ -225,6 +225,59 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task Start_PreparingConnector_IsOccupiedAndGenericUrlSelectsAvailableConnector()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-preparing-start-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-PREPARING-START", "Preparing start test");
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-PREPARING-START",
+                            ConnectorId = 1,
+                            LastStatus = "Preparing",
+                            LastStatusTime = DateTime.UtcNow
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-PREPARING-START",
+                            ConnectorId = 2,
+                            LastStatus = "Available",
+                            LastStatusTime = DateTime.UtcNow
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("CP-PREPARING-START", null);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal(2, model.ConnectorId);
+                Assert.Equal("Available", model.LastStatus);
+
+                var preparingConnector = model.Connectors.Single(c => c.ConnectorId == 1);
+                Assert.Equal("Occupied", preparingConnector.LastStatus);
+                Assert.Contains("currently in use", preparingConnector.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+                Assert.False(preparingConnector.IsSelected);
+
+                var availableConnector = model.Connectors.Single(c => c.ConnectorId == 2);
+                Assert.Equal("Available", availableConnector.LastStatus);
+                Assert.True(availableConnector.IsSelected);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task Start_PublicDisplayCode_UsesDerivedPublicConnectorLabels()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-public-code-{Guid.NewGuid():N}.sqlite");
@@ -593,6 +646,102 @@ namespace OCPP.Core.Server.Tests
                 Assert.Equal(0, chargePoint.OfflineConnectorCount);
                 Assert.True(chargePoint.HasMultipleConnectors);
                 Assert.Equal("Available", chargePoint.Status);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Map_PreparingConnector_IsCountedAsOccupied()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-preparing-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-MAP-PREPARING", "Preparing map test");
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-MAP-PREPARING",
+                            ConnectorId = 1,
+                            LastStatus = "Preparing",
+                            LastStatusTime = DateTime.UtcNow
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-MAP-PREPARING",
+                            ConnectorId = 2,
+                            LastStatus = "Available",
+                            LastStatusTime = DateTime.UtcNow
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("Available", chargePoint.Status);
+                Assert.Equal(2, chargePoint.ConnectorCount);
+                Assert.Equal(1, chargePoint.AvailableConnectorCount);
+                Assert.Equal(1, chargePoint.OccupiedConnectorCount);
+                Assert.Equal(0, chargePoint.OfflineConnectorCount);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Map_AllPreparingConnectors_AggregatesAsOccupied()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-map-all-preparing-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-MAP-ALL-PREPARING", "All preparing map test");
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-MAP-ALL-PREPARING",
+                            ConnectorId = 1,
+                            LastStatus = "Preparing",
+                            LastStatusTime = DateTime.UtcNow
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-MAP-ALL-PREPARING",
+                            ConnectorId = 2,
+                            LastStatus = "Preparing",
+                            LastStatusTime = DateTime.UtcNow
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Map();
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicMapViewModel>(viewResult.Model);
+                var chargePoint = Assert.Single(model.ChargePoints);
+
+                Assert.Equal("Occupied", chargePoint.Status);
+                Assert.Equal(2, chargePoint.ConnectorCount);
+                Assert.Equal(0, chargePoint.AvailableConnectorCount);
+                Assert.Equal(2, chargePoint.OccupiedConnectorCount);
+                Assert.Equal(0, chargePoint.OfflineConnectorCount);
             }
             finally
             {
