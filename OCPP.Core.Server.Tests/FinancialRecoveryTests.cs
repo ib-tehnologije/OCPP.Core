@@ -59,6 +59,21 @@ namespace OCPP.Core.Server.Tests
     public class FinancialRecoverySettlementTests
     {
         [Fact]
+        public void Assess_BlocksReviewRequiredMeterEvidence()
+        {
+            var reservation = CreateReservation();
+            reservation.Status = PaymentReservationStatus.Failed;
+            var transaction = CreateTransaction();
+            transaction.MeterEvidenceState = MeterEvidenceSettlementState.ReviewRequired;
+            transaction.MeterEvidenceReason = MeterEvidenceReason.PhysicalCapacityUnavailable;
+
+            var result = FinancialRecoverySettlementAssessor.Assess(reservation, transaction);
+
+            Assert.False(result.Eligible);
+            Assert.Contains("meter evidence", result.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public void Assess_DerivesBillableValuesFromPersistedEvidence()
         {
             var reservation = CreateReservation();

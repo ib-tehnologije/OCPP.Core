@@ -185,13 +185,34 @@ namespace OCPP.Core.Server
                     // write charging/meter data in chargepoint status
                     if (connectorId > 0)
                     {
+                        var transaction = DbContext.Transactions
+                            .Where(t => t.TransactionId == meterValueRequest.TransactionId &&
+                                        t.ChargePointId == ChargePointStatus.Id &&
+                                        t.ConnectorId == connectorId &&
+                                        !t.StopTime.HasValue)
+                            .FirstOrDefault();
+                        var evidence = ProcessMeterEvidence(
+                            transaction,
+                            meterValueRequest.MeterValue,
+                            meterTime,
+                            "MeterValues",
+                            terminal: false);
+                        if (transaction == null)
+                        {
+                            meterKWH = -1;
+                        }
+                        else if (evidence != null)
+                        {
+                            meterKWH = string.Equals(evidence.Outcome, OCPP.Core.Server.Payments.MeterEvidenceOutcome.Accepted, StringComparison.Ordinal)
+                                ? evidence.NormalizedMeterKwh.GetValueOrDefault(-1)
+                                : -1;
+                        }
                         msgMeterValue = $"Meter (kWh): {meterKWH} | Charge (kW): {currentChargeKW} | Current (A): {currentImportA} | SoC (%): {stateOfCharge}";
 
                         if (meterKWH >= 0)
                         {
                             UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
                             UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime, currentChargeKW, currentImportA, stateOfCharge);
-                            UpdateOpenTransactionMeterStop(connectorId, meterKWH);
                             ocppMiddleware?.NotifyTransactionMeterUpdated(
                                 DbContext,
                                 ChargePointStatus,

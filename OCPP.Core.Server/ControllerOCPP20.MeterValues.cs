@@ -65,6 +65,17 @@ namespace OCPP.Core.Server
                     // write charging/meter data in chargepoint status
                     if (connectorId > 0)
                     {
+                        var transaction = DbContext.Transactions
+                            .Where(t => t.ChargePointId == ChargePointStatus.Id && t.ConnectorId == connectorId && !t.StopTime.HasValue)
+                            .OrderByDescending(t => t.TransactionId)
+                            .FirstOrDefault();
+                        var evidence = ProcessMeterEvidence(transaction, meterValueRequest.MeterValue, meterTime.Value, "MeterValues", terminal: false);
+                        if (evidence != null)
+                        {
+                            meterKWH = string.Equals(evidence.Outcome, OCPP.Core.Server.Payments.MeterEvidenceOutcome.Accepted, StringComparison.Ordinal)
+                                ? evidence.NormalizedMeterKwh.GetValueOrDefault(-1)
+                                : -1;
+                        }
                         msgMeterValue = $"Meter (kWh): {meterKWH}";
                         if (currentChargeKW >= 0) msgMeterValue += $" | Charge (kW): {currentChargeKW}";
                         if (currentImportA >= 0) msgMeterValue += $" | Current (A): {currentImportA}";

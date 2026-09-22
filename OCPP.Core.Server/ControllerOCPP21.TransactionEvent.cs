@@ -77,12 +77,6 @@ namespace OCPP.Core.Server
                     ocppMiddleware?.NotifyConnectorOcppStatus(DbContext, ChargePointStatus, connectorId, rawChargingState, transactionEventRequest.Timestamp);
                 }
 
-                if (connectorId > 0 && meterKWH >= 0)
-                {
-                    UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
-                    UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime.Value, currentChargeKW, currentImportA, stateOfCharge);
-                }
-
                 if (transactionEventRequest.EventType == TransactionEventEnumType.Started)
                 {
                     try
@@ -183,6 +177,23 @@ namespace OCPP.Core.Server
 
                                 DbContext.SaveChanges();
 
+                                var meterEvidence = ProcessMeterEvidence(
+                                    transaction,
+                                    transactionEventRequest.MeterValue,
+                                    transactionEventRequest.Timestamp,
+                                    "TransactionEvent.Started",
+                                    terminal: false);
+                                if (meterEvidence != null &&
+                                    string.Equals(meterEvidence.Outcome, Payments.MeterEvidenceOutcome.Accepted, StringComparison.Ordinal) &&
+                                    meterEvidence.NormalizedMeterKwh.HasValue)
+                                {
+                                    meterKWH = meterEvidence.NormalizedMeterKwh.Value;
+                                    transaction.MeterStart = meterKWH;
+                                    DbContext.SaveChanges();
+                                    UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
+                                    UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime.Value, currentChargeKW, currentImportA, stateOfCharge);
+                                }
+
                                 ocppMiddleware?.NotifyTransactionStarted(DbContext, ChargePointStatus, transaction.ConnectorId, idTag, transaction.TransactionId);
                                 if (meterKWH >= 0)
                                 {
@@ -225,12 +236,20 @@ namespace OCPP.Core.Server
                             transaction.ChargePointId == ChargePointStatus.Id &&
                             !transaction.StopTime.HasValue)
                         {
-                            // write current meter value in "stop" value
-                            if (meterKWH >= 0)
+                            var meterEvidence = ProcessMeterEvidence(
+                                transaction,
+                                transactionEventRequest.MeterValue,
+                                transactionEventRequest.Timestamp,
+                                "TransactionEvent.Updated",
+                                terminal: false);
+                            if (meterEvidence != null &&
+                                string.Equals(meterEvidence.Outcome, Payments.MeterEvidenceOutcome.Accepted, StringComparison.Ordinal) &&
+                                meterEvidence.NormalizedMeterKwh.HasValue)
                             {
+                                meterKWH = meterEvidence.NormalizedMeterKwh.Value;
                                 Logger.LogInformation("UpdateTransaction => Meter='{0}' (kWh)", meterKWH);
-                                transaction.MeterStop = meterKWH;
-                                DbContext.SaveChanges();
+                                UpdateConnectorStatus(connectorId, null, null, meterKWH, meterTime);
+                                UpdateMemoryConnectorStatus(connectorId, meterKWH, meterTime.Value, currentChargeKW, currentImportA, stateOfCharge);
                                 ocppMiddleware?.NotifyTransactionMeterUpdated(
                                     DbContext,
                                     ChargePointStatus,
@@ -408,8 +427,24 @@ namespace OCPP.Core.Server
                                         // write current meter value in "stop" value
                                         Logger.LogInformation("EndTransaction => Meter='{0}' (kWh)", meterKWH);
 
+                                        var meterEvidence = ProcessMeterEvidence(
+                                            transaction,
+                                            transactionEventRequest.MeterValue,
+                                            transactionEventRequest.Timestamp,
+                                            "TransactionEvent.Ended",
+                                            terminal: true);
+                                        if (meterEvidence != null &&
+                                            !string.Equals(meterEvidence.Outcome, Payments.MeterEvidenceOutcome.ReviewRequired, StringComparison.Ordinal))
+                                        {
+                                            var acceptedMeterKwh = meterEvidence.SettlementMeterKwh ?? meterEvidence.NormalizedMeterKwh;
+                                            if (acceptedMeterKwh.HasValue)
+                                            {
+                                                UpdateConnectorStatus(connectorId, null, null, acceptedMeterKwh.Value, meterTime);
+                                                UpdateMemoryConnectorStatus(connectorId, acceptedMeterKwh.Value, meterTime.Value, currentChargeKW, currentImportA, stateOfCharge);
+                                            }
+                                        }
+
                                         transaction.StopTime = transactionEventRequest.Timestamp.UtcDateTime;
-                                        transaction.MeterStop = meterKWH;
                                         transaction.StopTagId = idTag;
                                         transaction.StopReason = transactionEventRequest.TransactionInfo?.StoppedReason.HasValue == true
                                             ? transactionEventRequest.TransactionInfo.StoppedReason.ToString()

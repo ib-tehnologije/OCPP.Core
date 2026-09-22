@@ -84,6 +84,15 @@ namespace OCPP.Core.Server.Payments.Invoices
                 return;
             }
 
+            if (transaction.TransactionId > 0)
+            {
+                var meterEvidence = MeterEvidenceSettlementGuard.AssessInvoice(reservation, transaction);
+                if (!meterEvidence.Ready)
+                {
+                    throw new InvalidOperationException(meterEvidence.Reason);
+                }
+            }
+
             using var buyerMutationGate = dbContext == null || !dbContext.Database.IsRelational()
                 ? InvoiceBuyerMutationGate.Enter(reservation.ReservationId)
                 : null;

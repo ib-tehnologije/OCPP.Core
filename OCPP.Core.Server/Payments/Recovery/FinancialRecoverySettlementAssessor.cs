@@ -69,6 +69,12 @@ namespace OCPP.Core.Server.Payments.Recovery
                 return Blocked("Transaction meter stop is below meter start.");
             }
 
+            var meterEvidence = MeterEvidenceSettlementGuard.Assess(reservation, transaction);
+            if (!meterEvidence.Ready)
+            {
+                return Blocked(meterEvidence.Reason);
+            }
+
             if (reservation.PricePerKwh < 0 || reservation.UserSessionFee < 0 ||
                 reservation.UsageFeePerMinute < 0 || transaction.IdleUsageFeeAmount < 0 ||
                 transaction.UsageFeeMinutes < 0)

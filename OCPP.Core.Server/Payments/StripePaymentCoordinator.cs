@@ -1407,6 +1407,23 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
+            var meterEvidence = recoveryAssessment == null
+                ? MeterEvidenceSettlementGuard.EnsureReady(dbContext, reservation, transaction, "StripeComplete")
+                : MeterEvidenceSettlementGuard.Assess(reservation, transaction);
+            if (!meterEvidence.Ready)
+            {
+                reservation.Status = PaymentReservationStatus.ReviewRequired;
+                reservation.LastError = meterEvidence.Reason;
+                reservation.UpdatedAtUtc = _utcNow();
+                dbContext.SaveChanges();
+                _logger.LogWarning(
+                    "Stripe/Complete => Meter evidence requires review reservation={ReservationId} tx={TransactionId} reason={Reason}",
+                    reservation.ReservationId,
+                    transaction.TransactionId,
+                    meterEvidence.Reason);
+                return;
+            }
+
             var now = _utcNow();
             if (recoveryAssessment == null)
             {

@@ -161,6 +161,7 @@ namespace OCPP.Core.Server.Payments
         public const string Completed = ChargePaymentReservationState.Completed;
         public const string Cancelled = ChargePaymentReservationState.Cancelled;
         public const string Failed = ChargePaymentReservationState.Failed;
+        public const string ReviewRequired = ChargePaymentReservationState.ReviewRequired;
 
         public static readonly string[] InactiveStatuses = ChargePaymentReservationState.InactiveStatuses;
         public static readonly string[] ConnectorLockStatuses = ChargePaymentReservationState.ConnectorLockStatuses;

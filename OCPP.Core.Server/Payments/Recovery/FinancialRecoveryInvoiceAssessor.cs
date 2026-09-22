@@ -31,6 +31,12 @@ namespace OCPP.Core.Server.Payments.Recovery
                 return Blocked("Reservation transaction link does not match the supplied transaction.");
             }
 
+            var meterEvidence = MeterEvidenceSettlementGuard.AssessInvoice(reservation, transaction);
+            if (!meterEvidence.Ready)
+            {
+                return Blocked(meterEvidence.Reason);
+            }
+
             if (!transaction.StopTime.HasValue || transaction.StopTime.Value < transaction.StartTime)
             {
                 return Blocked("Invoice recovery requires a terminal transaction with ordered timestamps.");

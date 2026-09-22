@@ -47,6 +47,7 @@ namespace OCPP.Core.Database
         public virtual DbSet<ConnectorStatus> ConnectorStatuses { get; set; }
         public virtual DbSet<InvoiceSubmissionLog> InvoiceSubmissionLogs { get; set; }
         public virtual DbSet<MessageLog> MessageLogs { get; set; }
+        public virtual DbSet<MeterEvidenceAnomaly> MeterEvidenceAnomalies { get; set; }
         public virtual DbSet<PublicPortalSettings> PublicPortalSettings { get; set; }
         public virtual DbSet<Transaction> Transactions { get; set; }
         public virtual DbSet<ChargePaymentReservation> ChargePaymentReservations { get; set; }
@@ -172,6 +173,26 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.ConnectorName).HasMaxLength(100);
 
                 entity.Property(e => e.LastStatus).HasMaxLength(100);
+            });
+
+            modelBuilder.Entity<MeterEvidenceAnomaly>(entity =>
+            {
+                entity.ToTable("MeterEvidenceAnomaly");
+                entity.HasKey(e => e.MeterEvidenceAnomalyId);
+                entity.Property(e => e.ChargePointId).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.Protocol).IsRequired().HasMaxLength(20);
+                entity.Property(e => e.Source).IsRequired().HasMaxLength(50);
+                entity.Property(e => e.RawValue).IsRequired().HasMaxLength(500);
+                entity.Property(e => e.RawUnit).HasMaxLength(50);
+                entity.Property(e => e.EvidenceKey).IsRequired().HasMaxLength(64);
+                entity.Property(e => e.Outcome).IsRequired().HasMaxLength(50);
+                entity.Property(e => e.Reason).IsRequired().HasMaxLength(100);
+                entity.HasIndex(e => new { e.TransactionId, e.ObservedAtUtc });
+                entity.HasIndex(e => new { e.TransactionId, e.EvidenceKey }).IsUnique();
+                entity.HasOne(e => e.Transaction)
+                    .WithMany()
+                    .HasForeignKey(e => e.TransactionId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<StripeWebhookEvent>(entity =>
@@ -362,6 +383,9 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.StopTagId).HasMaxLength(50);
 
                 entity.Property(e => e.StopReason).HasMaxLength(100);
+                entity.Property(e => e.TrustedMaximumPowerSource).HasMaxLength(100);
+                entity.Property(e => e.MeterEvidenceState).HasMaxLength(50);
+                entity.Property(e => e.MeterEvidenceReason).HasMaxLength(100);
 
                 entity.Property(e => e.Currency).HasMaxLength(10);
                 entity.Property(e => e.FreeReason).HasMaxLength(200);

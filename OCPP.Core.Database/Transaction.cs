@@ -37,6 +37,15 @@ namespace OCPP.Core.Database
         public string StopTagId { get; set; }
         public DateTime? StopTime { get; set; }
         public double? MeterStop { get; set; }
+        public double? AcceptedMeterKwh { get; set; }
+        public DateTime? AcceptedMeterAtUtc { get; set; }
+        public double? AcceptedMeterToleranceKwh { get; set; }
+        public double? TrustedMaximumPowerKw { get; set; }
+        public double? TrustedMaximumPowerToleranceKw { get; set; }
+        public DateTime? TrustedMaximumPowerAtUtc { get; set; }
+        public string TrustedMaximumPowerSource { get; set; }
+        public string MeterEvidenceState { get; set; }
+        public string MeterEvidenceReason { get; set; }
         public string StopReason { get; set; }
         public double MaxEnergyKwh { get; set; }
         public double EnergyKwh { get; set; }

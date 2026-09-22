@@ -2206,6 +2206,63 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CompleteReservation_ReviewRequiredMeterEvidence_DoesNotCaptureInvoiceOrNotify()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-REVIEW-METER",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-REVIEW-METER",
+                StripePaymentIntentId = "pi_review_meter",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                Currency = "eur"
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 12529,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = new DateTime(2026, 9, 10, 10, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 9, 10, 10, 10, 0, DateTimeKind.Utc),
+                StopReason = "EVDisconnected",
+                MeterStart = 17.30859375,
+                AcceptedMeterKwh = 17.30859375,
+                AcceptedMeterAtUtc = new DateTime(2026, 9, 10, 10, 0, 13, DateTimeKind.Utc),
+                MeterEvidenceState = MeterEvidenceSettlementState.ReviewRequired,
+                MeterEvidenceReason = MeterEvidenceReason.PhysicalCapacityUnavailable,
+                MaxEnergyKwh = 80
+            };
+            context.AddRange(reservation, transaction);
+            context.SaveChanges();
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = reservation.StripePaymentIntentId, Status = "requires_capture", Amount = 10_000 }
+            };
+            var invoice = new FakeInvoiceIntegrationService();
+            var email = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                emailService: email,
+                invoiceIntegrationService: invoice);
+
+            coordinator.CompleteReservation(context, transaction);
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(PaymentReservationStatus.ReviewRequired, reservation.Status);
+            Assert.False(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+            Assert.Null(reservation.CapturedAtUtc);
+            Assert.Equal(0, invoice.HandleCompletedReservationCount);
+            Assert.Equal(0, email.ChargingCompletedCount);
+        }
+
+        [Fact]
         public void RecoverTerminalSettlement_CapturesTheExactAssessedAmount()
         {
             using var context = CreateContext();
@@ -2806,12 +2863,26 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0m, transaction.UserSessionFeeAmount);
         }
 
+        [Fact]
+        public void CompleteReservation_CancelsSessionFeeOnlyCharge_ForLegitimateZeroEnergy()
+        {
+            CompleteReservationWithUnusableEnergy(meterStart: null, meterStop: 0, expectedStatus: PaymentReservationStatus.Cancelled, expectCancellation: true);
+        }
+
         [Theory]
-        [InlineData(null, 0.0)]
         [InlineData(0.0, null)]
         [InlineData(-1.0, 0.0)]
         [InlineData(100.0, 99.5)]
-        public void CompleteReservation_CancelsSessionFeeOnlyCharge_WhenEnergyIsMissingOrInvalid(double? meterStart, double? meterStop)
+        public void CompleteReservation_RequiresReview_WhenTerminalMeterHasNoAcceptedFallback(double? meterStart, double? meterStop)
+        {
+            CompleteReservationWithUnusableEnergy(meterStart, meterStop, PaymentReservationStatus.ReviewRequired, expectCancellation: false);
+        }
+
+        private void CompleteReservationWithUnusableEnergy(
+            double? meterStart,
+            double? meterStop,
+            string expectedStatus,
+            bool expectCancellation)
         {
             using var context = CreateContext();
             var reservation = new ChargePaymentReservation
@@ -2860,8 +2931,8 @@ namespace OCPP.Core.Server.Tests
 
             coordinator.CompleteReservation(context, transaction);
 
-            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
-            Assert.True(intentService.CancelCalled);
+            Assert.Equal(expectedStatus, reservation.Status);
+            Assert.Equal(expectCancellation, intentService.CancelCalled);
             Assert.False(intentService.CaptureCalled);
             Assert.Equal(0m, transaction.UserSessionFeeAmount);
             Assert.Equal(0, invoiceIntegration.HandleCompletedReservationCount);
