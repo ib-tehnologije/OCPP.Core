@@ -6,11 +6,81 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
 using Xunit;
+using Ocpp16Measurand = OCPP.Core.Server.Messages_OCPP16.SampledValueMeasurand;
+using Ocpp16Sample = OCPP.Core.Server.Messages_OCPP16.SampledValue;
+using Ocpp16Unit = OCPP.Core.Server.Messages_OCPP16.SampledValueUnit;
+using Ocpp20Measurand = OCPP.Core.Server.Messages_OCPP20.MeasurandEnumType;
+using Ocpp20Sample = OCPP.Core.Server.Messages_OCPP20.SampledValueType;
+using Ocpp20Unit = OCPP.Core.Server.Messages_OCPP20.UnitOfMeasureType;
+using Ocpp21Measurand = OCPP.Core.Server.Messages_OCPP21.MeasurandEnumType;
+using Ocpp21Sample = OCPP.Core.Server.Messages_OCPP21.SampledValueType;
+using Ocpp21Unit = OCPP.Core.Server.Messages_OCPP21.UnitOfMeasureType;
 
 namespace OCPP.Core.Server.Tests
 {
     public class MeterEvidenceIngestionTests
     {
+        [Fact]
+        public void Ocpp16_OfferedPowerAdapterPreservesRawCandidateEncoding()
+        {
+            var observation = new MeterEvidenceObservation();
+
+            ControllerOCPP16.AddOfferedPower(observation, new[]
+            {
+                new Ocpp16Sample { Value = "22000", Measurand = Ocpp16Measurand.Power_Offered, Unit = Ocpp16Unit.W }
+            });
+
+            Assert.Equal("22", observation.OfferedPowerRawValue);
+            Assert.Equal("kW", observation.OfferedPowerUnit);
+            Assert.Equal("22000", observation.CandidateOfferedPowerRawValue);
+            Assert.Equal("W", observation.CandidateOfferedPowerUnit);
+            Assert.Equal(0, observation.CandidateOfferedPowerMultiplier);
+        }
+
+        [Fact]
+        public void Ocpp201_OfferedPowerAdapterPreservesRawCandidateEncoding()
+        {
+            var observation = new MeterEvidenceObservation();
+
+            ControllerOCPP20.AddOfferedPower(observation, new[]
+            {
+                new Ocpp20Sample
+                {
+                    Value = 22,
+                    Measurand = Ocpp20Measurand.Power_Offered,
+                    UnitOfMeasure = new Ocpp20Unit { Unit = "W", Multiplier = 3 }
+                }
+            });
+
+            Assert.Equal("22", observation.OfferedPowerRawValue);
+            Assert.Equal("kW", observation.OfferedPowerUnit);
+            Assert.Equal("22", observation.CandidateOfferedPowerRawValue);
+            Assert.Equal("W", observation.CandidateOfferedPowerUnit);
+            Assert.Equal(3, observation.CandidateOfferedPowerMultiplier);
+        }
+
+        [Fact]
+        public void Ocpp21_OfferedPowerAdapterPreservesRawCandidateEncoding()
+        {
+            var observation = new MeterEvidenceObservation();
+
+            ControllerOCPP21.AddOfferedPower(observation, new[]
+            {
+                new Ocpp21Sample
+                {
+                    Value = 22,
+                    Measurand = Ocpp21Measurand.Power_Offered,
+                    UnitOfMeasure = new Ocpp21Unit { Unit = "W", Multiplier = 3 }
+                }
+            });
+
+            Assert.Equal("22", observation.OfferedPowerRawValue);
+            Assert.Equal("kW", observation.OfferedPowerUnit);
+            Assert.Equal("22", observation.CandidateOfferedPowerRawValue);
+            Assert.Equal("W", observation.CandidateOfferedPowerUnit);
+            Assert.Equal(3, observation.CandidateOfferedPowerMultiplier);
+        }
+
         [Fact]
         public void Ocpp16_MeterValuesThenImpossibleStop_PreservesProjectionAndRawTerminalEvidence()
         {

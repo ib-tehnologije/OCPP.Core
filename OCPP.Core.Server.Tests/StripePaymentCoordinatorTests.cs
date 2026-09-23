@@ -2296,6 +2296,11 @@ namespace OCPP.Core.Server.Tests
                 StopTime = stoppedAt,
                 MeterStart = 100,
                 MeterStop = 104.25,
+                AcceptedMeterKwh = 104.25,
+                AcceptedMeterAtUtc = stoppedAt,
+                AcceptedMeterToleranceKwh = 0.0005,
+                MeterEvidenceState = MeterEvidenceSettlementState.Accepted,
+                MeterEvidenceReason = MeterEvidenceReason.Accepted,
                 UsageFeeMinutes = 4,
                 IdleUsageFeeAmount = 0.20m
             };
@@ -2380,7 +2385,12 @@ namespace OCPP.Core.Server.Tests
                 StartTime = stoppedAt.AddHours(-1),
                 StopTime = stoppedAt,
                 MeterStart = 100,
-                MeterStop = 101
+                MeterStop = 101,
+                AcceptedMeterKwh = 101,
+                AcceptedMeterAtUtc = stoppedAt,
+                AcceptedMeterToleranceKwh = 0.0005,
+                MeterEvidenceState = MeterEvidenceSettlementState.Accepted,
+                MeterEvidenceReason = MeterEvidenceReason.Accepted
             };
             context.AddRange(reservation, transaction);
             context.SaveChanges();
@@ -2444,7 +2454,12 @@ namespace OCPP.Core.Server.Tests
                 StartTime = stoppedAt.AddHours(-1),
                 StopTime = stoppedAt,
                 MeterStart = 100,
-                MeterStop = 101
+                MeterStop = 101,
+                AcceptedMeterKwh = 101,
+                AcceptedMeterAtUtc = stoppedAt,
+                AcceptedMeterToleranceKwh = 0.0005,
+                MeterEvidenceState = MeterEvidenceSettlementState.Accepted,
+                MeterEvidenceReason = MeterEvidenceReason.Accepted
             };
             ChargePaymentReservation CreateReservation(string paymentIntentId) => new()
             {
@@ -2529,7 +2544,12 @@ namespace OCPP.Core.Server.Tests
                 StartTime = stoppedAt.AddHours(-1),
                 StopTime = stoppedAt,
                 MeterStart = 100,
-                MeterStop = 101
+                MeterStop = 101,
+                AcceptedMeterKwh = 101,
+                AcceptedMeterAtUtc = stoppedAt,
+                AcceptedMeterToleranceKwh = 0.0005,
+                MeterEvidenceState = MeterEvidenceSettlementState.Accepted,
+                MeterEvidenceReason = MeterEvidenceReason.Accepted
             };
             context.AddRange(reservation, transaction);
             context.SaveChanges();

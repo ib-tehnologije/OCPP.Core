@@ -112,18 +112,21 @@ namespace OCPP.Core.Server
             return observation;
         }
 
-        private static void AddOfferedPower(MeterEvidenceObservation observation, IEnumerable<SampledValue> samples)
+        internal static void AddOfferedPower(MeterEvidenceObservation observation, IEnumerable<SampledValue> samples)
         {
             var power = samples.Where(sample => sample.Measurand == SampledValueMeasurand.Power_Offered).ToList();
             var selected = power.Where(sample => !sample.Phase.HasValue).TakeLast(1).ToList();
             if (selected.Count == 0) selected = power.Where(sample => sample.Phase.HasValue).ToList();
+            if (selected.Count == 0) return;
+            observation.CandidateOfferedPowerRawValue = string.Join(";", selected.Select(sample => sample.Value));
+            observation.CandidateOfferedPowerUnit = string.Join(";", selected.Select(sample => sample.Unit?.ToString() ?? string.Empty));
+            observation.CandidateOfferedPowerMultiplier = 0;
             var totalKw = 0d;
             foreach (var sample in selected)
             {
                 if (!MeterEvidenceProcessor.TryNormalizePower(sample.Value, sample.Unit?.ToString(), 0, out var valueKw, out _)) return;
                 totalKw += valueKw;
             }
-            if (selected.Count == 0) return;
             observation.OfferedPowerRawValue = totalKw.ToString("R", CultureInfo.InvariantCulture);
             observation.OfferedPowerUnit = "kW";
         }

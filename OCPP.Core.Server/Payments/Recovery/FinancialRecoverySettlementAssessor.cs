@@ -69,6 +69,14 @@ namespace OCPP.Core.Server.Payments.Recovery
                 return Blocked("Transaction meter stop is below meter start.");
             }
 
+            if ((!string.Equals(transaction.MeterEvidenceState, MeterEvidenceSettlementState.Accepted, StringComparison.Ordinal) &&
+                 !string.Equals(transaction.MeterEvidenceState, MeterEvidenceSettlementState.FallbackAccepted, StringComparison.Ordinal)) ||
+                !transaction.AcceptedMeterKwh.HasValue ||
+                !transaction.AcceptedMeterAtUtc.HasValue)
+            {
+                return Blocked("Financial recovery requires an accepted meter projection; meter evidence must be Accepted or FallbackAccepted before capture.");
+            }
+
             var meterEvidence = MeterEvidenceSettlementGuard.Assess(reservation, transaction);
             if (!meterEvidence.Ready)
             {

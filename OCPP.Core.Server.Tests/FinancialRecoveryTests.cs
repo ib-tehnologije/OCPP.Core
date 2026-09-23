@@ -74,6 +74,35 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Assess_BlocksBlankMeterEvidenceBeforeRecoveryCapture()
+        {
+            var reservation = CreateReservation();
+            var transaction = CreateTransaction();
+            transaction.MeterEvidenceState = null;
+            transaction.MeterEvidenceReason = null;
+            transaction.AcceptedMeterKwh = null;
+            transaction.AcceptedMeterAtUtc = null;
+
+            var result = FinancialRecoverySettlementAssessor.Assess(reservation, transaction);
+
+            Assert.False(result.Eligible);
+            Assert.Contains("accepted meter projection", result.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Assess_BlocksUnknownMeterEvidenceStateBeforeRecoveryCapture()
+        {
+            var reservation = CreateReservation();
+            var transaction = CreateTransaction();
+            transaction.MeterEvidenceState = "Unknown";
+
+            var result = FinancialRecoverySettlementAssessor.Assess(reservation, transaction);
+
+            Assert.False(result.Eligible);
+            Assert.Contains("accepted meter projection", result.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public void Assess_DerivesBillableValuesFromPersistedEvidence()
         {
             var reservation = CreateReservation();
@@ -167,6 +196,11 @@ namespace OCPP.Core.Server.Tests
             StopTime = new DateTime(2026, 1, 1, 11, 0, 0, DateTimeKind.Utc),
             MeterStart = 14250,
             MeterStop = 14254.25,
+            AcceptedMeterKwh = 14254.25,
+            AcceptedMeterAtUtc = new DateTime(2026, 1, 1, 11, 0, 0, DateTimeKind.Utc),
+            AcceptedMeterToleranceKwh = 0.0005,
+            MeterEvidenceState = MeterEvidenceSettlementState.Accepted,
+            MeterEvidenceReason = MeterEvidenceReason.Accepted,
             UsageFeeMinutes = 4,
             IdleUsageFeeAmount = 0.20m
         };

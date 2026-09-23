@@ -505,7 +505,11 @@ namespace OCPP.Core.Server.Tests
                     ConnectorId = 2,
                     StartTagId = "TAG3",
                     StartTime = availableAt.AddHours(-1),
-                    MeterStart = 10.0
+                    MeterStart = 10.0,
+                    TrustedMaximumPowerKw = 22,
+                    TrustedMaximumPowerToleranceKw = 0.5,
+                    TrustedMaximumPowerAtUtc = availableAt.AddHours(-1),
+                    TrustedMaximumPowerSource = "OCPP1.6:MeterValues:Power.Offered"
                 });
                 db.ConnectorStatuses.Add(new ConnectorStatus
                 {

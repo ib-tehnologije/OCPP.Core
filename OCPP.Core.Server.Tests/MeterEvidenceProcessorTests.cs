@@ -1,5 +1,8 @@
 using System;
+using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using OCPP.Core.Database;
@@ -105,6 +108,25 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, Assert.Single(db.MeterEvidenceAnomalies).Reason);
         }
 
+        [Fact]
+        public void Process_PositiveTerminalIncreaseBelowAuthorizationLimitWithoutPowerEvidence_RequiresReview()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(maxEnergyKwh: 80);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10", "kWh", transaction.StartTime, "OCPP1.6", "MeterValues"));
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(10), "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(10d, transaction.AcceptedMeterKwh);
+            Assert.Null(transaction.MeterStop);
+            Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, Assert.Single(db.MeterEvidenceAnomalies).Reason);
+        }
+
         [Theory]
         [InlineData("not-a-number", "kWh", MeterEvidenceReason.Malformed)]
         [InlineData("NaN", "kWh", MeterEvidenceReason.NonFinite)]
@@ -185,6 +207,50 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Process_ReplayWithoutPowerCandidate_ReusesLegacyEvidenceKey()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(meterStart: 17.30859375);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+            var acceptedAt = transaction.StartTime.AddSeconds(10);
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("17.30859375", "kWh", acceptedAt, "OCPP1.6", "MeterValues", offeredPowerRaw: "22", offeredPowerUnit: "kW"));
+            var observedAt = acceptedAt.AddSeconds(587);
+            var legacyKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u001f",
+                transaction.TransactionId.ToString(CultureInfo.InvariantCulture),
+                observedAt.ToString("O", CultureInfo.InvariantCulture),
+                "OCPP1.6",
+                "StopTransaction",
+                "6135.992",
+                "kWh",
+                "0",
+                MeterEvidenceReason.PhysicallyImpossibleIncrease)))).ToLowerInvariant();
+            db.MeterEvidenceAnomalies.Add(new MeterEvidenceAnomaly
+            {
+                TransactionId = transaction.TransactionId,
+                ChargePointId = transaction.ChargePointId,
+                ConnectorId = transaction.ConnectorId,
+                ObservedAtUtc = observedAt,
+                Protocol = "OCPP1.6",
+                Source = "StopTransaction",
+                RawValue = "6135.992",
+                RawUnit = "kWh",
+                EvidenceKey = legacyKey,
+                Outcome = MeterEvidenceOutcome.FallbackAccepted,
+                Reason = MeterEvidenceReason.PhysicallyImpossibleIncrease,
+                CreatedAtUtc = observedAt
+            });
+            db.SaveChanges();
+
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("6135.992", "kWh", observedAt, "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.Single(db.MeterEvidenceAnomalies);
+            Assert.Equal(legacyKey, Assert.Single(db.MeterEvidenceAnomalies).EvidenceKey);
+        }
+
+        [Fact]
         public void Process_SameRawValueWithDifferentMultiplier_PreservesDistinctEvidence()
         {
             using var db = CreateContext();
@@ -229,6 +295,10 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, result.Reason);
             Assert.Null(transaction.MeterStop);
             Assert.Equal(22d, transaction.TrustedMaximumPowerKw);
+            var anomaly = Assert.Single(db.MeterEvidenceAnomalies);
+            Assert.Equal("1000000", anomaly.CandidateOfferedPowerRawValue);
+            Assert.Equal("kW", anomaly.CandidateOfferedPowerUnit);
+            Assert.Equal(0, anomaly.CandidateOfferedPowerMultiplier);
         }
 
         [Fact]
@@ -429,7 +499,10 @@ namespace OCPP.Core.Server.Tests
             IsTerminal = terminal,
             OfferedPowerRawValue = offeredPowerRaw,
             OfferedPowerUnit = offeredPowerUnit,
-            OfferedPowerMultiplier = offeredPowerMultiplier
+            OfferedPowerMultiplier = offeredPowerMultiplier,
+            CandidateOfferedPowerRawValue = offeredPowerRaw,
+            CandidateOfferedPowerUnit = offeredPowerUnit,
+            CandidateOfferedPowerMultiplier = offeredPowerRaw == null && offeredPowerUnit == null ? null : offeredPowerMultiplier
         };
     }
 }

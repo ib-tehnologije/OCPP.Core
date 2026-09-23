@@ -116,11 +116,16 @@ namespace OCPP.Core.Server
             return observation;
         }
 
-        private static void AddOfferedPower(MeterEvidenceObservation observation, IEnumerable<SampledValueType> samples)
+        internal static void AddOfferedPower(MeterEvidenceObservation observation, IEnumerable<SampledValueType> samples)
         {
             var power = samples.Where(sample => sample.Measurand == MeasurandEnumType.Power_Offered).ToList();
             var selected = power.Where(sample => !sample.Phase.HasValue).TakeLast(1).ToList();
             if (selected.Count == 0) selected = power.Where(sample => sample.Phase.HasValue).ToList();
+            if (selected.Count == 0) return;
+            observation.CandidateOfferedPowerRawValue = string.Join(";", selected.Select(sample => sample.Value.ToString("R", CultureInfo.InvariantCulture)));
+            observation.CandidateOfferedPowerUnit = string.Join(";", selected.Select(sample => sample.UnitOfMeasure?.Unit ?? string.Empty));
+            var multipliers = selected.Select(sample => sample.UnitOfMeasure?.Multiplier ?? 0).Distinct().ToList();
+            observation.CandidateOfferedPowerMultiplier = multipliers.Count == 1 ? multipliers[0] : null;
             var totalKw = 0d;
             var toleranceKw = 0d;
             foreach (var sample in selected)
@@ -134,7 +139,6 @@ namespace OCPP.Core.Server
                 totalKw += valueKw;
                 toleranceKw += sampleToleranceKw;
             }
-            if (selected.Count == 0) return;
             observation.OfferedPowerRawValue = totalKw.ToString("R", CultureInfo.InvariantCulture);
             observation.OfferedPowerUnit = "kW";
             observation.OfferedPowerMultiplier = 0;

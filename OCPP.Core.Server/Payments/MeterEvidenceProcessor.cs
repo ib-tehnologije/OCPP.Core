@@ -52,6 +52,9 @@ namespace OCPP.Core.Server.Payments
         public string OfferedPowerRawValue { get; set; }
         public string OfferedPowerUnit { get; set; }
         public int OfferedPowerMultiplier { get; set; }
+        public string CandidateOfferedPowerRawValue { get; set; }
+        public string CandidateOfferedPowerUnit { get; set; }
+        public int? CandidateOfferedPowerMultiplier { get; set; }
     }
 
     public sealed class MeterEvidenceResult
@@ -115,6 +118,19 @@ namespace OCPP.Core.Server.Payments
                 if (increaseKwh < -monotonicTolerance)
                 {
                     return RejectOrFallback(dbContext, transaction, observation, observedAtUtc, normalizedMeterKwh, MeterEvidenceReason.NonMonotonic);
+                }
+
+                if (observation.IsTerminal &&
+                    increaseKwh > 0 &&
+                    !transaction.TrustedMaximumPowerKw.HasValue)
+                {
+                    return RequireReview(
+                        dbContext,
+                        transaction,
+                        observation,
+                        observedAtUtc,
+                        normalizedMeterKwh,
+                        MeterEvidenceReason.PhysicalCapacityUnavailable);
                 }
 
                 if (transaction.TrustedMaximumPowerKw.HasValue &&
@@ -430,7 +446,20 @@ namespace OCPP.Core.Server.Payments
             var protocol = Truncate(observation.Protocol ?? "Unknown", 20);
             var source = Truncate(observation.Source ?? "Unknown", 50);
             var rawUnit = Truncate(observation.Unit, 50);
-            var evidenceKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u001f",
+            var candidateOfferedPowerRawValue = Truncate(
+                observation.CandidateOfferedPowerRawValue ?? observation.OfferedPowerRawValue,
+                500);
+            var candidateOfferedPowerUnit = Truncate(
+                observation.CandidateOfferedPowerUnit ?? observation.OfferedPowerUnit,
+                50);
+            var candidateOfferedPowerMultiplier = observation.CandidateOfferedPowerMultiplier;
+            if (!candidateOfferedPowerMultiplier.HasValue &&
+                (!string.IsNullOrWhiteSpace(observation.OfferedPowerRawValue) ||
+                 !string.IsNullOrWhiteSpace(observation.OfferedPowerUnit)))
+            {
+                candidateOfferedPowerMultiplier = observation.OfferedPowerMultiplier;
+            }
+            var legacyEvidence = string.Join("\u001f",
                 transaction.TransactionId.ToString(CultureInfo.InvariantCulture),
                 observedAtUtc.ToString("O", CultureInfo.InvariantCulture),
                 protocol,
@@ -438,7 +467,25 @@ namespace OCPP.Core.Server.Payments
                 rawValue,
                 rawUnit ?? string.Empty,
                 observation.UnitMultiplier.ToString(CultureInfo.InvariantCulture),
-                reason ?? string.Empty)))).ToLowerInvariant();
+                reason ?? string.Empty);
+            var hasPowerCandidate = !string.IsNullOrWhiteSpace(candidateOfferedPowerRawValue) ||
+                                    !string.IsNullOrWhiteSpace(candidateOfferedPowerUnit) ||
+                                    candidateOfferedPowerMultiplier.HasValue;
+            var evidence = hasPowerCandidate
+                ? string.Join("\u001f",
+                    transaction.TransactionId.ToString(CultureInfo.InvariantCulture),
+                    observedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                    protocol,
+                    source,
+                    rawValue,
+                    rawUnit ?? string.Empty,
+                    observation.UnitMultiplier.ToString(CultureInfo.InvariantCulture),
+                    candidateOfferedPowerRawValue ?? string.Empty,
+                    candidateOfferedPowerUnit ?? string.Empty,
+                    candidateOfferedPowerMultiplier?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    reason ?? string.Empty)
+                : legacyEvidence;
+            var evidenceKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence))).ToLowerInvariant();
             var exists = dbContext.MeterEvidenceAnomalies.Local.Any(item =>
                              item.TransactionId == transaction.TransactionId && item.EvidenceKey == evidenceKey) ||
                          dbContext.MeterEvidenceAnomalies.AsNoTracking().Any(item =>
@@ -459,6 +506,9 @@ namespace OCPP.Core.Server.Payments
                 RawValue = rawValue,
                 RawUnit = rawUnit,
                 RawUnitMultiplier = observation.UnitMultiplier,
+                CandidateOfferedPowerRawValue = candidateOfferedPowerRawValue,
+                CandidateOfferedPowerUnit = candidateOfferedPowerUnit,
+                CandidateOfferedPowerMultiplier = candidateOfferedPowerMultiplier,
                 EvidenceKey = evidenceKey,
                 NormalizedMeterKwh = normalizedMeterKwh,
                 Outcome = outcome,
