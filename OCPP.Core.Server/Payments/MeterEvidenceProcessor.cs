@@ -120,17 +120,25 @@ namespace OCPP.Core.Server.Payments
                     return RejectOrFallback(dbContext, transaction, observation, observedAtUtc, normalizedMeterKwh, MeterEvidenceReason.NonMonotonic);
                 }
 
-                if (observation.IsTerminal &&
-                    increaseKwh > 0 &&
-                    !transaction.TrustedMaximumPowerKw.HasValue)
+                if (increaseKwh > 0 &&
+                    !transaction.TrustedMaximumPowerKw.HasValue &&
+                    (observation.IsTerminal || !hasCurrentPower))
                 {
-                    return RequireReview(
-                        dbContext,
-                        transaction,
-                        observation,
-                        observedAtUtc,
-                        normalizedMeterKwh,
-                        MeterEvidenceReason.PhysicalCapacityUnavailable);
+                    return observation.IsTerminal
+                        ? RequireReview(
+                            dbContext,
+                            transaction,
+                            observation,
+                            observedAtUtc,
+                            normalizedMeterKwh,
+                            MeterEvidenceReason.PhysicalCapacityUnavailable)
+                        : RejectOrFallback(
+                            dbContext,
+                            transaction,
+                            observation,
+                            observedAtUtc,
+                            normalizedMeterKwh,
+                            MeterEvidenceReason.PhysicalCapacityUnavailable);
                 }
 
                 if (transaction.TrustedMaximumPowerKw.HasValue &&

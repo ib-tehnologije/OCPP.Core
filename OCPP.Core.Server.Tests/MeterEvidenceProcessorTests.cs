@@ -104,8 +104,10 @@ namespace OCPP.Core.Server.Tests
 
             Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
             Assert.Null(transaction.MeterStop);
-            Assert.Equal(17.30859375d, transaction.AcceptedMeterKwh);
-            Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, Assert.Single(db.MeterEvidenceAnomalies).Reason);
+            Assert.Equal(10d, transaction.AcceptedMeterKwh);
+            Assert.Equal(2, db.MeterEvidenceAnomalies.Count());
+            Assert.All(db.MeterEvidenceAnomalies, anomaly =>
+                Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, anomaly.Reason));
         }
 
         [Fact]
@@ -127,6 +129,55 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, Assert.Single(db.MeterEvidenceAnomalies).Reason);
         }
 
+        [Fact]
+        public void Process_CapacityFreeIntermediateThenEqualTerminal_RequiresReviewWithoutAdvancingProjection()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(maxEnergyKwh: 80);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var intermediate = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(5), "OCPP2.0.1", "MeterValues"));
+            var terminal = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(10), "OCPP2.0.1", "TransactionEvent.Ended", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.Rejected, intermediate.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, terminal.Outcome);
+            Assert.Equal(10d, transaction.AcceptedMeterKwh);
+            Assert.Equal(transaction.StartTime, transaction.AcceptedMeterAtUtc);
+            Assert.Null(transaction.MeterStop);
+            Assert.Equal(MeterEvidenceSettlementState.ReviewRequired, transaction.MeterEvidenceState);
+            var anomalies = db.MeterEvidenceAnomalies
+                .OrderBy(anomaly => anomaly.MeterEvidenceAnomalyId)
+                .ToList();
+            Assert.All(anomalies, anomaly =>
+                Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, anomaly.Reason));
+            Assert.Equal(2, anomalies.Count);
+            Assert.Equal("10.1", anomalies[0].RawValue);
+            Assert.Equal("MeterValues", anomalies[0].Source);
+            Assert.Equal(MeterEvidenceOutcome.Rejected, anomalies[0].Outcome);
+            Assert.Equal(10d, anomalies[0].AcceptedMeterKwh);
+        }
+
+        [Fact]
+        public void Process_CapacityFreeZeroEnergyIntermediate_RemainsAccepted()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(maxEnergyKwh: 80);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10", "kWh", transaction.StartTime.AddMinutes(5), "OCPP2.0.1", "MeterValues"));
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, result.Outcome);
+            Assert.Equal(10d, transaction.AcceptedMeterKwh);
+            Assert.Equal(transaction.StartTime.AddMinutes(5), transaction.AcceptedMeterAtUtc);
+            Assert.Equal(MeterEvidenceSettlementState.Accepted, transaction.MeterEvidenceState);
+            Assert.Empty(db.MeterEvidenceAnomalies);
+        }
+
         [Theory]
         [InlineData("not-a-number", "kWh", MeterEvidenceReason.Malformed)]
         [InlineData("NaN", "kWh", MeterEvidenceReason.NonFinite)]
@@ -140,7 +191,8 @@ namespace OCPP.Core.Server.Tests
             db.Transactions.Add(transaction);
             db.SaveChanges();
             MeterEvidenceProcessor.Process(db, transaction,
-                Observation("10.5", "kWh", transaction.StartTime.AddMinutes(1), "OCPP2.0.1", "MeterValues"));
+                Observation("10.5", "kWh", transaction.StartTime.AddMinutes(1), "OCPP2.0.1", "MeterValues",
+                    offeredPowerRaw: "50", offeredPowerUnit: "kW"));
 
             var result = MeterEvidenceProcessor.Process(db, transaction,
                 Observation(raw, unit, transaction.StartTime.AddMinutes(2), "OCPP2.0.1", "TransactionEvent", terminal: true));
@@ -159,7 +211,8 @@ namespace OCPP.Core.Server.Tests
             db.SaveChanges();
             var acceptedAt = transaction.StartTime.AddMinutes(2);
             MeterEvidenceProcessor.Process(db, transaction,
-                Observation("12", "kWh", acceptedAt, "OCPP2.1", "MeterValues"));
+                Observation("12", "kWh", acceptedAt, "OCPP2.1", "MeterValues",
+                    offeredPowerRaw: "100", offeredPowerUnit: "kW"));
 
             MeterEvidenceProcessor.Process(db, transaction,
                 Observation("11", "kWh", acceptedAt.AddMinutes(1), "OCPP2.1", "MeterValues"));

@@ -2263,6 +2263,82 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CompleteReservation_CapacityFreeIntermediateThenEqualTerminal_DoesNotCaptureInvoiceOrNotify()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-CAPACITY-FREE",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-CAPACITY-FREE",
+                StripePaymentIntentId = "pi_capacity_free",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                Currency = "eur",
+                MaxEnergyKwh = 80
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 12530,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = new DateTime(2026, 9, 10, 10, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 9, 10, 10, 10, 0, DateTimeKind.Utc),
+                StopReason = "EVDisconnected",
+                MeterStart = 10,
+                MaxEnergyKwh = 80
+            };
+            context.AddRange(reservation, transaction);
+            context.SaveChanges();
+
+            MeterEvidenceProcessor.Process(context, transaction, new MeterEvidenceObservation
+            {
+                RawValue = "10.1",
+                Unit = "kWh",
+                ObservedAtUtc = transaction.StartTime.AddMinutes(5),
+                Protocol = "OCPP2.0.1",
+                Source = "MeterValues"
+            });
+            MeterEvidenceProcessor.Process(context, transaction, new MeterEvidenceObservation
+            {
+                RawValue = "10.1",
+                Unit = "kWh",
+                ObservedAtUtc = transaction.StopTime.Value,
+                Protocol = "OCPP2.0.1",
+                Source = "TransactionEvent.Ended",
+                IsTerminal = true
+            });
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = reservation.StripePaymentIntentId, Status = "requires_capture", Amount = 10_000 }
+            };
+            var invoice = new FakeInvoiceIntegrationService();
+            var email = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                emailService: email,
+                invoiceIntegrationService: invoice);
+
+            coordinator.CompleteReservation(context, transaction);
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(10d, transaction.AcceptedMeterKwh);
+            Assert.Null(transaction.MeterStop);
+            Assert.Equal(MeterEvidenceSettlementState.ReviewRequired, transaction.MeterEvidenceState);
+            Assert.Equal(PaymentReservationStatus.ReviewRequired, reservation.Status);
+            Assert.False(intentService.CaptureCalled);
+            Assert.False(intentService.CancelCalled);
+            Assert.Null(reservation.CapturedAtUtc);
+            Assert.Equal(0, invoice.HandleCompletedReservationCount);
+            Assert.Equal(0, email.ChargingCompletedCount);
+        }
+
+        [Fact]
         public void RecoverTerminalSettlement_CapturesTheExactAssessedAmount()
         {
             using var context = CreateContext();

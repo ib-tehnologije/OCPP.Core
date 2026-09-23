@@ -174,6 +174,88 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(MeterEvidenceReason.PhysicallyImpossibleIncrease, anomaly.Reason);
         }
 
+        [Theory]
+        [InlineData("1.6")]
+        [InlineData("2.0.1")]
+        [InlineData("2.1")]
+        public void CapacityFreeIntermediateThenEqualTerminal_RequiresReviewForEveryProtocol(string protocol)
+        {
+            using var db = CreateContext();
+            var transaction = CreateOpenTransaction(
+                transactionId: protocol == "1.6" ? 116 : protocol == "2.0.1" ? 120 : 121,
+                uid: protocol == "1.6" ? null : $"tx-capacity-free-{protocol}");
+            transaction.MeterStart = 10;
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            OCPPMessage intermediate;
+            OCPPMessage terminal;
+            if (protocol == "1.6")
+            {
+                intermediate = new OCPPMessage
+                {
+                    MessageType = "2",
+                    UniqueId = "capacity-free-intermediate-16",
+                    Action = "MeterValues",
+                    JsonPayload = $"{{\"connectorId\":1,\"transactionId\":{transaction.TransactionId},\"meterValue\":[{{\"timestamp\":\"2026-09-10T10:05:00Z\",\"sampledValue\":[{{\"value\":\"10100\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\"}}]}}]}}"
+                };
+                terminal = new OCPPMessage
+                {
+                    MessageType = "2",
+                    UniqueId = "capacity-free-terminal-16",
+                    Action = "StopTransaction",
+                    JsonPayload = $"{{\"meterStop\":10100,\"timestamp\":\"2026-09-10T10:10:00Z\",\"transactionId\":{transaction.TransactionId},\"reason\":\"EVDisconnected\"}}"
+                };
+            }
+            else
+            {
+                intermediate = new OCPPMessage
+                {
+                    MessageType = "2",
+                    UniqueId = $"capacity-free-intermediate-{protocol}",
+                    Action = "MeterValues",
+                    JsonPayload = "{\"evseId\":1,\"meterValue\":[{\"timestamp\":\"2026-09-10T10:05:00Z\",\"sampledValue\":[{\"value\":10.1,\"measurand\":\"Energy.Active.Import.Register\",\"unitOfMeasure\":{\"unit\":\"kWh\"}}]}]}"
+                };
+                terminal = new OCPPMessage
+                {
+                    MessageType = "2",
+                    UniqueId = $"capacity-free-terminal-{protocol}",
+                    Action = "TransactionEvent",
+                    JsonPayload = $"{{\"eventType\":\"Ended\",\"timestamp\":\"2026-09-10T10:10:00Z\",\"triggerReason\":\"Authorized\",\"seqNo\":2,\"evse\":{{\"id\":1,\"connectorId\":1}},\"transactionInfo\":{{\"transactionId\":\"{transaction.Uid}\",\"stoppedReason\":\"EVDisconnected\"}},\"meterValue\":[{{\"timestamp\":\"2026-09-10T10:10:00Z\",\"sampledValue\":[{{\"value\":10.1,\"measurand\":\"Energy.Active.Import.Register\",\"unitOfMeasure\":{{\"unit\":\"kWh\"}}}}]}}]}}"
+                };
+            }
+
+            OCPPMessage intermediateResponse;
+            OCPPMessage terminalResponse;
+            if (protocol == "1.6")
+            {
+                var controller = new ControllerOCPP16(Configuration(), NullLoggerFactory.Instance, ChargePointStatus(), db);
+                intermediateResponse = controller.ProcessRequest(intermediate, null);
+                terminalResponse = controller.ProcessRequest(terminal, null);
+            }
+            else if (protocol == "2.0.1")
+            {
+                var controller = new ControllerOCPP20(Configuration(), NullLoggerFactory.Instance, ChargePointStatus(), db);
+                intermediateResponse = controller.ProcessRequest(intermediate, null);
+                terminalResponse = controller.ProcessRequest(terminal, null);
+            }
+            else
+            {
+                var controller = new ControllerOCPP21(Configuration(), NullLoggerFactory.Instance, ChargePointStatus(), db);
+                intermediateResponse = controller.ProcessRequest(intermediate, null);
+                terminalResponse = controller.ProcessRequest(terminal, null);
+            }
+
+            Assert.Equal("3", intermediateResponse.MessageType);
+            Assert.Equal("3", terminalResponse.MessageType);
+            Assert.Equal(10d, transaction.AcceptedMeterKwh);
+            Assert.Null(transaction.MeterStop);
+            Assert.Equal(MeterEvidenceSettlementState.ReviewRequired, transaction.MeterEvidenceState);
+            Assert.Equal(2, db.MeterEvidenceAnomalies.Count());
+            Assert.All(db.MeterEvidenceAnomalies, anomaly =>
+                Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, anomaly.Reason));
+        }
+
         [Fact]
         public void Ocpp16_NegativeStartMeter_IsPreservedAsRejectedEvidence()
         {
@@ -328,7 +410,7 @@ namespace OCPP.Core.Server.Tests
                 MessageType = "2",
                 UniqueId = "phase-16",
                 Action = "MeterValues",
-                JsonPayload = "{\"connectorId\":1,\"transactionId\":16,\"meterValue\":[{\"timestamp\":\"2026-09-10T10:01:00Z\",\"sampledValue\":[{\"value\":\"18000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\"},{\"value\":\"6000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\",\"phase\":\"L1\"},{\"value\":\"6000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\",\"phase\":\"L2\"},{\"value\":\"6000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\",\"phase\":\"L3\"}]}]}"
+                JsonPayload = "{\"connectorId\":1,\"transactionId\":16,\"meterValue\":[{\"timestamp\":\"2026-09-10T10:01:00Z\",\"sampledValue\":[{\"value\":\"18000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\"},{\"value\":\"6000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\",\"phase\":\"L1\"},{\"value\":\"6000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\",\"phase\":\"L2\"},{\"value\":\"6000\",\"measurand\":\"Energy.Active.Import.Register\",\"unit\":\"Wh\",\"phase\":\"L3\"},{\"value\":\"50000\",\"measurand\":\"Power.Offered\",\"unit\":\"W\"}]}]}"
             }, null);
 
             Assert.Equal("3", response.MessageType);
@@ -350,7 +432,7 @@ namespace OCPP.Core.Server.Tests
                 MessageType = "2",
                 UniqueId = $"phase-{protocol}",
                 Action = "MeterValues",
-                JsonPayload = "{\"evseId\":1,\"meterValue\":[{\"timestamp\":\"2026-09-10T10:01:00Z\",\"sampledValue\":[{\"value\":6,\"measurand\":\"Energy.Active.Import.Register\",\"phase\":\"L1\",\"unitOfMeasure\":{\"unit\":\"kWh\"}},{\"value\":6,\"measurand\":\"Energy.Active.Import.Register\",\"phase\":\"L2\",\"unitOfMeasure\":{\"unit\":\"kWh\"}},{\"value\":6,\"measurand\":\"Energy.Active.Import.Register\",\"phase\":\"L3\",\"unitOfMeasure\":{\"unit\":\"kWh\"}}]}]}"
+                JsonPayload = "{\"evseId\":1,\"meterValue\":[{\"timestamp\":\"2026-09-10T10:01:00Z\",\"sampledValue\":[{\"value\":6,\"measurand\":\"Energy.Active.Import.Register\",\"phase\":\"L1\",\"unitOfMeasure\":{\"unit\":\"kWh\"}},{\"value\":6,\"measurand\":\"Energy.Active.Import.Register\",\"phase\":\"L2\",\"unitOfMeasure\":{\"unit\":\"kWh\"}},{\"value\":6,\"measurand\":\"Energy.Active.Import.Register\",\"phase\":\"L3\",\"unitOfMeasure\":{\"unit\":\"kWh\"}},{\"value\":50,\"measurand\":\"Power.Offered\",\"unitOfMeasure\":{\"unit\":\"kW\"}}]}]}"
             };
 
             var response = protocol == "2.0.1"
