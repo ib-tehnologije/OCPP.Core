@@ -115,7 +115,7 @@ Migration `AddInvoiceSubmissionIdempotency` adds nullable `InvoiceSubmissionLog.
 
 Migration `AddMeterEvidenceSafeguard` adds nullable accepted-meter projection, precision, physical-capacity evidence, and review-state columns to `Transactions`, plus the append-only `MeterEvidenceAnomaly` table with a unique replay key. Existing rows are not backfilled. New OCPP ingestion populates the projection; connector-Available closure validates its raw terminal candidate before settlement; and settlement retries revalidate any changed terminal candidate when projection/capacity evidence is present. Historical closed rows without projection data retain structural compatibility checks, and historical completed captures retain their already-persisted billing breakdown. All newly ingested or recovered transactions pass the meter-evidence boundary before capture.
 
-Migration `AddMeterEvidencePowerCandidateProvenance` adds nullable candidate offered-power raw value, unit, and multiplier columns to `MeterEvidenceAnomaly`. Deploy it after `AddMeterEvidenceSafeguard`. Financial recovery settlement now requires a non-blank accepted meter projection and timestamp before any provider capture; a structurally valid meter delta alone is insufficient.
+Migration `AddMeterEvidencePowerCandidateProvenance` adds nullable candidate offered-power raw value, unit, and position-matched multiplier-encoding columns to `MeterEvidenceAnomaly`. Deploy it after `AddMeterEvidenceSafeguard`. Financial recovery settlement now requires a non-blank accepted meter projection and timestamp before any provider capture; a structurally valid meter delta alone is insufficient.
 
 SQLite:
 

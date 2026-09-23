@@ -186,6 +186,7 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.RawUnit).HasMaxLength(50);
                 entity.Property(e => e.CandidateOfferedPowerRawValue).HasMaxLength(500);
                 entity.Property(e => e.CandidateOfferedPowerUnit).HasMaxLength(50);
+                entity.Property(e => e.CandidateOfferedPowerMultiplier).HasMaxLength(500);
                 entity.Property(e => e.EvidenceKey).IsRequired().HasMaxLength(64);
                 entity.Property(e => e.Outcome).IsRequired().HasMaxLength(50);
                 entity.Property(e => e.Reason).IsRequired().HasMaxLength(100);

@@ -298,7 +298,45 @@ namespace OCPP.Core.Server.Tests
             var anomaly = Assert.Single(db.MeterEvidenceAnomalies);
             Assert.Equal("1000000", anomaly.CandidateOfferedPowerRawValue);
             Assert.Equal("kW", anomaly.CandidateOfferedPowerUnit);
-            Assert.Equal(0, anomaly.CandidateOfferedPowerMultiplier);
+            Assert.Equal("0", anomaly.CandidateOfferedPowerMultiplier);
+        }
+
+        [Fact]
+        public void Process_MixedPowerMultiplierCandidatesRemainDistinctAndReplaySafe()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+            var observedAt = transaction.StartTime.AddMinutes(1);
+
+            foreach (var multipliers in new[] { "3;0", "0;3" })
+            {
+                var observation = new MeterEvidenceObservation
+                {
+                    RawValue = "11",
+                    Unit = "J",
+                    ObservedAtUtc = observedAt,
+                    Protocol = "OCPP2.1",
+                    Source = "TransactionEvent.Ended",
+                    IsTerminal = true,
+                    CandidateOfferedPowerRawValue = "7;8",
+                    CandidateOfferedPowerUnit = "W;W",
+                    CandidateOfferedPowerMultiplier = multipliers
+                };
+
+                MeterEvidenceProcessor.Process(db, transaction, observation);
+                MeterEvidenceProcessor.Process(db, transaction, observation);
+            }
+
+            db.ChangeTracker.Clear();
+            var anomalies = db.MeterEvidenceAnomalies
+                .AsNoTracking()
+                .OrderBy(item => item.CandidateOfferedPowerMultiplier)
+                .ToList();
+            Assert.Equal(2, anomalies.Count);
+            Assert.Equal(new[] { "0;3", "3;0" }, anomalies.Select(item => item.CandidateOfferedPowerMultiplier));
+            Assert.Equal(2, anomalies.Select(item => item.EvidenceKey).Distinct().Count());
         }
 
         [Fact]
@@ -502,7 +540,9 @@ namespace OCPP.Core.Server.Tests
             OfferedPowerMultiplier = offeredPowerMultiplier,
             CandidateOfferedPowerRawValue = offeredPowerRaw,
             CandidateOfferedPowerUnit = offeredPowerUnit,
-            CandidateOfferedPowerMultiplier = offeredPowerRaw == null && offeredPowerUnit == null ? null : offeredPowerMultiplier
+            CandidateOfferedPowerMultiplier = offeredPowerRaw == null && offeredPowerUnit == null
+                ? null
+                : offeredPowerMultiplier.ToString(CultureInfo.InvariantCulture)
         };
     }
 }

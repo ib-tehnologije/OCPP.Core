@@ -628,8 +628,9 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<double?>("AcceptedMeterKwh")
                         .HasColumnType("float");
 
-                    b.Property<int?>("CandidateOfferedPowerMultiplier")
-                        .HasColumnType("int");
+                    b.Property<string>("CandidateOfferedPowerMultiplier")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("CandidateOfferedPowerRawValue")
                         .HasMaxLength(500)

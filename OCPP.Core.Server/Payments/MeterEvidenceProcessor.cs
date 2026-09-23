@@ -54,7 +54,7 @@ namespace OCPP.Core.Server.Payments
         public int OfferedPowerMultiplier { get; set; }
         public string CandidateOfferedPowerRawValue { get; set; }
         public string CandidateOfferedPowerUnit { get; set; }
-        public int? CandidateOfferedPowerMultiplier { get; set; }
+        public string CandidateOfferedPowerMultiplier { get; set; }
     }
 
     public sealed class MeterEvidenceResult
@@ -452,12 +452,12 @@ namespace OCPP.Core.Server.Payments
             var candidateOfferedPowerUnit = Truncate(
                 observation.CandidateOfferedPowerUnit ?? observation.OfferedPowerUnit,
                 50);
-            var candidateOfferedPowerMultiplier = observation.CandidateOfferedPowerMultiplier;
-            if (!candidateOfferedPowerMultiplier.HasValue &&
+            var candidateOfferedPowerMultiplier = Truncate(observation.CandidateOfferedPowerMultiplier, 500);
+            if (string.IsNullOrWhiteSpace(candidateOfferedPowerMultiplier) &&
                 (!string.IsNullOrWhiteSpace(observation.OfferedPowerRawValue) ||
                  !string.IsNullOrWhiteSpace(observation.OfferedPowerUnit)))
             {
-                candidateOfferedPowerMultiplier = observation.OfferedPowerMultiplier;
+                candidateOfferedPowerMultiplier = observation.OfferedPowerMultiplier.ToString(CultureInfo.InvariantCulture);
             }
             var legacyEvidence = string.Join("\u001f",
                 transaction.TransactionId.ToString(CultureInfo.InvariantCulture),
@@ -470,7 +470,7 @@ namespace OCPP.Core.Server.Payments
                 reason ?? string.Empty);
             var hasPowerCandidate = !string.IsNullOrWhiteSpace(candidateOfferedPowerRawValue) ||
                                     !string.IsNullOrWhiteSpace(candidateOfferedPowerUnit) ||
-                                    candidateOfferedPowerMultiplier.HasValue;
+                                    !string.IsNullOrWhiteSpace(candidateOfferedPowerMultiplier);
             var evidence = hasPowerCandidate
                 ? string.Join("\u001f",
                     transaction.TransactionId.ToString(CultureInfo.InvariantCulture),
@@ -482,7 +482,7 @@ namespace OCPP.Core.Server.Payments
                     observation.UnitMultiplier.ToString(CultureInfo.InvariantCulture),
                     candidateOfferedPowerRawValue ?? string.Empty,
                     candidateOfferedPowerUnit ?? string.Empty,
-                    candidateOfferedPowerMultiplier?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    candidateOfferedPowerMultiplier ?? string.Empty,
                     reason ?? string.Empty)
                 : legacyEvidence;
             var evidenceKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence))).ToLowerInvariant();

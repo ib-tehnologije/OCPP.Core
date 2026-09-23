@@ -120,7 +120,7 @@ namespace OCPP.Core.Server
             if (selected.Count == 0) return;
             observation.CandidateOfferedPowerRawValue = string.Join(";", selected.Select(sample => sample.Value));
             observation.CandidateOfferedPowerUnit = string.Join(";", selected.Select(sample => sample.Unit?.ToString() ?? string.Empty));
-            observation.CandidateOfferedPowerMultiplier = 0;
+            observation.CandidateOfferedPowerMultiplier = "0";
             var totalKw = 0d;
             foreach (var sample in selected)
             {

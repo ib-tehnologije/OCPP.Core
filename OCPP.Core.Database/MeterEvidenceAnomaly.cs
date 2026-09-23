@@ -18,7 +18,7 @@ namespace OCPP.Core.Database
         public int RawUnitMultiplier { get; set; }
         public string CandidateOfferedPowerRawValue { get; set; }
         public string CandidateOfferedPowerUnit { get; set; }
-        public int? CandidateOfferedPowerMultiplier { get; set; }
+        public string CandidateOfferedPowerMultiplier { get; set; }
         public string EvidenceKey { get; set; }
         public double? NormalizedMeterKwh { get; set; }
         public string Outcome { get; set; }

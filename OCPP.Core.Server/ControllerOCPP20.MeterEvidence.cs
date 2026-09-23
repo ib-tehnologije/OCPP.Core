@@ -124,8 +124,8 @@ namespace OCPP.Core.Server
             if (selected.Count == 0) return;
             observation.CandidateOfferedPowerRawValue = string.Join(";", selected.Select(sample => sample.Value.ToString("R", CultureInfo.InvariantCulture)));
             observation.CandidateOfferedPowerUnit = string.Join(";", selected.Select(sample => sample.UnitOfMeasure?.Unit ?? string.Empty));
-            var multipliers = selected.Select(sample => sample.UnitOfMeasure?.Multiplier ?? 0).Distinct().ToList();
-            observation.CandidateOfferedPowerMultiplier = multipliers.Count == 1 ? multipliers[0] : null;
+            observation.CandidateOfferedPowerMultiplier = string.Join(";", selected.Select(sample =>
+                (sample.UnitOfMeasure?.Multiplier ?? 0).ToString(CultureInfo.InvariantCulture)));
             var totalKw = 0d;
             var toleranceKw = 0d;
             foreach (var sample in selected)

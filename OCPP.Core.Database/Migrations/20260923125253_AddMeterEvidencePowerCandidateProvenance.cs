@@ -10,10 +10,11 @@ namespace OCPP.Core.Database.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<int>(
+            migrationBuilder.AddColumn<string>(
                 name: "CandidateOfferedPowerMultiplier",
                 table: "MeterEvidenceAnomaly",
-                type: "int",
+                type: "nvarchar(500)",
+                maxLength: 500,
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(

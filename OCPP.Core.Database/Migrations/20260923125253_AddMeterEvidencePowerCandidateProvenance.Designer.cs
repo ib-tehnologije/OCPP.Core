@@ -12,7 +12,7 @@ using OCPP.Core.Database;
 namespace OCPP.Core.Database.Migrations
 {
     [DbContext(typeof(OCPPCoreContext))]
-    [Migration("20260923071735_AddMeterEvidencePowerCandidateProvenance")]
+    [Migration("20260923125253_AddMeterEvidencePowerCandidateProvenance")]
     partial class AddMeterEvidencePowerCandidateProvenance
     {
         /// <inheritdoc />
@@ -631,8 +631,9 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<double?>("AcceptedMeterKwh")
                         .HasColumnType("float");
 
-                    b.Property<int?>("CandidateOfferedPowerMultiplier")
-                        .HasColumnType("int");
+                    b.Property<string>("CandidateOfferedPowerMultiplier")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("CandidateOfferedPowerRawValue")
                         .HasMaxLength(500)
