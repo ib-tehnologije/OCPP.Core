@@ -118,11 +118,23 @@ namespace OCPP.Core.Server
                         transaction.ChargePointId == ChargePointStatus.Id &&
                         !transaction.StopTime.HasValue)
                     {
-                        if (transaction.ConnectorId > 0)
+                        var meterEvidence = ProcessStopMeterEvidence(
+                            transaction,
+                            stopTransactionRequest.MeterStop,
+                            stopTransactionRequest.Timestamp,
+                            "StopTransaction");
+
+                        if (transaction.ConnectorId > 0 &&
+                            meterEvidence != null &&
+                            !string.Equals(meterEvidence.Outcome, OCPP.Core.Server.Payments.MeterEvidenceOutcome.ReviewRequired, StringComparison.Ordinal))
                         {
                             // Update meter value in db connector status 
-                            UpdateConnectorStatus(transaction.ConnectorId, null, null, (double)stopTransactionRequest.MeterStop / 1000, stopTransactionRequest.Timestamp);
-                            UpdateMemoryConnectorStatus(transaction.ConnectorId, (double)stopTransactionRequest.MeterStop / 1000, stopTransactionRequest.Timestamp, null, null, null);
+                            var acceptedMeterKwh = meterEvidence.SettlementMeterKwh ?? meterEvidence.NormalizedMeterKwh;
+                            if (acceptedMeterKwh.HasValue)
+                            {
+                                UpdateConnectorStatus(transaction.ConnectorId, null, null, acceptedMeterKwh.Value, stopTransactionRequest.Timestamp);
+                                UpdateMemoryConnectorStatus(transaction.ConnectorId, acceptedMeterKwh.Value, stopTransactionRequest.Timestamp, null, null, null);
+                            }
                         }
 
                         // If a stop-tag was provided and differs from the start-tag, validate whether it is in the same group.
@@ -152,7 +164,6 @@ namespace OCPP.Core.Server
                         }
 
                         transaction.StopTagId = idTag;
-                        transaction.MeterStop = (double)stopTransactionRequest.MeterStop / 1000; // Meter value here is always Wh
                         transaction.StopReason = stopTransactionRequest.Reason.ToString();
                         transaction.StopTime = stopTransactionRequest.Timestamp.UtcDateTime;
                         var reservation = FindReservationForTransaction(transaction);

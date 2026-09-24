@@ -1768,7 +1768,11 @@ namespace OCPP.Core.Server.Tests
                         ConnectorId = 2,
                         StartTagId = "PAY-AVAILABLE",
                         StartTime = availableAt.UtcDateTime.AddHours(-7),
-                        MeterStart = 50.0
+                        MeterStart = 50.0,
+                        TrustedMaximumPowerKw = 22,
+                        TrustedMaximumPowerToleranceKw = 0.5,
+                        TrustedMaximumPowerAtUtc = availableAt.UtcDateTime.AddHours(-7),
+                        TrustedMaximumPowerSource = "OCPP1.6:MeterValues:Power.Offered"
                     });
                     setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
                     {

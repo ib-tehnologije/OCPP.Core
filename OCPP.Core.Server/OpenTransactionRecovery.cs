@@ -3,6 +3,7 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments;
 
 namespace OCPP.Core.Server
 {
@@ -33,14 +34,16 @@ namespace OCPP.Core.Server
 
             DateTime stopTimeUtc = ResolveStopTimeUtc(availableAtUtc, transaction.StartTime);
             double? previousMeterStop = transaction.MeterStop;
-            double meterStop = ResolveMeterStop(dbContext, transaction, chargePointId, connectorId, liveMeterKwh);
-
-            if (!transaction.MeterStop.HasValue ||
-                transaction.MeterStop.Value < transaction.MeterStart ||
-                meterStop > transaction.MeterStop.Value)
+            var terminalCandidate = ResolveMeterStop(dbContext, transaction, chargePointId, connectorId, liveMeterKwh);
+            MeterEvidenceProcessor.Process(dbContext, transaction, new MeterEvidenceObservation
             {
-                transaction.MeterStop = meterStop;
-            }
+                RawValue = terminalCandidate.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                Unit = "kWh",
+                ObservedAtUtc = stopTimeUtc,
+                Protocol = "Recovery",
+                Source = $"{source}:{terminalCandidate.Provenance}",
+                IsTerminal = true
+            });
 
             transaction.StopTime = stopTimeUtc;
             transaction.StopReason = ConnectorAvailableStopReason;
@@ -85,7 +88,7 @@ namespace OCPP.Core.Server
             return nowUtc >= startTimeUtc ? nowUtc : startTimeUtc;
         }
 
-        private static double ResolveMeterStop(
+        private static (double Value, string Provenance) ResolveMeterStop(
             OCPPCoreContext dbContext,
             Transaction transaction,
             string chargePointId,
@@ -95,10 +98,14 @@ namespace OCPP.Core.Server
             double meterStop = transaction.MeterStop.HasValue && transaction.MeterStop.Value >= transaction.MeterStart
                 ? transaction.MeterStop.Value
                 : transaction.MeterStart;
+            var provenance = transaction.MeterStop.HasValue && transaction.MeterStop.Value >= transaction.MeterStart
+                ? "TransactionMeterStop"
+                : "MeterStart";
 
             if (liveMeterKwh.HasValue && liveMeterKwh.Value >= meterStop)
             {
                 meterStop = liveMeterKwh.Value;
+                provenance = "LiveConnectorMeter";
             }
 
             double? persistedMeter = dbContext.ConnectorStatuses
@@ -110,9 +117,10 @@ namespace OCPP.Core.Server
             if (persistedMeter.HasValue && persistedMeter.Value >= meterStop)
             {
                 meterStop = persistedMeter.Value;
+                provenance = "PersistedConnectorMeter";
             }
 
-            return meterStop;
+            return (meterStop, provenance);
         }
     }
 }

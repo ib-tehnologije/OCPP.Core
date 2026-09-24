@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OCPP.Core.Database;
 
@@ -11,9 +12,11 @@ using OCPP.Core.Database;
 namespace OCPP.Core.Database.Migrations
 {
     [DbContext(typeof(OCPPCoreContext))]
-    partial class OCPPCoreContextModelSnapshot : ModelSnapshot
+    [Migration("20260922202147_AddMeterEvidenceSafeguard")]
+    partial class AddMeterEvidenceSafeguard
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -627,18 +630,6 @@ namespace OCPP.Core.Database.Migrations
 
                     b.Property<double?>("AcceptedMeterKwh")
                         .HasColumnType("float");
-
-                    b.Property<string>("CandidateOfferedPowerMultiplier")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("CandidateOfferedPowerRawValue")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("CandidateOfferedPowerUnit")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("ChargePointId")
                         .IsRequired()

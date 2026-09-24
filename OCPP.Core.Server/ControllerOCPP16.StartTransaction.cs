@@ -69,6 +69,10 @@ namespace OCPP.Core.Server
                         transaction.StartResult = startTransactionResponse.IdTagInfo.Status.ToString();
                         DbContext.Add<Transaction>(transaction);
                         DbContext.SaveChanges();
+                        ProcessStartMeterEvidence(
+                            transaction,
+                            startTransactionRequest.MeterStart,
+                            startTransactionRequest.Timestamp);
 
                         // Return DB-ID as transaction ID
                         startTransactionResponse.TransactionId = transaction.TransactionId;

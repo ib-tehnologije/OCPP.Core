@@ -113,6 +113,10 @@ Migration `AddPaymentAuthorizationReleaseReconciliation` adds nullable release-s
 
 Migration `AddInvoiceSubmissionIdempotency` adds nullable `InvoiceSubmissionLog.SubmissionKey`, a filtered unique index, and nullable bounded lease identifier/expiry columns. Historical rows remain null and are not backfilled. New submit-mode attempts use the provider plus deterministic API transaction reference as their durable lineage and hold a five-minute database lease across the provider create boundary. A repeated, concurrent, or restarted attempt checks submitted/external local evidence first and performs an exact provider lookup before another create. Transport errors, non-empty unmatched responses, unrecognized schemas, and multiple exact provider matches remain `ProviderUnknown` and fail closed.
 
+Migration `AddMeterEvidenceSafeguard` adds nullable accepted-meter projection, precision, physical-capacity evidence, and review-state columns to `Transactions`, plus the append-only `MeterEvidenceAnomaly` table with a unique replay key. Existing rows are not backfilled. New OCPP ingestion populates the projection; connector-Available closure validates its raw terminal candidate before settlement; and settlement retries revalidate any changed terminal candidate when projection/capacity evidence is present. Historical closed rows without projection data retain structural compatibility checks, and historical completed captures retain their already-persisted billing breakdown. All newly ingested or recovered transactions pass the meter-evidence boundary before capture.
+
+Migration `AddMeterEvidencePowerCandidateProvenance` adds nullable candidate offered-power raw value, unit, and position-matched multiplier-encoding columns to `MeterEvidenceAnomaly`. Deploy it after `AddMeterEvidenceSafeguard`. Financial recovery settlement now requires a non-blank accepted meter projection and timestamp before any provider capture; a structurally valid meter delta alone is insufficient.
+
 SQLite:
 
 - Used for local/test runs.
