@@ -12,6 +12,11 @@ import {
   sleep,
 } from "./common.mjs";
 import { attachWebSocketMessageHandler, connectWebSocket, isWebSocketOpen } from "../lib/websocket_support.mjs";
+import {
+  buildOfferedPowerSample16,
+  buildOfferedPowerSample2x,
+  createPlausibleMeterTimeline,
+} from "../lib/meter_evidence_fixture.mjs";
 
 const protocolPresets = {
   "1.6": {
@@ -301,28 +306,29 @@ async function bootChargePoint(client, preset, tag) {
   });
 }
 
-async function sendMeterValue16(client, connectorId, transactionId, kwh) {
+async function sendMeterValue16(client, connectorId, transactionId, kwh, timestampIso) {
   await client.call("MeterValues", {
     connectorId,
     transactionId,
     meterValue: [
       {
-        timestamp: nowIsoUtc(),
+        timestamp: timestampIso,
         sampledValue: [
           { value: String(kwh), measurand: "Energy.Active.Import.Register", unit: "kWh" },
           { value: String((kwh / 3).toFixed(3)), measurand: "Energy.Active.Import.Register", phase: "L1", unit: "kWh" },
           { value: String((kwh / 3).toFixed(3)), measurand: "Energy.Active.Import.Register", phase: "L2", unit: "kWh" },
           { value: String((kwh / 3).toFixed(3)), measurand: "Energy.Active.Import.Register", phase: "L3", unit: "kWh" },
+          buildOfferedPowerSample16(),
         ],
       },
     ],
   });
 }
 
-async function sendMeterValue2x(client, connectorId, kwh, chargingState, seqNo, transactionId, tag) {
+async function sendMeterValue2x(client, connectorId, kwh, chargingState, seqNo, transactionId, tag, timestampIso) {
   await client.call("TransactionEvent", {
     eventType: "Updated",
-    timestamp: nowIsoUtc(),
+    timestamp: timestampIso,
     triggerReason: "MeterValuePeriodic",
     seqNo,
     idToken: { idToken: tag, type: "Central" },
@@ -330,13 +336,14 @@ async function sendMeterValue2x(client, connectorId, kwh, chargingState, seqNo, 
     transactionInfo: { transactionId, chargingState },
     meterValue: [
       {
-        timestamp: nowIsoUtc(),
+        timestamp: timestampIso,
         sampledValue: [
           { value: kwh, measurand: "Energy.Active.Import.Register", unitOfMeasure: { unit: "kWh" } },
           { value: Number((kwh / 3).toFixed(3)), measurand: "Energy.Active.Import.Register", phase: "L1", unitOfMeasure: { unit: "kWh" } },
           { value: Number((kwh / 3).toFixed(3)), measurand: "Energy.Active.Import.Register", phase: "L2", unitOfMeasure: { unit: "kWh" } },
           { value: Number((kwh / 3).toFixed(3)), measurand: "Energy.Active.Import.Register", phase: "L3", unitOfMeasure: { unit: "kWh" } },
           { value: 7200, measurand: "Power.Active.Import", unitOfMeasure: { unit: "W" } },
+          buildOfferedPowerSample2x(),
         ],
       },
     ],
@@ -347,13 +354,14 @@ async function executeScenario16(client, preset, scenario, tag, timings, onResul
   let transactionId = null;
 
   client.onCall("RemoteStartTransaction", async (_uniqueId, payload) => {
+    const meterTimeline = createPlausibleMeterTimeline();
     const connectorId = payload?.connectorId ?? preset.connectorId;
     const idTag = payload?.idTag ?? tag;
     const startResponse = await client.call("StartTransaction", {
       connectorId,
       idTag,
       meterStart: 0,
-      timestamp: nowIsoUtc(),
+      timestamp: meterTimeline.startedAtUtc,
     });
     transactionId = startResponse?.transactionId ?? startResponse?.TransactionId;
     await client.call("StatusNotification", {
@@ -363,13 +371,13 @@ async function executeScenario16(client, preset, scenario, tag, timings, onResul
       timestamp: nowIsoUtc(),
     });
 
-    await sendMeterValue16(client, connectorId, transactionId, 0.677);
+    await sendMeterValue16(client, connectorId, transactionId, 0.677, meterTimeline.firstMeterAtUtc);
     await sleep(timings.betweenMeterValuesMs);
-    await sendMeterValue16(client, connectorId, transactionId, 1.234);
+    await sendMeterValue16(client, connectorId, transactionId, 1.234, meterTimeline.secondMeterAtUtc);
 
     if (scenario === "live_meter_progress") {
       await sleep(timings.extraChargeMs);
-      await sendMeterValue16(client, connectorId, transactionId, 2.468);
+      await sendMeterValue16(client, connectorId, transactionId, 2.468, meterTimeline.liveMeterAtUtc);
     }
 
     if (scenario === "suspended_idle_then_unplug" || scenario === "quiet_hours_idle_excluded") {
@@ -387,7 +395,7 @@ async function executeScenario16(client, preset, scenario, tag, timings, onResul
     await client.call("StopTransaction", {
       transactionId,
       meterStop: scenario === "live_meter_progress" ? 2.468 : 1.234,
-      timestamp: nowIsoUtc(),
+      timestamp: meterTimeline.terminalAtUtc,
       reason: "Local",
     });
 
@@ -417,18 +425,19 @@ async function executeScenario2x(client, preset, scenario, tag, timings, onResul
   let transactionId = null;
 
   client.onCall("RequestStartTransaction", async (_uniqueId, payload) => {
+    const meterTimeline = createPlausibleMeterTimeline();
     const connectorId = payload?.evseId ?? preset.connectorId;
     transactionId = guidLike();
 
     await client.call("TransactionEvent", {
       eventType: "Started",
-      timestamp: nowIsoUtc(),
+      timestamp: meterTimeline.startedAtUtc,
       triggerReason: "Authorized",
       seqNo: 0,
       idToken: { idToken: tag, type: "Central" },
       evse: { id: connectorId, connectorId },
       transactionInfo: { transactionId, remoteStartId: payload?.remoteStartId ?? 0, chargingState: "EVConnected" },
-      meterValue: [{ timestamp: nowIsoUtc(), sampledValue: [{ value: 0 }] }],
+      meterValue: [{ timestamp: meterTimeline.startedAtUtc, sampledValue: [{ value: 0 }] }],
     });
 
     await client.call("StatusNotification", {
@@ -438,17 +447,17 @@ async function executeScenario2x(client, preset, scenario, tag, timings, onResul
       connectorId,
     });
 
-    await sendMeterValue2x(client, connectorId, 0.677, "Charging", 1, transactionId, tag);
+    await sendMeterValue2x(client, connectorId, 0.677, "Charging", 1, transactionId, tag, meterTimeline.firstMeterAtUtc);
     await sleep(timings.betweenMeterValuesMs);
-    await sendMeterValue2x(client, connectorId, 1.234, "Charging", 2, transactionId, tag);
+    await sendMeterValue2x(client, connectorId, 1.234, "Charging", 2, transactionId, tag, meterTimeline.secondMeterAtUtc);
 
     if (scenario === "live_meter_progress") {
       await sleep(timings.extraChargeMs);
-      await sendMeterValue2x(client, connectorId, 2.468, "Charging", 3, transactionId, tag);
+      await sendMeterValue2x(client, connectorId, 2.468, "Charging", 3, transactionId, tag, meterTimeline.liveMeterAtUtc);
     }
 
     if (scenario === "suspended_idle_then_unplug" || scenario === "quiet_hours_idle_excluded") {
-      await sendMeterValue2x(client, connectorId, 1.234, "SuspendedEV", 4, transactionId, tag);
+      await sendMeterValue2x(client, connectorId, 1.234, "SuspendedEV", 4, transactionId, tag, meterTimeline.liveMeterAtUtc);
       await sleep(timings.suspendedBeforeStopMs);
     } else {
       await sleep(timings.activeBeforeStopMs);
@@ -456,13 +465,13 @@ async function executeScenario2x(client, preset, scenario, tag, timings, onResul
 
     await client.call("TransactionEvent", {
       eventType: "Ended",
-      timestamp: nowIsoUtc(),
+      timestamp: meterTimeline.terminalAtUtc,
       triggerReason: "RemoteStop",
       seqNo: scenario === "live_meter_progress" ? 5 : 4,
       idToken: { idToken: tag, type: "Central" },
       evse: { id: connectorId, connectorId },
       transactionInfo: { transactionId },
-      meterValue: [{ timestamp: nowIsoUtc(), sampledValue: [{ value: scenario === "live_meter_progress" ? 2.468 : 1.234 }] }],
+      meterValue: [{ timestamp: meterTimeline.terminalAtUtc, sampledValue: [{ value: scenario === "live_meter_progress" ? 2.468 : 1.234 }] }],
     });
 
     if (scenario === "stop_then_unplug" || scenario === "quiet_hours_idle_excluded" || scenario === "suspended_idle_then_unplug") {

@@ -9,6 +9,11 @@ import {
   sleep,
   waitFor,
 } from "./test_support.mjs";
+import {
+  buildOfferedPowerSample16,
+  buildOfferedPowerSample2x,
+  createPlausibleMeterTimeline,
+} from "./meter_evidence_fixture.mjs";
 
 const PROTOCOL_CONFIG = {
   "1.6": {
@@ -104,6 +109,7 @@ async function sendChargingState({ protocol, client, connectorId, tag, transacti
             sampledValue: [
               { value: String(energyKwh), measurand: "Energy.Active.Import.Register", unit: "kWh" },
               ...(powerKw != null ? [{ value: String(powerKw * 1000), measurand: "Power.Active.Import", unit: "W" }] : []),
+              buildOfferedPowerSample16(),
             ],
           },
         ],
@@ -130,6 +136,7 @@ async function sendChargingState({ protocol, client, connectorId, tag, transacti
             sampledValue: [
               { value: energyKwh, measurand: "Energy.Active.Import.Register", unitOfMeasure: { unit: "kWh" } },
               ...(powerKw != null ? [{ value: powerKw * 1000, measurand: "Power.Active.Import", unitOfMeasure: { unit: "W" } }] : []),
+              buildOfferedPowerSample2x(),
             ],
           },
         ],
@@ -145,13 +152,13 @@ async function sendChargingState({ protocol, client, connectorId, tag, transacti
   }
 }
 
-async function startTransaction({ protocol, client, connectorId, tag, transactionRef }) {
+async function startTransaction({ protocol, client, connectorId, tag, transactionRef, meterTimeline }) {
   if (protocol === "1.6") {
     const startResponse = await client.call("StartTransaction", {
       connectorId,
       idTag: tag,
       meterStart: 0,
-      timestamp: nowIsoUtc(),
+      timestamp: meterTimeline.startedAtUtc,
     });
 
     transactionRef.transactionId = startResponse?.transactionId ?? startResponse?.TransactionId ?? null;
@@ -165,6 +172,7 @@ async function startTransaction({ protocol, client, connectorId, tag, transactio
       energyKwh: 0.6,
       powerKw: 7.2,
       seqNo: 1,
+      timestampIso: meterTimeline.firstMeterAtUtc,
     });
     return;
   }
@@ -172,13 +180,13 @@ async function startTransaction({ protocol, client, connectorId, tag, transactio
   transactionRef.transactionUid = guidLike();
   await client.call("TransactionEvent", {
     eventType: "Started",
-    timestamp: nowIsoUtc(),
+    timestamp: meterTimeline.startedAtUtc,
     triggerReason: "Authorized",
     seqNo: 0,
     idToken: { idToken: tag, type: "Central" },
     evse: { id: connectorId, connectorId },
     transactionInfo: { transactionId: transactionRef.transactionUid, remoteStartId: transactionRef.remoteStartId ?? 0, chargingState: "EVConnected" },
-    meterValue: [{ timestamp: nowIsoUtc(), sampledValue: [{ value: 0, measurand: "Energy.Active.Import.Register", unitOfMeasure: { unit: "kWh" } }] }],
+    meterValue: [{ timestamp: meterTimeline.startedAtUtc, sampledValue: [{ value: 0, measurand: "Energy.Active.Import.Register", unitOfMeasure: { unit: "kWh" } }] }],
   });
 
   await sendChargingState({
@@ -191,35 +199,36 @@ async function startTransaction({ protocol, client, connectorId, tag, transactio
     energyKwh: 0.6,
     powerKw: 7.2,
     seqNo: 1,
+    timestampIso: meterTimeline.firstMeterAtUtc,
   });
 }
 
-async function stopTransaction({ protocol, client, connectorId, tag, transactionRef }) {
+async function stopTransaction({ protocol, client, connectorId, tag, transactionRef, meterTimeline }) {
   if (protocol === "1.6") {
     await client.call("StopTransaction", {
       transactionId: transactionRef.transactionId,
       meterStop: 1200,
-      timestamp: nowIsoUtc(),
+      timestamp: meterTimeline.terminalAtUtc,
       reason: "Local",
     });
     await client.call("StatusNotification", {
       connectorId,
       errorCode: "NoError",
       status: "Finishing",
-      timestamp: nowIsoUtc(),
+      timestamp: meterTimeline.terminalAtUtc,
     });
     return;
   }
 
   await client.call("TransactionEvent", {
     eventType: "Ended",
-    timestamp: nowIsoUtc(),
+    timestamp: meterTimeline.terminalAtUtc,
     triggerReason: "RemoteStop",
     seqNo: 99,
     idToken: { idToken: tag, type: "Central" },
     evse: { id: connectorId, connectorId },
     transactionInfo: { transactionId: transactionRef.transactionUid, remoteStartId: transactionRef.remoteStartId ?? 0 },
-    meterValue: [{ timestamp: nowIsoUtc(), sampledValue: [{ value: 1.2, measurand: "Energy.Active.Import.Register", unitOfMeasure: { unit: "kWh" } }] }],
+    meterValue: [{ timestamp: meterTimeline.terminalAtUtc, sampledValue: [{ value: 1.2, measurand: "Energy.Active.Import.Register", unitOfMeasure: { unit: "kWh" } }] }],
   });
 
   await client.call("StatusNotification", {
@@ -242,6 +251,7 @@ export function createProtocolScenarioDriver({
 }) {
   const normalizedProtocol = normalizeProtocol(protocol);
   const config = PROTOCOL_CONFIG[normalizedProtocol];
+  const meterTimeline = createPlausibleMeterTimeline();
   const client = new OcppClient({
     url: `${serverWsBase}/${encodeURIComponent(chargePointId)}`,
     protocols: config.subProtocols,
@@ -284,7 +294,7 @@ export function createProtocolScenarioDriver({
 
     idleTransitionSent = true;
     await sleep(idleTransitionDelayMs);
-    const idleTimestamp = new Date(Date.now() - 90_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const idleTimestamp = meterTimeline.idleMeterAtUtc;
     await sendChargingState({
       protocol: normalizedProtocol,
       client,
@@ -317,6 +327,7 @@ export function createProtocolScenarioDriver({
       energyKwh: 1.2,
       powerKw: 11.0,
       seqNo: 3,
+      timestampIso: meterTimeline.liveMeterAtUtc,
     });
     state.summary.push({ event: "live_progress", energyKwh: 1.2, atUtc: nowIsoUtc() });
   }
@@ -340,6 +351,7 @@ export function createProtocolScenarioDriver({
       connectorId,
       tag: state.activeTag,
       transactionRef: state,
+      meterTimeline,
     });
     state.startedAtUtc = nowIsoUtc();
     startedResolve(state);
@@ -360,6 +372,7 @@ export function createProtocolScenarioDriver({
       connectorId,
       tag: state.activeTag,
       transactionRef: state,
+      meterTimeline,
     });
     state.stoppedAtUtc = nowIsoUtc();
     state.summary.push({ event: "stopped", atUtc: state.stoppedAtUtc });
