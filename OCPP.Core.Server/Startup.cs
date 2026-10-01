@@ -73,6 +73,7 @@ namespace OCPP.Core.Server
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddOCPPDbContext(Configuration);
+            services.AddOcppHealthChecks();
             services.AddControllers();
             services.AddHttpClient();
             services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
@@ -146,6 +147,12 @@ namespace OCPP.Core.Server
             {
                 app.UseDeveloperExceptionPage();
             }
+
+            app.UseRouting();
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapOcppHealthChecks();
+            });
 
             // Migrate database
             using var scope = serviceScopeFactory.CreateScope();

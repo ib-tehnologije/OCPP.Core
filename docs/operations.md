@@ -115,6 +115,16 @@ Observed:
 - Log files are configured under `Logs` by each app.
 - Sentry is enabled only when a DSN is present in configuration.
 - Hangfire dashboards can be enabled with `Hangfire:EnableDashboard` and `Hangfire:DashboardPath`.
+- Server and management apps expose health endpoints:
+  - `/health/live` returns dependency-free process liveness.
+  - `/health/ready` checks database connectivity and should return HTTP 200 when ready or HTTP 503 when unhealthy.
+  - Both endpoints return compact JSON with top-level `status`, `durationMs`, and per-check entries.
+
+Recommended external monitors:
+
+- OCPP server: monitor `/health/live` for process availability and `/health/ready` for database readiness.
+- Management/public portal: monitor `/health/live` and `/health/ready`.
+- Optional deeper smoke checks: monitor the public portal path `/Public/Map` or a stable `cp/{cp}` page for user-facing rendering, and monitor server `/API/Status` with `X-API-Key` only when the monitor supports private headers. `/API/Status` reports connected charge point sessions and is not a replacement for `/health/ready`.
 
 Unknown / verify:
 

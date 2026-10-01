@@ -54,6 +54,20 @@ Unknown / verify:
 
 - Whether these routes are considered public API contracts or internal app-to-app endpoints.
 
+## Health Endpoints
+
+Code locations:
+
+- `OCPP.Core.Server/HealthEndpointExtensions.cs`
+- `OCPP.Core.Management/HealthEndpointExtensions.cs`
+
+Known behavior:
+
+- Both server and management apps expose `/health/live` and `/health/ready`.
+- `/health/live` is a dependency-free liveness probe.
+- `/health/ready` checks database connectivity.
+- Health endpoints return compact JSON and do not require the OCPP server `X-API-Key`.
+
 ## Operator Management Portal
 
 Code locations:

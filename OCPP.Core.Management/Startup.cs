@@ -56,6 +56,7 @@ namespace OCPP.Core.Management
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddOCPPDbContext(Configuration);
+            services.AddOcppHealthChecks();
 
             if (HasSqlServerHangfireStorage)
             {
@@ -137,6 +138,8 @@ namespace OCPP.Core.Management
 
             app.UseEndpoints(endpoints =>
             {
+                endpoints.MapOcppHealthChecks();
+
                 endpoints.MapControllerRoute(
                     name: "public-start-charge-point",
                     pattern: "cp/{cp}",
