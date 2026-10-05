@@ -107,6 +107,7 @@ Known behavior:
 - Configurable branding, SEO, QR scanner, light theme, support, and footer settings.
 - The checked PWA manifest and favicon assets use the public `EV.Charge` app name and icon.
 - Customer notification emails use bilingual Croatian/English templates and are not currently tied to the public portal language selector.
+- The static help page `OCPP.Core.Management/wwwroot/faq.html` (served at `/faq.html`) keeps one Croatian HTML body plus inline HR/EN/SL/IT/DE/FR dictionaries with identical keys. `?lang=xx` selects the language (falling back to the browser language, then Croatian), and a manual selector change writes `?lang=` back into the URL. Its JSON-LD mirrors the visible Croatian questions and answers. Copy stays station-specific and provider-neutral: no fixed prices, bank release deadlines, named wallets or card brands, universal stop/unlock/refund promises, or night tariff, because those depend on per-station configuration, the payment provider account, banks, and charger hardware. Canonical and hreflang links point at `https://evcharge.hr/faq.html`. `public-start-localization.spec.js` checks the dictionaries, JSON-LD, these exclusions, and `?lang=` selection.
 
 Important edge cases:
 
