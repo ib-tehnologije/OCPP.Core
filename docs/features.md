@@ -48,6 +48,7 @@ Known behavior:
 
 - API routes require `X-API-Key` when `ApiKey` is configured.
 - Stripe webhook handling is the exception to server API key checking.
+- `ChangeConfiguration` takes `{value}` as one URL-encoded path segment and decodes it exactly once from the raw request target, so values containing `/` (for example network-profile blobs with `wss://` URLs) reach the charge point intact. Encode the whole value with `encodeURIComponent`/`Uri.EscapeDataString`; an unencoded `/` splits the route.
 - Remote commands are dispatched to protocol-specific methods based on the connected charge point protocol.
 - Reset accepts `Hard` and `Soft` modes (case-insensitive). An unsupported mode returns HTTP 400.
 - Omitting `mode` preserves the compatibility reset: OCPP 1.6 receives `Soft`; OCPP 2.x receives `OnIdle`. `Hard` selects a full reset and `Soft` selects the compatibility-safe reset for each protocol.
