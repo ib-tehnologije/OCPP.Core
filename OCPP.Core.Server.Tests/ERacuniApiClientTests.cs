@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -325,7 +324,7 @@ namespace OCPP.Core.Server.Tests
         [Fact]
         public void LookupSalesInvoiceByApiTransactionId_BoundsResponseBodyReadWithHttpClientTimeout()
         {
-            var content = new CancellationAwareSlowHttpContent();
+            using var content = new CancellationAwareSlowHttpContent();
             var handler = new RecordingHttpMessageHandler
             {
                 Response = new HttpResponseMessage(HttpStatusCode.OK)
@@ -334,16 +333,18 @@ namespace OCPP.Core.Server.Tests
                 }
             };
             var client = CreateClient(handler, TimeSpan.FromMilliseconds(100));
-            var stopwatch = Stopwatch.StartNew();
+
+            // The body never completes on its own; only the client's timeout token can end the read.
+            // The safety net only exists so a regression fails the test instead of hanging the suite.
+            using var safetyNet = new System.Threading.Timer(_ => content.ReleaseWithoutCancellation(), null, TimeSpan.FromSeconds(30), System.Threading.Timeout.InfiniteTimeSpan);
 
             var result = client.LookupSalesInvoiceByApiTransactionId(CreateLookupRequest());
 
-            stopwatch.Stop();
+            Assert.False(content.ReleasedWithoutCancellation, "Response body read was not bounded by the HttpClient timeout.");
+            Assert.True(content.CancellationObserved);
             Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
             Assert.Equal(ERacuniInvoiceLookupFailureCategory.Transport, result.Diagnostics.FailureCategory);
             Assert.Equal(200, result.Diagnostics.HttpStatusCode);
-            Assert.True(content.CancellationObserved);
-            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Lookup took {stopwatch.Elapsed}.");
         }
 
         private static ERacuniApiRequestEnvelope CreateLookupRequest() => new()
@@ -430,7 +431,17 @@ namespace OCPP.Core.Server.Tests
 
         private sealed class CancellationAwareSlowHttpContent : HttpContent
         {
+            private readonly System.Threading.Tasks.TaskCompletionSource _release =
+                new(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+
             public bool CancellationObserved { get; private set; }
+            public bool ReleasedWithoutCancellation { get; private set; }
+
+            public void ReleaseWithoutCancellation()
+            {
+                ReleasedWithoutCancellation = true;
+                _release.TrySetResult();
+            }
 
             protected override System.Threading.Tasks.Task SerializeToStreamAsync(
                 System.IO.Stream stream,
@@ -444,7 +455,7 @@ namespace OCPP.Core.Server.Tests
             {
                 try
                 {
-                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                    await _release.Task.WaitAsync(cancellationToken);
                     await stream.WriteAsync(Encoding.UTF8.GetBytes("{}"), cancellationToken);
                 }
                 catch (OperationCanceledException)
