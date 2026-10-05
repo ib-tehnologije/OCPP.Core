@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -98,11 +99,77 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("SalesInvoiceList", audit.ProviderOperation);
             Assert.Equal(200, audit.HttpStatusCode);
             Assert.Equal("Unknown:UnrecognizedResponse:JsonObject:attempted", audit.ProviderResponseStatus);
-            Assert.Equal(
-                "Provider lookup returned a non-empty or unrecognized response without one exact match.",
-                audit.Error);
+            Assert.Equal("Provider lookup returned an unrecognized response shape.", audit.Error);
             Assert.Null(audit.ResponseBody);
             Assert.DoesNotContain("provider-payload", audit.Error, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Main_ExecuteWithTruncatedLookupPage_FailsClosedAndNeverCreates()
+        {
+            const string reservationId = "99999999-9999-9999-9999-999999999999";
+            var rows = string.Join(
+                ",",
+                Enumerable.Range(1, 500).Select(index =>
+                    $"{{\"date\":\"2026-01-01\",\"number\":\"SYNTH-{index}\",\"orderReference\":\"OTHER-{index}\",\"totalAmount\":1.00,\"totalCurrency\":\"EUR\"}}"));
+            using var provider = new SyntheticInvoiceProviderServer(
+                $"{{\"response\":{{\"status\":\"ok\",\"result\":[{rows}]}}}}");
+            using var scenario = _fixture.CreateScenario($$"""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "recover-invoice", "reservationId": "{{reservationId}}" }
+                  ]
+                }
+                """);
+            scenario.SeedInvoiceRecovery(Guid.Parse(reservationId));
+
+            var result = scenario.RunExecute(provider.BaseUrl);
+
+            Assert.Equal(1, result.ExitCode);
+            Assert.Single(provider.RequestBodies);
+            Assert.DoesNotContain("SalesInvoiceCreate", provider.RequestBodies[0], StringComparison.Ordinal);
+            using var verificationContext = scenario.CreateContext();
+            var audit = Assert.Single(verificationContext.InvoiceSubmissionLogs);
+            Assert.Equal("ProviderUnknown", audit.Status);
+            Assert.Equal("Unknown:TruncatedResponse:ResponseResultArray:attempted", audit.ProviderResponseStatus);
+            Assert.Null(audit.ExternalInvoiceNumber);
+        }
+
+        [Fact]
+        public void Main_ExecuteWithExactProviderMatch_AdoptsExistingInvoiceWithoutCreate()
+        {
+            const string reservationId = "88888888-8888-8888-8888-888888888888";
+            using var provider = new SyntheticInvoiceProviderServer(
+                "{\"response\":{\"status\":\"ok\",\"result\":[" +
+                "{\"date\":\"2026-01-01\",\"number\":\"SYNTH-OTHER\",\"orderReference\":\"EVSE-660\",\"reference\":\"STRIPE-OTHER\",\"totalAmount\":3.00,\"totalCurrency\":\"EUR\"}," +
+                "{\"date\":\"2026-01-01\",\"number\":\"SYNTH-0066\",\"orderReference\":\"EVSE-66\",\"reference\":\"STRIPE-88888888888888888888888888888888\",\"totalAmount\":3.00,\"totalCurrency\":\"EUR\"}" +
+                "]}}");
+            using var scenario = _fixture.CreateScenario($$"""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "recover-invoice", "reservationId": "{{reservationId}}" }
+                  ]
+                }
+                """);
+            scenario.SeedInvoiceRecovery(Guid.Parse(reservationId));
+
+            var result = scenario.RunExecute(provider.BaseUrl);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("outcome=Executed", result.StdOut, StringComparison.Ordinal);
+            var requestBody = Assert.Single(provider.RequestBodies);
+            Assert.Contains("\"method\":\"SalesInvoiceList\"", requestBody, StringComparison.Ordinal);
+            Assert.Contains("\"dateFrom\":\"2025-12-31\"", requestBody, StringComparison.Ordinal);
+            Assert.Contains("\"dateTo\":\"2026-01-02\"", requestBody, StringComparison.Ordinal);
+            Assert.DoesNotContain("apiTransactionId", requestBody, StringComparison.Ordinal);
+            Assert.DoesNotContain("SalesInvoiceCreate", requestBody, StringComparison.Ordinal);
+            using var verificationContext = scenario.CreateContext();
+            var audit = Assert.Single(verificationContext.InvoiceSubmissionLogs);
+            Assert.Equal("Submitted", audit.Status);
+            Assert.Equal("SYNTH-0066", audit.ExternalInvoiceNumber);
+            Assert.Equal(200, audit.HttpStatusCode);
         }
     }
 

@@ -38,10 +38,35 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         public bool GeneratePublicUrl { get; set; }
     }
 
+    /// <summary>
+    /// Documented SalesInvoiceList filters sent to the provider. SalesInvoiceList has no
+    /// apiTransactionId filter, so the lookup asks for a bounded invoice-date window and
+    /// matches rows locally against <see cref="ERacuniSalesInvoiceLookupCriteria"/>.
+    /// </summary>
     public class ERacuniSalesInvoiceLookupParameters
     {
-        [JsonProperty("apiTransactionId")]
-        public string ApiTransactionId { get; set; }
+        [JsonProperty("dateFrom")]
+        public string DateFrom { get; set; }
+
+        [JsonProperty("dateTo")]
+        public string DateTo { get; set; }
+    }
+
+    /// <summary>
+    /// Local match criteria for a SalesInvoiceList row. These values are never sent to the provider.
+    /// </summary>
+    public sealed class ERacuniSalesInvoiceLookupCriteria
+    {
+        public string OrderReference { get; set; }
+
+        /// <summary>
+        /// Optional secondary identifier sent as SalesInvoice.reference. A row carrying it counts as a
+        /// candidate even when its orderReference differs, so a changed orderReference cannot prove absence.
+        /// </summary>
+        public string Reference { get; set; }
+
+        public decimal? TotalAmount { get; set; }
+        public string Currency { get; set; }
     }
 
     public class ERacuniSalesInvoice
@@ -194,7 +219,13 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         NonJsonResponse,
         DuplicateMatch,
         MissingDurableIdentifier,
-        UnrecognizedResponse
+        UnrecognizedResponse,
+        ProviderErrorStatus,
+        TruncatedResponse,
+        UnrecognizedRow,
+        RowOutsideDateWindow,
+        AmountMismatch,
+        IdentifierMismatch
     }
 
     public enum ERacuniInvoiceLookupResponseShape
@@ -204,7 +235,8 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         ResultArray,
         JsonObject,
         OtherJson,
-        NonJson
+        NonJson,
+        ResponseResultArray
     }
 
     public sealed record ERacuniInvoiceLookupDiagnostics(

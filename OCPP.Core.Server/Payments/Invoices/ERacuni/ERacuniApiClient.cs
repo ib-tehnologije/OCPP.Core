@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Linq;
@@ -14,12 +17,20 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
     public interface IERacuniApiClient
     {
         ERacuniApiResult CreateSalesInvoice(ERacuniApiRequestEnvelope request);
-        ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request) =>
+        ERacuniInvoiceLookupResult LookupSalesInvoice(
+            ERacuniApiRequestEnvelope request,
+            ERacuniSalesInvoiceLookupCriteria criteria) =>
             ERacuniInvoiceLookupResult.Unknown("Provider lookup is not implemented.");
     }
 
     public class ERacuniApiClient : IERacuniApiClient
     {
+        /// <summary>Maximum number of rows SalesInvoiceList returns in one response.</summary>
+        public const int ProviderListRowLimit = 500;
+
+        /// <summary>Upper bound on the inclusive invoice-date window a lookup may request.</summary>
+        public const int MaxLookupWindowDays = 31;
+
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly InvoiceIntegrationOptions _options;
         private readonly ILogger<ERacuniApiClient> _logger;
@@ -43,16 +54,29 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             return Send(request);
         }
 
-        public ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request)
+        public ERacuniInvoiceLookupResult LookupSalesInvoice(
+            ERacuniApiRequestEnvelope request,
+            ERacuniSalesInvoiceLookupCriteria criteria)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             if (request.Parameters is not ERacuniSalesInvoiceLookupParameters parameters ||
-                string.IsNullOrWhiteSpace(parameters.ApiTransactionId))
+                string.IsNullOrWhiteSpace(criteria?.OrderReference) ||
+                !criteria.TotalAmount.HasValue ||
+                !TryParseProviderDate(parameters.DateFrom, out var dateFrom) ||
+                !TryParseProviderDate(parameters.DateTo, out var dateTo))
             {
                 return Unknown(
-                    "Exact provider transaction reference is missing.",
+                    "Exact provider order reference, total amount, or invoice-date window is missing.",
                     requestAttempted: false,
                     ERacuniInvoiceLookupFailureCategory.MissingReference);
+            }
+
+            if (dateFrom > dateTo || (dateTo - dateFrom).TotalDays >= MaxLookupWindowDays)
+            {
+                return Unknown(
+                    "Provider lookup invoice-date window is inverted or wider than the supported bound.",
+                    requestAttempted: false,
+                    ERacuniInvoiceLookupFailureCategory.Configuration);
             }
 
             ERacuniApiResult response;
@@ -84,7 +108,8 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             }
 
             var status = (int)response.StatusCode;
-            var responseShape = ClassifyResponseShape(response);
+            var parsedBody = TryParseLookupJson(response.Body);
+            var responseShape = ClassifyResponseShape(parsedBody);
             if (status < 200 || status > 299)
             {
                 return Unknown(
@@ -95,7 +120,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                     responseShape);
             }
 
-            if (response.ParsedBody == null)
+            if (parsedBody == null)
             {
                 return Unknown(
                     "Provider lookup returned a non-JSON response.",
@@ -105,72 +130,153 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                     responseShape);
             }
 
-            var exactMatches = response.ParsedBody
-                .SelectTokens("$..apiTransactionId")
-                .Select(token => token.Parent?.Parent)
-                .OfType<JObject>()
-                .Where(candidate => string.Equals(
-                    candidate.GetValue("apiTransactionId", StringComparison.OrdinalIgnoreCase)?.ToString(),
-                    parameters.ApiTransactionId,
-                    StringComparison.Ordinal))
-                .ToList();
-
-            if (exactMatches.Count > 1)
+            var envelope = parsedBody is JObject rootObject &&
+                           rootObject.GetValue("response", StringComparison.OrdinalIgnoreCase) is JObject nestedResponse
+                ? nestedResponse
+                : parsedBody as JObject;
+            var providerStatus = envelope?.GetValue("status", StringComparison.OrdinalIgnoreCase);
+            if (providerStatus != null &&
+                !string.Equals(providerStatus.ToString().Trim(), "ok", StringComparison.OrdinalIgnoreCase))
             {
                 return Unknown(
-                    "Provider lookup returned duplicate exact matches.",
+                    "Provider lookup returned a non-ok provider status.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.ProviderErrorStatus,
+                    status,
+                    responseShape);
+            }
+
+            var rows = parsedBody as JArray ??
+                       envelope?.GetValue("result", StringComparison.OrdinalIgnoreCase) as JArray;
+            if (rows == null)
+            {
+                return Unknown(
+                    "Provider lookup returned an unrecognized response shape.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse,
+                    status,
+                    responseShape);
+            }
+
+            // SalesInvoiceList returns at most one page. A full page may hide the matching
+            // invoice, so absence can only be proven from a page below the provider limit.
+            if (rows.Count >= ProviderListRowLimit)
+            {
+                return Unknown(
+                    "Provider lookup returned a full page that may be truncated; absence cannot be proven.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.TruncatedResponse,
+                    status,
+                    responseShape);
+            }
+
+            var expectedOrderReference = criteria.OrderReference.Trim();
+            var expectedReference = string.IsNullOrWhiteSpace(criteria.Reference) ? null : criteria.Reference.Trim();
+            var candidates = new List<JObject>();
+            foreach (var row in rows)
+            {
+                if (row is not JObject invoice ||
+                    !TryParseProviderDate(ReadString(invoice, "date"), out var invoiceDate) ||
+                    invoice.GetValue("orderReference", StringComparison.OrdinalIgnoreCase) == null)
+                {
+                    return Unknown(
+                        "Provider lookup row does not expose a recognizable invoice date and order reference.",
+                        requestAttempted,
+                        ERacuniInvoiceLookupFailureCategory.UnrecognizedRow,
+                        status,
+                        responseShape);
+                }
+
+                if (invoiceDate < dateFrom || invoiceDate > dateTo)
+                {
+                    return Unknown(
+                        "Provider lookup returned an invoice outside the requested date window.",
+                        requestAttempted,
+                        ERacuniInvoiceLookupFailureCategory.RowOutsideDateWindow,
+                        status,
+                        responseShape);
+                }
+
+                // Either identifier makes a row a candidate. Absence is proven only when neither matches.
+                if (IdentifierEquals(invoice, "orderReference", expectedOrderReference) ||
+                    (expectedReference != null && IdentifierEquals(invoice, "reference", expectedReference)))
+                {
+                    candidates.Add(invoice);
+                }
+            }
+
+            if (candidates.Count > 1)
+            {
+                return Unknown(
+                    "Provider lookup returned duplicate order-reference matches.",
                     requestAttempted,
                     ERacuniInvoiceLookupFailureCategory.DuplicateMatch,
                     status,
                     responseShape);
             }
 
-            if (exactMatches.Count == 1)
+            if (candidates.Count == 0)
             {
-                var match = exactMatches[0];
-                var metadata = ERacuniApiResponseMetadataReader.Read(match);
-                if (string.IsNullOrWhiteSpace(metadata.DocumentId) &&
-                    string.IsNullOrWhiteSpace(metadata.InvoiceNumber))
-                {
-                    return Unknown(
-                        "Provider lookup match has no durable document identifier.",
-                        requestAttempted,
-                        ERacuniInvoiceLookupFailureCategory.MissingDurableIdentifier,
-                        status,
-                        responseShape);
-                }
-
-                return ERacuniInvoiceLookupResult.Found(new ERacuniApiResult
-                {
-                    StatusCode = response.StatusCode,
-                    Body = match.ToString(Formatting.None),
-                    ParsedBody = match
-                }, Diagnostics(
+                return ERacuniInvoiceLookupResult.NotFound(Diagnostics(
                     requestAttempted,
                     ERacuniInvoiceLookupFailureCategory.None,
                     status,
                     responseShape));
             }
 
-            var isRecognizedEmptyResult = response.ParsedBody is JArray rootArray && rootArray.Count == 0;
-            if (response.ParsedBody is JObject rootObject &&
-                rootObject.GetValue("result", StringComparison.OrdinalIgnoreCase) is JArray resultArray)
+            var match = candidates[0];
+            var matchReference = ReadString(match, "reference");
+            if (!IdentifierEquals(match, "orderReference", expectedOrderReference) ||
+                (expectedReference != null &&
+                 !string.IsNullOrWhiteSpace(matchReference) &&
+                 !IdentifierEquals(match, "reference", expectedReference)))
             {
-                isRecognizedEmptyResult = resultArray.Count == 0;
-            }
-
-            return isRecognizedEmptyResult
-                ? ERacuniInvoiceLookupResult.NotFound(Diagnostics(
+                return Unknown(
+                    "Provider lookup candidate has contradicting order reference or reference identifiers.",
                     requestAttempted,
-                    ERacuniInvoiceLookupFailureCategory.None,
-                    status,
-                    responseShape))
-                : Unknown(
-                    "Provider lookup returned a non-empty or unrecognized response without one exact match.",
-                    requestAttempted,
-                    ERacuniInvoiceLookupFailureCategory.UnrecognizedResponse,
+                    ERacuniInvoiceLookupFailureCategory.IdentifierMismatch,
                     status,
                     responseShape);
+            }
+
+            if (!TryReadAmount(match.GetValue("totalAmount", StringComparison.OrdinalIgnoreCase), out var totalAmount) ||
+                totalAmount != criteria.TotalAmount.Value ||
+                (!string.IsNullOrWhiteSpace(criteria.Currency) &&
+                 !string.Equals(
+                     ReadString(match, "totalCurrency")?.Trim(),
+                     criteria.Currency.Trim(),
+                     StringComparison.OrdinalIgnoreCase)))
+            {
+                return Unknown(
+                    "Provider lookup order-reference match has a different or unreadable total amount or currency.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.AmountMismatch,
+                    status,
+                    responseShape);
+            }
+
+            var metadata = ERacuniApiResponseMetadataReader.Read(match);
+            if (string.IsNullOrWhiteSpace(metadata.DocumentId) &&
+                string.IsNullOrWhiteSpace(metadata.InvoiceNumber))
+            {
+                return Unknown(
+                    "Provider lookup match has no durable document identifier.",
+                    requestAttempted,
+                    ERacuniInvoiceLookupFailureCategory.MissingDurableIdentifier,
+                    status,
+                    responseShape);
+            }
+
+            return ERacuniInvoiceLookupResult.Found(new ERacuniApiResult
+            {
+                StatusCode = response.StatusCode,
+                Body = match.ToString(Formatting.None),
+                ParsedBody = match
+            }, Diagnostics(
+                requestAttempted,
+                ERacuniInvoiceLookupFailureCategory.None,
+                status,
+                responseShape));
         }
 
         private ERacuniApiResult Send(ERacuniApiRequestEnvelope request) => Send(request, null, null);
@@ -252,26 +358,95 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             ERacuniInvoiceLookupResponseShape responseShape) =>
             new(requestAttempted, failureCategory, httpStatusCode, responseShape);
 
-        private static ERacuniInvoiceLookupResponseShape ClassifyResponseShape(ERacuniApiResult response)
+        private static ERacuniInvoiceLookupResponseShape ClassifyResponseShape(JToken parsedBody)
         {
-            if (response?.ParsedBody == null)
+            if (parsedBody == null)
             {
                 return ERacuniInvoiceLookupResponseShape.NonJson;
             }
 
-            if (response.ParsedBody is JArray)
+            if (parsedBody is JArray)
             {
                 return ERacuniInvoiceLookupResponseShape.JsonArray;
             }
 
-            if (response.ParsedBody is JObject rootObject)
+            if (parsedBody is JObject rootObject)
             {
-                return rootObject.GetValue("result", StringComparison.OrdinalIgnoreCase) is JArray
-                    ? ERacuniInvoiceLookupResponseShape.ResultArray
+                if (rootObject.GetValue("result", StringComparison.OrdinalIgnoreCase) is JArray)
+                {
+                    return ERacuniInvoiceLookupResponseShape.ResultArray;
+                }
+
+                return rootObject.GetValue("response", StringComparison.OrdinalIgnoreCase) is JObject nestedResponse &&
+                       nestedResponse.GetValue("result", StringComparison.OrdinalIgnoreCase) is JArray
+                    ? ERacuniInvoiceLookupResponseShape.ResponseResultArray
                     : ERacuniInvoiceLookupResponseShape.JsonObject;
             }
 
             return ERacuniInvoiceLookupResponseShape.OtherJson;
+        }
+
+        private static bool TryParseProviderDate(string value, out DateTime date)
+        {
+            date = default;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var trimmed = value.Trim();
+            if (trimmed.Length > 10 && (trimmed[10] == 'T' || trimmed[10] == ' '))
+            {
+                trimmed = trimmed.Substring(0, 10);
+            }
+
+            return DateTime.TryParseExact(
+                trimmed,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out date);
+        }
+
+        private static bool TryReadAmount(JToken token, out decimal amount)
+        {
+            amount = default;
+            if (token == null)
+            {
+                return false;
+            }
+
+            if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+            {
+                try
+                {
+                    amount = token.Value<decimal>();
+                    return true;
+                }
+                catch (OverflowException)
+                {
+                    return false;
+                }
+            }
+
+            return token.Type == JTokenType.String &&
+                   decimal.TryParse(
+                       token.ToString().Trim(),
+                       NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                       CultureInfo.InvariantCulture,
+                       out amount);
+        }
+
+        private static bool IdentifierEquals(JObject value, string propertyName, string expected) =>
+            string.Equals(
+                ReadString(value, propertyName)?.Trim(),
+                expected,
+                StringComparison.OrdinalIgnoreCase);
+
+        private static string ReadString(JObject value, string propertyName)
+        {
+            var token = value?.GetValue(propertyName, StringComparison.OrdinalIgnoreCase);
+            return token == null || token.Type == JTokenType.Null ? null : token.ToString();
         }
 
         private static Uri BuildEndpoint(ERacuniInvoiceOptions options)
@@ -331,6 +506,39 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                 return JToken.Parse(body);
             }
             catch (JsonReaderException)
+            {
+                return null;
+            }
+        }
+
+        // Lookup responses keep dates as strings and amounts as decimals so row matching never
+        // depends on local time-zone conversion or binary floating-point rounding.
+        private static JToken TryParseLookupJson(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var reader = new JsonTextReader(new StringReader(body))
+                {
+                    DateParseHandling = DateParseHandling.None,
+                    FloatParseHandling = FloatParseHandling.Decimal
+                };
+                var token = JToken.ReadFrom(reader);
+                while (reader.Read())
+                {
+                    if (reader.TokenType != JsonToken.Comment)
+                    {
+                        return null;
+                    }
+                }
+
+                return token;
+            }
+            catch (JsonException)
             {
                 return null;
             }
