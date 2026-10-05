@@ -18,6 +18,7 @@
  */
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -668,6 +669,41 @@ namespace OCPP.Core.Server
             int control = 11 - a;
             if (control == 10) control = 0;
             return control == (oibDigits[10] - '0');
+        }
+
+        // Returns the fully decoded API path segment at the given index.
+        // Kestrel decodes Request.Path except %2F, so decoding that value again would turn an
+        // encoded literal "%252F" into "/". Decode the raw request target exactly once instead.
+        internal static string DecodeRawPathSegment(string rawTarget, string[] pathParts, int index)
+        {
+            if (pathParts == null || index < 0 || index >= pathParts.Length)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrEmpty(rawTarget) && rawTarget[0] == '/')
+            {
+                int queryStart = rawTarget.IndexOfAny(new[] { '?', '#' });
+                string rawPath = queryStart >= 0 ? rawTarget.Substring(0, queryStart) : rawTarget;
+                string[] rawParts = rawPath.Split('/');
+
+                // Align from the end so a PathBase prefix in the raw target does not shift the index
+                int rawIndex = index + (rawParts.Length - pathParts.Length);
+                if (rawParts.Length >= pathParts.Length && rawIndex < rawParts.Length)
+                {
+                    try
+                    {
+                        return Uri.UnescapeDataString(rawParts[rawIndex]);
+                    }
+                    catch (UriFormatException)
+                    {
+                        // fall back to the server-decoded segment
+                    }
+                }
+            }
+
+            // Without a raw target only %2F is still encoded in the server-decoded path
+            return Regex.Replace(pathParts[index], "%2F", "/", RegexOptions.IgnoreCase);
         }
 
         // Removes entry only when key and object instance still match.
@@ -1830,7 +1866,12 @@ namespace OCPP.Core.Server
                                 {
                                     if (status.Protocol == Protocol_OCPP16)
                                     {
-                                        await ChangeConfiguration16(status, context, dbContext, urlConnectorId, urlParam);
+                                        // Values such as Alfen network profiles contain URLs; decode the raw segment so %2F becomes '/'
+                                        string configValue = DecodeRawPathSegment(
+                                            context.Features.Get<IHttpRequestFeature>()?.RawTarget,
+                                            urlParts,
+                                            5);
+                                        await ChangeConfiguration16(status, context, dbContext, urlConnectorId, configValue);
                                     }
                                     else
                                     {

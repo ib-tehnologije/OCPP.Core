@@ -48,6 +48,7 @@ Known behavior:
 
 - API routes require `X-API-Key` when `ApiKey` is configured.
 - Stripe webhook handling is the exception to server API key checking.
+- `ChangeConfiguration` takes `{value}` as one URL-encoded path segment and decodes it exactly once from the raw request target, so values containing `/` (for example network-profile blobs with `wss://` URLs) reach the charge point intact. Encode the whole value with `encodeURIComponent`/`Uri.EscapeDataString`; an unencoded `/` splits the route.
 - Remote commands are dispatched to protocol-specific methods based on the connected charge point protocol.
 
 Unknown / verify:
