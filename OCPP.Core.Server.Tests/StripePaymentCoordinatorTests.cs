@@ -2375,7 +2375,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void CompleteReservation_CapacityFreeIntermediateThenEqualTerminal_DoesNotCaptureInvoiceOrNotify()
+        public void CompleteReservation_CapacityFreeIntermediateThenEqualTerminalWithFallbackDisabled_DoesNotCaptureInvoiceOrNotify()
         {
             using var context = CreateContext();
             var reservation = new ChargePaymentReservation
@@ -2411,6 +2411,7 @@ namespace OCPP.Core.Server.Tests
                 Unit = "kWh",
                 ObservedAtUtc = transaction.StartTime.AddMinutes(5),
                 Protocol = "OCPP2.0.1",
+                FallbackMaximumPowerKw = 0,
                 Source = "MeterValues"
             });
             MeterEvidenceProcessor.Process(context, transaction, new MeterEvidenceObservation
@@ -2419,6 +2420,7 @@ namespace OCPP.Core.Server.Tests
                 Unit = "kWh",
                 ObservedAtUtc = transaction.StopTime.Value,
                 Protocol = "OCPP2.0.1",
+                FallbackMaximumPowerKw = 0,
                 Source = "TransactionEvent.Ended",
                 IsTerminal = true
             });
@@ -2450,7 +2452,84 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(0, email.ChargingCompletedCount);
         }
 
-        [Fact]
+[Fact]
+        public void CompleteReservation_NoOfferedPowerWithinFallbackCeiling_CapturesInvoicesAndNotifies()
+        {
+            using var context = CreateContext();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-FALLBACK-CAPACITY",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-FALLBACK-CAPACITY",
+                StripePaymentIntentId = "pi_fallback_capacity",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                Currency = "eur",
+                MaxEnergyKwh = 80
+            };
+            var transaction = new Transaction
+            {
+                TransactionId = 12531,
+                ChargePointId = reservation.ChargePointId,
+                ConnectorId = reservation.ConnectorId,
+                StartTagId = reservation.ChargeTagId,
+                StartTime = new DateTime(2026, 9, 10, 10, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 9, 10, 10, 30, 0, DateTimeKind.Utc),
+                StopReason = "EVDisconnected",
+                MeterStart = 10,
+                MaxEnergyKwh = 80
+            };
+            context.AddRange(reservation, transaction);
+            context.SaveChanges();
+
+            // No Power.Offered anywhere: the default fallback ceiling must accept a normal 22 kW session.
+            var intermediate = MeterEvidenceProcessor.Process(context, transaction, new MeterEvidenceObservation
+            {
+                RawValue = "15.5",
+                Unit = "kWh",
+                ObservedAtUtc = transaction.StartTime.AddMinutes(15),
+                Protocol = "OCPP1.6",
+                Source = "MeterValues"
+            });
+            var terminal = MeterEvidenceProcessor.Process(context, transaction, new MeterEvidenceObservation
+            {
+                RawValue = "21000",
+                Unit = "Wh",
+                ObservedAtUtc = transaction.StopTime.Value,
+                Protocol = "OCPP1.6",
+                Source = "StopTransaction",
+                IsTerminal = true
+            });
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = reservation.StripePaymentIntentId, Status = "requires_capture", Amount = 10_000 }
+            };
+            var invoice = new FakeInvoiceIntegrationService();
+            var email = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(
+                context,
+                new FakeSessionService(),
+                intentService,
+                emailService: email,
+                invoiceIntegrationService: invoice);
+
+            coordinator.CompleteReservation(context, transaction);
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, intermediate.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.Accepted, terminal.Outcome);
+            Assert.Equal(21d, transaction.MeterStop);
+            Assert.Null(transaction.TrustedMaximumPowerKw);
+            Assert.Equal(MeterEvidenceSettlementState.Accepted, transaction.MeterEvidenceState);
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.True(intentService.CaptureCalled);
+            Assert.Equal(550, intentService.LastCaptureOptions?.AmountToCapture ?? 0);
+            Assert.Equal(1, invoice.HandleCompletedReservationCount);
+            Assert.Empty(context.MeterEvidenceAnomalies);
+        }
+
+                [Fact]
         public void RecoverTerminalSettlement_CapturesTheExactAssessedAmount()
         {
             using var context = CreateContext();

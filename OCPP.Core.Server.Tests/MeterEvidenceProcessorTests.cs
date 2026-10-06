@@ -90,7 +90,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Process_HighTerminalSampleWithoutPowerEvidence_RequiresReview()
+        public void Process_HighTerminalSampleWithoutPowerEvidenceAndFallbackDisabled_RequiresReview()
         {
             using var db = CreateContext();
             var transaction = CreateTransaction(maxEnergyKwh: 80);
@@ -98,9 +98,9 @@ namespace OCPP.Core.Server.Tests
             db.SaveChanges();
 
             MeterEvidenceProcessor.Process(db, transaction,
-                Observation("17.30859375", "kWh", transaction.StartTime, "OCPP1.6", "MeterValues"));
+                Observation("17.30859375", "kWh", transaction.StartTime, "OCPP1.6", "MeterValues", fallbackMaximumPowerKw: 0));
             var result = MeterEvidenceProcessor.Process(db, transaction,
-                Observation("6135.992", "kWh", transaction.StartTime.AddSeconds(587), "OCPP1.6", "StopTransaction", terminal: true));
+                Observation("6135.992", "kWh", transaction.StartTime.AddSeconds(587), "OCPP1.6", "StopTransaction", terminal: true, fallbackMaximumPowerKw: 0));
 
             Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
             Assert.Null(transaction.MeterStop);
@@ -111,7 +111,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Process_PositiveTerminalIncreaseBelowAuthorizationLimitWithoutPowerEvidence_RequiresReview()
+        public void Process_PositiveTerminalIncreaseBelowAuthorizationLimitWithoutPowerEvidenceAndFallbackDisabled_RequiresReview()
         {
             using var db = CreateContext();
             var transaction = CreateTransaction(maxEnergyKwh: 80);
@@ -119,9 +119,9 @@ namespace OCPP.Core.Server.Tests
             db.SaveChanges();
 
             MeterEvidenceProcessor.Process(db, transaction,
-                Observation("10", "kWh", transaction.StartTime, "OCPP1.6", "MeterValues"));
+                Observation("10", "kWh", transaction.StartTime, "OCPP1.6", "MeterValues", fallbackMaximumPowerKw: 0));
             var result = MeterEvidenceProcessor.Process(db, transaction,
-                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(10), "OCPP1.6", "StopTransaction", terminal: true));
+                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(10), "OCPP1.6", "StopTransaction", terminal: true, fallbackMaximumPowerKw: 0));
 
             Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
             Assert.Equal(10d, transaction.AcceptedMeterKwh);
@@ -130,7 +130,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Process_CapacityFreeIntermediateThenEqualTerminal_RequiresReviewWithoutAdvancingProjection()
+        public void Process_CapacityFreeIntermediateWithFallbackDisabledThenEqualTerminal_RequiresReviewWithoutAdvancingProjection()
         {
             using var db = CreateContext();
             var transaction = CreateTransaction(maxEnergyKwh: 80);
@@ -138,9 +138,9 @@ namespace OCPP.Core.Server.Tests
             db.SaveChanges();
 
             var intermediate = MeterEvidenceProcessor.Process(db, transaction,
-                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(5), "OCPP2.0.1", "MeterValues"));
+                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(5), "OCPP2.0.1", "MeterValues", fallbackMaximumPowerKw: 0));
             var terminal = MeterEvidenceProcessor.Process(db, transaction,
-                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(10), "OCPP2.0.1", "TransactionEvent.Ended", terminal: true));
+                Observation("10.1", "kWh", transaction.StartTime.AddMinutes(10), "OCPP2.0.1", "TransactionEvent.Ended", terminal: true, fallbackMaximumPowerKw: 0));
 
             Assert.Equal(MeterEvidenceOutcome.Rejected, intermediate.Outcome);
             Assert.Equal(MeterEvidenceOutcome.ReviewRequired, terminal.Outcome);
@@ -330,7 +330,32 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Process_UncorroboratedHigherTerminalPowerRequiresReviewWithoutReplacingCapacity()
+        public void Process_UncorroboratedHigherTerminalPowerWithFallbackDisabledRequiresReviewWithoutReplacingCapacity()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(meterStart: 17.30859375, maxEnergyKwh: 80);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+            var acceptedAt = transaction.StartTime.AddSeconds(10);
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("17.30859375", "kWh", acceptedAt, "OCPP2.0.1", "MeterValues", offeredPowerRaw: "22", offeredPowerUnit: "kW", fallbackMaximumPowerKw: 0));
+
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("6135.992", "kWh", acceptedAt.AddSeconds(587), "OCPP2.0.1", "TransactionEvent.Ended", terminal: true,
+                    offeredPowerRaw: "1000000", offeredPowerUnit: "kW", fallbackMaximumPowerKw: 0));
+
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, result.Reason);
+            Assert.Null(transaction.MeterStop);
+            Assert.Equal(22d, transaction.TrustedMaximumPowerKw);
+            var anomaly = Assert.Single(db.MeterEvidenceAnomalies);
+            Assert.Equal("1000000", anomaly.CandidateOfferedPowerRawValue);
+            Assert.Equal("kW", anomaly.CandidateOfferedPowerUnit);
+            Assert.Equal("0", anomaly.CandidateOfferedPowerMultiplier);
+        }
+
+[Fact]
+        public void Process_InflatedTerminalOfferedPower_IsCappedByFallbackCeilingAndFallsBack()
         {
             using var db = CreateContext();
             var transaction = CreateTransaction(meterStart: 17.30859375, maxEnergyKwh: 80);
@@ -344,17 +369,163 @@ namespace OCPP.Core.Server.Tests
                 Observation("6135.992", "kWh", acceptedAt.AddSeconds(587), "OCPP2.0.1", "TransactionEvent.Ended", terminal: true,
                     offeredPowerRaw: "1000000", offeredPowerUnit: "kW"));
 
-            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
-            Assert.Equal(MeterEvidenceReason.PhysicalCapacityUnavailable, result.Reason);
-            Assert.Null(transaction.MeterStop);
+            Assert.Equal(MeterEvidenceOutcome.FallbackAccepted, result.Outcome);
+            Assert.Equal(MeterEvidenceReason.PhysicallyImpossibleIncrease, result.Reason);
+            Assert.Equal(17.30859375d, transaction.MeterStop);
             Assert.Equal(22d, transaction.TrustedMaximumPowerKw);
-            var anomaly = Assert.Single(db.MeterEvidenceAnomalies);
-            Assert.Equal("1000000", anomaly.CandidateOfferedPowerRawValue);
-            Assert.Equal("kW", anomaly.CandidateOfferedPowerUnit);
-            Assert.Equal("0", anomaly.CandidateOfferedPowerMultiplier);
+            Assert.Equal("1000000", Assert.Single(db.MeterEvidenceAnomalies).CandidateOfferedPowerRawValue);
         }
 
         [Fact]
+        public void Process_InflatedIntermediateOfferedPower_CannotJustifyOrLatchAnAbsurdJump()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(meterStart: 17.30859375, maxEnergyKwh: 0);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+            var acceptedAt = transaction.StartTime.AddSeconds(10);
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("17.30859375", "kWh", acceptedAt, "OCPP1.6", "MeterValues", offeredPowerRaw: "22", offeredPowerUnit: "kW"));
+
+            var glitch = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("6135.992", "kWh", acceptedAt.AddSeconds(587), "OCPP1.6", "MeterValues",
+                    offeredPowerRaw: "1000000", offeredPowerUnit: "kW"));
+            var terminal = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("6136500", "Wh", acceptedAt.AddSeconds(650), "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.Rejected, glitch.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, terminal.Outcome);
+            Assert.Equal(MeterEvidenceReason.PhysicallyImpossibleIncrease, terminal.Reason);
+            Assert.Null(transaction.MeterStop);
+            Assert.Equal(17.30859375d, transaction.AcceptedMeterKwh);
+            Assert.Equal(22d, transaction.TrustedMaximumPowerKw);
+        }
+
+        [Fact]
+        public void Process_RisingOfferedPowerOnIntermediateReadingWithFallbackDisabled_RequiresReview()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10", "kWh", transaction.StartTime, "OCPP2.1", "Started", offeredPowerRaw: "3", offeredPowerUnit: "kW",
+                    fallbackMaximumPowerKw: 0));
+
+            var intermediate = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("13", "kWh", transaction.StartTime.AddMinutes(10), "OCPP2.1", "Updated",
+                    offeredPowerRaw: "22", offeredPowerUnit: "kW", fallbackMaximumPowerKw: 0));
+
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, intermediate.Outcome);
+            Assert.Equal(3d, transaction.TrustedMaximumPowerKw);
+            Assert.Equal(10d, transaction.AcceptedMeterKwh);
+        }
+
+        [Fact]
+        public void Process_PersistentRegisterOffset_IsNeverAbsorbedByElapsedTimeAndRequiresReview()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(maxEnergyKwh: 80);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            // 11 kW session sampled every minute; from minute 6 the register is offset by +30 kWh.
+            MeterEvidenceResult last = null!;
+            for (var minute = 1; minute <= 30; minute++)
+            {
+                var realKwh = 10 + 11d * minute / 60;
+                var reportedWh = Math.Round((realKwh + (minute >= 6 ? 30 : 0)) * 1000);
+                last = MeterEvidenceProcessor.Process(db, transaction,
+                    Observation(reportedWh.ToString(CultureInfo.InvariantCulture), "Wh", transaction.StartTime.AddMinutes(minute),
+                        "OCPP1.6", minute == 30 ? "StopTransaction" : "MeterValues", terminal: minute == 30));
+            }
+
+            // The offset is never billed: the session stops for review at the last good reading.
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, last.Outcome);
+            Assert.Equal(MeterEvidenceReason.PhysicallyImpossibleIncrease, last.Reason);
+            Assert.Null(transaction.MeterStop);
+            Assert.Equal(10.917d, transaction.AcceptedMeterKwh);
+            Assert.False(MeterEvidenceSettlementGuard.Assess(null, transaction).Ready);
+        }
+
+        [Fact]
+        public void Process_TransientSpikeThenNormalReadings_ResumesAcceptance()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10200", "Wh", transaction.StartTime.AddMinutes(1), "OCPP1.6", "MeterValues"));
+            var spike = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("90000", "Wh", transaction.StartTime.AddMinutes(2), "OCPP1.6", "MeterValues"));
+            var resumed = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10550", "Wh", transaction.StartTime.AddMinutes(3), "OCPP1.6", "MeterValues"));
+            var terminal = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("11000", "Wh", transaction.StartTime.AddMinutes(5), "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.Rejected, spike.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.Accepted, resumed.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.Accepted, terminal.Outcome);
+            Assert.Equal(11d, transaction.MeterStop);
+        }
+
+        [Fact]
+        public void Process_RecoveredKwhWithCoarsePrecisionAboveLimit_RequiresReview()
+        {
+            using var db = CreateContext();
+            // "31" re-formatted from a kWh double carries a 0.5 kWh string precision; it must not
+            // let 20.4 kWh pass a 20 kWh authorization boundary.
+            var transaction = CreateTransaction(meterStart: 10.6, maxEnergyKwh: 20);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("31", "kWh", transaction.StartTime.AddHours(1), "Recovery", "Cleanup:LiveConnectorMeter", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(MeterEvidenceReason.AuthorizationLimitExceeded, result.Reason);
+            Assert.False(MeterEvidenceSettlementGuard.Assess(null, transaction).Ready);
+        }
+
+        [Fact]
+        public void AvailableConnectorRecovery_AfterLaterSessionOnConnector_IgnoresConnectorMeters()
+        {
+            using var db = CreateContext();
+            var orphan = CreateTransaction(maxEnergyKwh: 200);
+            db.Transactions.Add(orphan);
+            db.SaveChanges();
+            MeterEvidenceProcessor.Process(db, orphan,
+                Observation("15", "kWh", orphan.StartTime.AddMinutes(30), "OCPP1.6", "MeterValues"));
+            db.Transactions.Add(new Transaction
+            {
+                TransactionId = orphan.TransactionId + 1,
+                ChargePointId = orphan.ChargePointId,
+                ConnectorId = orphan.ConnectorId,
+                StartTime = orphan.StartTime.AddHours(2),
+                StopTime = orphan.StartTime.AddHours(5),
+                MeterStart = 15,
+                MeterStop = 40
+            });
+            db.SaveChanges();
+
+            var closed = OpenTransactionRecovery.TryCloseForAvailableConnector(
+                db,
+                orphan,
+                orphan.ChargePointId,
+                orphan.ConnectorId,
+                orphan.StartTime.AddHours(10),
+                40,
+                NullLogger.Instance,
+                "Cleanup");
+
+            Assert.True(closed);
+            Assert.Equal(15d, orphan.MeterStop);
+            Assert.Equal(MeterEvidenceSettlementState.Accepted, orphan.MeterEvidenceState);
+        }
+
+                [Fact]
         public void Process_MixedPowerMultiplierCandidatesRemainDistinctAndReplaySafe()
         {
             using var db = CreateContext();
@@ -551,6 +722,296 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(13.5d, transaction.MeterStop);
         }
 
+        [Fact]
+        public void Process_Tx12529JumpWithoutOfferedPower_FallbackCeilingSettlesFromLastAcceptedReading()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(meterStart: 17.30859375);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var accepted = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("17.30859375", "kWh", transaction.StartTime.AddSeconds(10), "OCPP1.6", "MeterValues"));
+            var terminal = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("6135.992", "kWh", transaction.StartTime.AddSeconds(597), "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, accepted.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.FallbackAccepted, terminal.Outcome);
+            Assert.Equal(17.30859375d, transaction.MeterStop);
+            Assert.Null(transaction.TrustedMaximumPowerKw);
+            Assert.Equal(MeterEvidenceSettlementState.FallbackAccepted, transaction.MeterEvidenceState);
+            Assert.Equal(MeterEvidenceReason.PhysicallyImpossibleIncrease, Assert.Single(db.MeterEvidenceAnomalies).Reason);
+        }
+
+        [Fact]
+        public void Process_StartAndStopOnlyWithoutOfferedPower_AcceptsPlausibleEnergy()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10500", "Wh", transaction.StartTime.AddMinutes(5), "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, result.Outcome);
+            Assert.Equal(10.5d, transaction.MeterStop);
+            Assert.Equal(MeterEvidenceSettlementState.Accepted, transaction.MeterEvidenceState);
+            Assert.Empty(db.MeterEvidenceAnomalies);
+        }
+
+        [Fact]
+        public void Process_ZeroEnergyWhStop_NormalizesExactlyToMeterStartEvenWithoutFallback()
+        {
+            using var db = CreateContext();
+            // 1001 * 0.001 != 1001 / 1000 in binary floating point; the stop must still equal the start.
+            var transaction = CreateTransaction(meterStart: 1001d / 1000);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("1001", "Wh", transaction.StartTime.AddMinutes(2), "OCPP1.6", "StopTransaction", terminal: true,
+                    fallbackMaximumPowerKw: 0));
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, result.Outcome);
+            Assert.Equal(transaction.MeterStart, transaction.MeterStop);
+            Assert.Empty(db.MeterEvidenceAnomalies);
+        }
+
+        [Fact]
+        public void Process_DecreaseWithinReadingPrecision_KeepsAcceptedProjectionForSettlement()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10.43", "kWh", transaction.StartTime.AddMinutes(5), "OCPP2.0.1", "MeterValues"));
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10.4", "kWh", transaction.StartTime.AddMinutes(10), "OCPP2.0.1", "TransactionEvent.Ended", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, result.Outcome);
+            Assert.Equal(10.43d, transaction.MeterStop);
+            Assert.Equal(10.43d, transaction.AcceptedMeterKwh);
+            Assert.True(MeterEvidenceSettlementGuard.Assess(null, transaction).Ready);
+        }
+
+        [Theory]
+        [InlineData("21", MeterEvidenceOutcome.Accepted)]
+        [InlineData("21.2", MeterEvidenceOutcome.Rejected)]
+        public void Process_ConfiguredFallbackCeiling_BoundsIncreaseByElapsedTime(string reading, string expectedOutcome)
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            // 22 kW for 30 minutes allows at most 11 kWh above the 10 kWh start.
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation(reading, "kWh", transaction.StartTime.AddMinutes(30), "OCPP1.6", "MeterValues",
+                    fallbackMaximumPowerKw: 22));
+
+            Assert.Equal(expectedOutcome, result.Outcome);
+            if (expectedOutcome == MeterEvidenceOutcome.Rejected)
+            {
+                Assert.Equal(MeterEvidenceReason.PhysicallyImpossibleIncrease, result.Reason);
+                Assert.Equal(10d, transaction.AcceptedMeterKwh);
+            }
+        }
+
+        [Fact]
+        public void Process_RisingOfferedPowerOnIntermediateReading_RaisesTrustedCapacity()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10", "kWh", transaction.StartTime, "OCPP2.1", "Started", offeredPowerRaw: "3", offeredPowerUnit: "kW"));
+
+            var intermediate = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("13", "kWh", transaction.StartTime.AddMinutes(10), "OCPP2.1", "Updated",
+                    offeredPowerRaw: "22", offeredPowerUnit: "kW"));
+            var terminal = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("16", "kWh", transaction.StartTime.AddMinutes(20), "OCPP2.1", "Ended", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, intermediate.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.Accepted, terminal.Outcome);
+            Assert.Equal(22d, transaction.TrustedMaximumPowerKw);
+            Assert.Equal(16d, transaction.MeterStop);
+            Assert.Empty(db.MeterEvidenceAnomalies);
+        }
+
+        [Fact]
+        public void Process_OverAuthorizationLimitWithFallbackCapacity_RequiresReviewAfterAcceptingReading()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(maxEnergyKwh: 20);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("31", "kWh", transaction.StartTime.AddHours(1), "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(MeterEvidenceReason.AuthorizationLimitExceeded, result.Reason);
+            Assert.Equal(31d, transaction.AcceptedMeterKwh);
+            Assert.Equal(MeterEvidenceSettlementState.ReviewRequired, transaction.MeterEvidenceState);
+        }
+
+        [Fact]
+        public void Assess_EnergyLimitReachedExactly_IsReadyDespiteFloatingPointRounding()
+        {
+            using var db = CreateContext();
+            // (1024005 / 1000) - (1004005 / 1000) is slightly above 20 in binary floating point.
+            var transaction = CreateTransaction(meterStart: 1004005d / 1000, maxEnergyKwh: 20);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            var result = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("1024005", "Wh", transaction.StartTime.AddHours(1), "OCPP1.6", "StopTransaction", terminal: true));
+
+            Assert.True(transaction.MeterStop!.Value - transaction.MeterStart > 20d);
+            Assert.Equal(MeterEvidenceOutcome.Accepted, result.Outcome);
+            var decision = MeterEvidenceSettlementGuard.Assess(null, transaction);
+            Assert.True(decision.Ready, decision.Reason);
+        }
+
+        [Fact]
+        public void AvailableConnectorRecovery_WithoutOfferedPower_SettlesFromAcceptedLiveMeter()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction(maxEnergyKwh: 200);
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+            MeterEvidenceProcessor.Process(db, transaction,
+                Observation("15", "kWh", transaction.StartTime.AddMinutes(15), "OCPP1.6", "MeterValues"));
+
+            var closed = OpenTransactionRecovery.TryCloseForAvailableConnector(
+                db,
+                transaction,
+                transaction.ChargePointId,
+                transaction.ConnectorId,
+                transaction.StartTime.AddMinutes(20),
+                15,
+                NullLogger.Instance,
+                "Cleanup");
+
+            Assert.True(closed);
+            Assert.Equal(15d, transaction.MeterStop);
+            Assert.Equal(MeterEvidenceSettlementState.Accepted, transaction.MeterEvidenceState);
+            Assert.Empty(db.MeterEvidenceAnomalies);
+        }
+
+        [Fact]
+        public void Process_SameSecondGlitchAtSessionStart_DoesNotLockTheSession()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            // A Transaction.Begin sample stamped with the start second but 2 Wh above meterStart.
+            var begin = MeterEvidenceProcessor.Process(db, transaction,
+                Observation("10002", "Wh", transaction.StartTime, "OCPP1.6", "MeterValues"));
+            MeterEvidenceResult last = null!;
+            for (var minute = 1; minute <= 60; minute++)
+            {
+                var wh = Math.Round((10 + 22d * minute / 60) * 1000);
+                last = MeterEvidenceProcessor.Process(db, transaction,
+                    Observation(wh.ToString(CultureInfo.InvariantCulture), "Wh", transaction.StartTime.AddMinutes(minute),
+                        "OCPP1.6", minute == 60 ? "StopTransaction" : "MeterValues", terminal: minute == 60));
+            }
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, begin.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.Accepted, last.Outcome);
+            Assert.Equal(32d, transaction.MeterStop);
+        }
+
+        [Fact]
+        public void Process_ShortChargerClockStepBack_DoesNotLockTheSession()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            // 22 kW, one sample per real minute; after minute 20 the charger clock steps back 58 s.
+            MeterEvidenceResult last = null!;
+            for (var minute = 1; minute <= 40; minute++)
+            {
+                var wh = Math.Round((10 + 22d * minute / 60) * 1000);
+                var stamp = transaction.StartTime.AddMinutes(minute).AddSeconds(minute > 20 ? -58 : 0);
+                last = MeterEvidenceProcessor.Process(db, transaction,
+                    Observation(wh.ToString(CultureInfo.InvariantCulture), "Wh", stamp,
+                        "OCPP1.6", minute == 40 ? "StopTransaction" : "MeterValues", terminal: minute == 40));
+            }
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, last.Outcome);
+            Assert.Equal(Math.Round((10 + 22d * 40 / 60) * 1000) / 1000, transaction.MeterStop);
+        }
+
+        [Fact]
+        public void AvailableConnectorRecovery_LaterSessionWithResetChargerClock_IgnoresConnectorMeters()
+        {
+            using var db = CreateContext();
+            var orphan = CreateTransaction(maxEnergyKwh: 200);
+            db.Transactions.Add(orphan);
+            db.SaveChanges();
+            MeterEvidenceProcessor.Process(db, orphan,
+                Observation("15", "kWh", orphan.StartTime.AddMinutes(30), "OCPP1.6", "MeterValues"));
+            // The later session's charger clock was reset, so its StartTime is before the orphan's.
+            db.Transactions.Add(new Transaction
+            {
+                TransactionId = orphan.TransactionId + 1,
+                ChargePointId = orphan.ChargePointId,
+                ConnectorId = orphan.ConnectorId,
+                StartTime = orphan.StartTime.AddDays(-30),
+                StopTime = orphan.StartTime.AddDays(-30).AddHours(3),
+                MeterStart = 15,
+                MeterStop = 40
+            });
+            db.SaveChanges();
+
+            var closed = OpenTransactionRecovery.TryCloseForAvailableConnector(
+                db,
+                orphan,
+                orphan.ChargePointId,
+                orphan.ConnectorId,
+                orphan.StartTime.AddHours(10),
+                40,
+                NullLogger.Instance,
+                "Cleanup");
+
+            Assert.True(closed);
+            Assert.Equal(15d, orphan.MeterStop);
+        }
+
+        [Fact]
+        public void Process_OneHourChargerClockStepBack_RecoversAndBillsFullEnergy()
+        {
+            using var db = CreateContext();
+            var transaction = CreateTransaction();
+            db.Transactions.Add(transaction);
+            db.SaveChanges();
+
+            // 22 kW, one sample per real minute for 3 hours; after real minute 60 the charger clock
+            // steps back one hour (daylight-saving change on a charger that labels local time as UTC).
+            MeterEvidenceResult last = null!;
+            for (var minute = 1; minute <= 180; minute++)
+            {
+                var wh = Math.Round((10 + 22d * minute / 60) * 1000);
+                var stamp = transaction.StartTime.AddMinutes(minute > 60 ? minute - 60 : minute);
+                last = MeterEvidenceProcessor.Process(db, transaction,
+                    Observation(wh.ToString(CultureInfo.InvariantCulture), "Wh", stamp,
+                        "OCPP1.6", minute == 180 ? "StopTransaction" : "MeterValues", terminal: minute == 180));
+            }
+
+            Assert.Equal(MeterEvidenceOutcome.Accepted, last.Outcome);
+            Assert.Equal(76d, transaction.MeterStop);
+        }
+
         private static OCPPCoreContext CreateContext()
         {
             var options = new DbContextOptionsBuilder<OCPPCoreContext>()
@@ -579,8 +1040,10 @@ namespace OCPP.Core.Server.Tests
             string? offeredPowerRaw = null,
             string? offeredPowerUnit = null,
             int offeredPowerMultiplier = 0,
-            int unitMultiplier = 0) => new()
+            int unitMultiplier = 0,
+            double? fallbackMaximumPowerKw = null) => new()
         {
+            FallbackMaximumPowerKw = fallbackMaximumPowerKw,
             RawValue = raw,
             Unit = unit,
             UnitMultiplier = unitMultiplier,
