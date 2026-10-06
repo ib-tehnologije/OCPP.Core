@@ -117,6 +117,8 @@ Migration `AddMeterEvidenceSafeguard` adds nullable accepted-meter projection, p
 
 Migration `AddMeterEvidencePowerCandidateProvenance` adds nullable candidate offered-power raw value, unit, and position-matched multiplier-encoding columns to `MeterEvidenceAnomaly`. Deploy it after `AddMeterEvidenceSafeguard`. Financial recovery settlement now requires a non-blank accepted meter projection and timestamp before any provider capture; a structurally valid meter delta alone is insufficient.
 
+`MeterEvidence:FallbackMaximumPowerKw` (server, default `400`) is the physical capacity ceiling for chargers that do not report `Power.Offered`. Many chargers only sample energy, active power, and current by default, so without this fallback every positive-energy session from them would require review. Lower it only when every connected charger is known to stay below the value; set it to `0` to require offered-power evidence (strict mode). Check a charger's sampled measurands with the server API `GET /API/GetConfiguration/{chargePointId}/MeterValuesSampledData` (OCPP 1.6). No migration is involved.
+
 SQLite:
 
 - Used for local/test runs.

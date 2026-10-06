@@ -83,6 +83,8 @@ namespace OCPP.Core.Server
             services.Configure<Payments.ViesOptions>(Configuration.GetSection("Payments:Vies"));
             services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
             services.Configure<InvoiceIntegrationOptions>(Configuration.GetSection("Invoices"));
+            Payments.MeterEvidenceProcessor.ConfigureFallbackMaximumPowerKw(
+                Configuration.GetValue<double?>("MeterEvidence:FallbackMaximumPowerKw"));
             if (HasSqlServerHangfireStorage)
             {
                 services.AddHangfire((serviceProvider, config) =>

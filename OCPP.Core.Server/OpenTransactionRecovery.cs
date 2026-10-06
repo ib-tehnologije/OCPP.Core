@@ -102,6 +102,25 @@ namespace OCPP.Core.Server
                 ? "TransactionMeterStop"
                 : "MeterStart";
 
+            // Connector meters belong to the connector, not to this transaction. Once a later
+            // session started on the connector they describe that session, so settle from this
+            // transaction's own accepted projection instead.
+            bool laterSessionOnConnector = dbContext.Transactions
+                .AsNoTracking()
+                .Any(t => t.ChargePointId == chargePointId &&
+                          t.ConnectorId == connectorId &&
+                          t.TransactionId != transaction.TransactionId &&
+                          // Server-assigned ids order sessions even when the charger clock was reset.
+                          (t.TransactionId > transaction.TransactionId || t.StartTime > transaction.StartTime));
+            if (laterSessionOnConnector)
+            {
+                if (transaction.AcceptedMeterKwh.HasValue && transaction.AcceptedMeterKwh.Value > meterStop)
+                {
+                    return (transaction.AcceptedMeterKwh.Value, "AcceptedProjection");
+                }
+                return (meterStop, provenance);
+            }
+
             if (liveMeterKwh.HasValue && liveMeterKwh.Value >= meterStop)
             {
                 meterStop = liveMeterKwh.Value;

@@ -28,7 +28,7 @@ namespace OCPP.Core.Server
             if (energyGroups.Count == 0)
             {
                 if (!terminal) return null;
-                return MeterEvidenceProcessor.Process(DbContext, transaction, new MeterEvidenceObservation
+                return ProcessMeterObservation(transaction, new MeterEvidenceObservation
                 {
                     RawValue = string.Empty,
                     Unit = null,
@@ -44,7 +44,7 @@ namespace OCPP.Core.Server
             {
                 var observation = CreateObservation(energyGroups[index], fallbackTimestamp, source);
                 observation.IsTerminal = terminal && index == energyGroups.Count - 1;
-                result = MeterEvidenceProcessor.Process(DbContext, transaction, observation);
+                result = ProcessMeterObservation(transaction, observation);
             }
             return result;
         }

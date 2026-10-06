@@ -28,7 +28,7 @@ namespace OCPP.Core.Server
             if (energyGroups.Count == 0)
             {
                 if (!terminal) return null;
-                return MeterEvidenceProcessor.Process(DbContext, transaction, new MeterEvidenceObservation
+                return ProcessMeterObservation(transaction, new MeterEvidenceObservation
                 {
                     RawValue = string.Empty,
                     ObservedAtUtc = fallbackTimestamp.UtcDateTime,
@@ -43,7 +43,7 @@ namespace OCPP.Core.Server
             {
                 var observation = CreateObservation(energyGroups[index], fallbackTimestamp, source);
                 observation.IsTerminal = terminal && index == energyGroups.Count - 1;
-                result = MeterEvidenceProcessor.Process(DbContext, transaction, observation);
+                result = ProcessMeterObservation(transaction, observation);
             }
             return result;
         }
@@ -137,7 +137,7 @@ namespace OCPP.Core.Server
             DateTimeOffset timestamp,
             string source)
         {
-            return MeterEvidenceProcessor.Process(DbContext, transaction, new MeterEvidenceObservation
+            return ProcessMeterObservation(transaction, new MeterEvidenceObservation
             {
                 RawValue = rawMeterWh.ToString(CultureInfo.InvariantCulture),
                 Unit = "Wh",
@@ -153,7 +153,7 @@ namespace OCPP.Core.Server
             long rawMeterWh,
             DateTimeOffset timestamp)
         {
-            return MeterEvidenceProcessor.Process(DbContext, transaction, new MeterEvidenceObservation
+            return ProcessMeterObservation(transaction, new MeterEvidenceObservation
             {
                 RawValue = rawMeterWh.ToString(CultureInfo.InvariantCulture),
                 Unit = "Wh",

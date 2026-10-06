@@ -80,6 +80,19 @@ namespace OCPP.Core.Server
         /// <summary>
         /// Deserialize and validate JSON message (if schema file exists)
         /// </summary>
+        /// <summary>
+        /// Runs a meter observation through the shared evidence processor, applying the
+        /// configured fallback capacity ceiling (<c>MeterEvidence:FallbackMaximumPowerKw</c>).
+        /// </summary>
+        protected MeterEvidenceResult ProcessMeterObservation(Transaction transaction, MeterEvidenceObservation observation)
+        {
+            if (observation != null && !observation.FallbackMaximumPowerKw.HasValue)
+            {
+                observation.FallbackMaximumPowerKw = Configuration?.GetValue<double?>("MeterEvidence:FallbackMaximumPowerKw");
+            }
+            return MeterEvidenceProcessor.Process(DbContext, transaction, observation);
+        }
+
         protected T DeserializeMessage<T>(OCPPMessage msg)
         {
             string path = Assembly.GetExecutingAssembly().Location;

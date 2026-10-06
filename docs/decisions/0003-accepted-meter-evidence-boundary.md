@@ -22,6 +22,24 @@ An offered-power increase observed only with the candidate reading is not assume
 
 Historical completed captures without projection columns retain their immutable persisted invoice breakdown. New captures cannot create that legacy shape because the settlement guard runs before provider capture, and explicit financial recovery requires an `Accepted` or `FallbackAccepted` projection with a timestamp that matches the settlement meter.
 
+## Amendment: fallback capacity ceiling
+
+Many chargers never report `Power.Offered` with energy samples; their default sampled measurands are energy, active power, and current. Under the original decision every positive-energy session from such a charger stopped at `ReviewRequired`, which blocks automated settlement for whole fleets without identifying any actual meter fault.
+
+When no offered-power evidence has been accepted, the processor now uses a configured fallback ceiling (`MeterEvidence:FallbackMaximumPowerKw`, default `400` kW) as the capacity basis for the same elapsed-time check. The default is above any real charging power, so it accepts every physically achievable increase and still rejects readings no charger could deliver, such as a cumulative register that jumps by thousands of kWh within minutes. Accepted offered-power evidence keeps priority and tightens the bound, but charger-reported offered power is capped at the ceiling, so an inflated or mislabelled offered-power sample cannot justify or latch an impossible jump. A value of `0` restores the original strict behaviour.
+
+The elapsed time used for the bound is at least 60 seconds, because charger timestamps have whole-second resolution and are occasionally corrected by small steps; a same-second sample or a short clock correction must not make an ordinary increase look impossible.
+
+Because the bound grows with the time since the last accepted reading, a rejected jump could otherwise be admitted later if the register stays offset. After a non-terminal `PhysicallyImpossibleIncrease` rejection, readings at or above the lowest rejected level stay rejected until a reading on the accepted trajectory is accepted again; a terminal reading in that state requires review instead of settling silently. This lock is not applied when the charger clock stepped back since the last accepted reading (a `TimestampRegression` was recorded against it), because then the apparent jump is accumulated energy from the repeated clock period, for example a daylight-saving change on a charger that labels local time as UTC; the growing bound admits the following readings within minutes. A terminal reading that is itself impossible still settles from the last accepted projection, and replaying it reproduces that settlement.
+
+Related corrections:
+
+- Wh readings normalize by division, exactly like `MeterStart`, so a zero-energy stop equals its start instead of differing by a floating-point ulp. A decrease within reading precision keeps the previous accepted value.
+- The authorization boundary (`MaxEnergyKwh`) is compared with a floating-point epsilon only, both in the processor and in the settlement guard. Reading precision is not used there because some paths re-derive it from formatted kWh values.
+- With a fallback ceiling, a non-terminal increase that is plausible only under newly higher (ceiling-capped) offered power is accepted and raises the trusted capacity, instead of latching every later reading against the stale lower capacity. A terminal reading in that situation, and any such reading in strict mode, still requires review.
+- Connector-Available recovery ignores connector meters once a later session started on the same connector, and settles from the transaction's own accepted projection.
+- A physically plausible terminal reading above `MaxEnergyKwh` no longer requires review. It is typically the short overshoot after the server's own max-energy auto-stop, which every session reaching its limit produces. It settles at the authorized maximum (`MeterStart + MaxEnergyKwh`) as `FallbackAccepted` with reason `AuthorizationLimitExceeded`, and the actual reading is kept as anomaly evidence. This supersedes the earlier statement that a plausible authorization overshoot remains `ReviewRequired`.
+
 ## Consequences
 
 - Invalid terminal evidence cannot trigger automatic capture, invoice creation, or completion notification without a safe accepted fallback.
@@ -30,3 +48,4 @@ Historical completed captures without projection columns retain their immutable 
 - Replays reuse the same projection and do not duplicate anomaly rows in the normal retry path.
 - SQL Server deployments require migrations `AddMeterEvidenceSafeguard` and `AddMeterEvidencePowerCandidateProvenance`; SQLite test databases must be recreated through their existing `EnsureCreated()` workflow.
 - Operators must review sessions whose physical plausibility cannot be established from accepted evidence.
+- With the default fallback ceiling, missing offered-power evidence alone no longer requires review. Review remains for terminal evidence without a safe projection and for terminal readings that continue from a rejected impossible jump; authorization overshoot settles at the authorized maximum.

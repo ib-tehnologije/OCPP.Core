@@ -128,7 +128,9 @@ namespace OCPP.Core.Server.Payments
             var maxEnergyKwh = transaction.MaxEnergyKwh > 0
                 ? transaction.MaxEnergyKwh
                 : reservation?.MaxEnergyKwh ?? 0;
-            if (maxEnergyKwh > 0 && deliveredKwh > maxEnergyKwh)
+            // Floating-point subtraction of two kWh values can exceed an exactly reached
+            // limit by a few ulps; allow only that, never reading precision.
+            if (maxEnergyKwh > 0 && deliveredKwh > maxEnergyKwh + MeterEvidenceProcessor.AuthorizationLimitEpsilonKwh)
             {
                 return Blocked("Delivered energy exceeds the authorization boundary and requires review.");
             }
