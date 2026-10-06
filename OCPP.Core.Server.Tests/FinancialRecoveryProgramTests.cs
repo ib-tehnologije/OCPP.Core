@@ -111,7 +111,7 @@ namespace OCPP.Core.Server.Tests
             var rows = string.Join(
                 ",",
                 Enumerable.Range(1, 500).Select(index =>
-                    $"{{\"date\":\"2026-01-01\",\"number\":\"SYNTH-{index}\",\"orderReference\":\"OTHER-{index}\",\"totalAmount\":1.00,\"totalCurrency\":\"EUR\"}}"));
+                    $"{{\"date\":\"2026-01-01\",\"number\":\"SYNTH-{index}\",\"orderReference\":\"OTHER-{index}\",\"documentAmount\":1.00,\"documentCurrency\":\"EUR\"}}"));
             using var provider = new SyntheticInvoiceProviderServer(
                 $"{{\"response\":{{\"status\":\"ok\",\"result\":[{rows}]}}}}");
             using var scenario = _fixture.CreateScenario($$"""
@@ -142,8 +142,8 @@ namespace OCPP.Core.Server.Tests
             const string reservationId = "88888888-8888-8888-8888-888888888888";
             using var provider = new SyntheticInvoiceProviderServer(
                 "{\"response\":{\"status\":\"ok\",\"result\":[" +
-                "{\"date\":\"2026-01-01\",\"number\":\"SYNTH-OTHER\",\"orderReference\":\"EVSE-660\",\"reference\":\"STRIPE-OTHER\",\"totalAmount\":3.00,\"totalCurrency\":\"EUR\"}," +
-                "{\"date\":\"2026-01-01\",\"number\":\"SYNTH-0066\",\"orderReference\":\"EVSE-66\",\"reference\":\"STRIPE-88888888888888888888888888888888\",\"totalAmount\":3.00,\"totalCurrency\":\"EUR\"}" +
+                "{\"date\":\"2026-01-01\",\"number\":\"SYNTH-OTHER\",\"orderReference\":\"EVSE-660\",\"reference\":\"00 0001-261\",\"documentAmount\":3.00,\"documentCurrency\":\"EUR\"}," +
+                "{\"date\":\"2026-01-01\",\"number\":\"SYNTH-0066\",\"orderReference\":\"EVSE-66\",\"reference\":\"00 0002-261\",\"documentAmount\":3.00,\"documentCurrency\":\"EUR\"}" +
                 "]}}");
             using var scenario = _fixture.CreateScenario($$"""
                 {

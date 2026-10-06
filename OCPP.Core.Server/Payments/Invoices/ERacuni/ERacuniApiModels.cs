@@ -58,13 +58,6 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
     public sealed class ERacuniSalesInvoiceLookupCriteria
     {
         public string OrderReference { get; set; }
-
-        /// <summary>
-        /// Optional secondary identifier sent as SalesInvoice.reference. A row carrying it counts as a
-        /// candidate even when its orderReference differs, so a changed orderReference cannot prove absence.
-        /// </summary>
-        public string Reference { get; set; }
-
         public decimal? TotalAmount { get; set; }
         public string Currency { get; set; }
     }
@@ -224,8 +217,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         TruncatedResponse,
         UnrecognizedRow,
         RowOutsideDateWindow,
-        AmountMismatch,
-        IdentifierMismatch
+        AmountMismatch
     }
 
     public enum ERacuniInvoiceLookupResponseShape

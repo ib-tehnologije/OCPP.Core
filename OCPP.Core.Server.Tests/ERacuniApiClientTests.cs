@@ -121,10 +121,10 @@ namespace OCPP.Core.Server.Tests
         public void LookupSalesInvoice_ReturnsFoundForOneOrderReferenceAndAmountMatchInProviderEnvelope()
         {
             var handler = CreateHandler(Envelope(
-                InvoiceRow("EVSE-1010", number: "2026-0041", totalAmount: 12.34m, reference: "STRIPE-pi_1230"),
-                InvoiceRow("EVSE-101", number: "2026-0042", reference: "STRIPE-pi_123"),
+                InvoiceRow("EVSE-1010", number: "2026-0041", totalAmount: 12.34m, reference: "00 8511-261"),
+                InvoiceRow("EVSE-101", number: "2026-0042", reference: "00 8512-261"),
                 InvoiceRow(null, number: "2026-0043", reference: string.Empty),
-                InvoiceRow("EVSE-10", number: "2026-0044", totalAmount: 12.34m, reference: "STRIPE-pi_12")));
+                InvoiceRow("EVSE-10", number: "2026-0044", totalAmount: 12.34m, reference: "00 8513-261")));
             var client = CreateClient(handler);
 
             var result = client.LookupSalesInvoice(CreateLookupRequest(), CreateCriteria());
@@ -242,11 +242,11 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Theory]
-        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"totalAmount\":12.35,\"totalCurrency\":\"EUR\"}")]
-        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"totalCurrency\":\"EUR\"}")]
-        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"totalAmount\":\"12,34\",\"totalCurrency\":\"EUR\"}")]
-        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"totalAmount\":12.34,\"totalCurrency\":\"USD\"}")]
-        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"totalAmount\":12.34}")]
+        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"documentAmount\":12.35,\"documentCurrency\":\"EUR\"}")]
+        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"documentCurrency\":\"EUR\"}")]
+        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"documentAmount\":\"12,34\",\"documentCurrency\":\"EUR\"}")]
+        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"documentAmount\":12.34,\"documentCurrency\":\"USD\"}")]
+        [InlineData("{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"documentAmount\":12.34}")]
         public void LookupSalesInvoice_ReturnsUnknownWhenOrderReferenceMatchHasDifferentTotal(string row)
         {
             var client = CreateClient(CreateHandler($"{{\"response\":{{\"status\":\"ok\",\"result\":[{row}]}}}}"));
@@ -257,48 +257,27 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(ERacuniInvoiceLookupFailureCategory.AmountMismatch, result.Diagnostics.FailureCategory);
         }
 
-        [Theory]
-        [InlineData("EVSE-999", "STRIPE-pi_123")]
-        [InlineData("EVSE-101", "STRIPE-pi_other")]
-        [InlineData(null, " stripe-PI_123 ")]
-        public void LookupSalesInvoice_ReturnsUnknownWhenCandidateIdentifiersContradict(
-            string? orderReference,
-            string reference)
-        {
-            var client = CreateClient(CreateHandler(Envelope(
-                InvoiceRow("OTHER-1", reference: "STRIPE-pi_other"),
-                InvoiceRow(orderReference, number: "2026-0042", reference: reference))));
-
-            var result = client.LookupSalesInvoice(CreateLookupRequest(), CreateCriteria());
-
-            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
-            Assert.Equal(ERacuniInvoiceLookupFailureCategory.IdentifierMismatch, result.Diagnostics.FailureCategory);
-        }
-
         [Fact]
-        public void LookupSalesInvoice_ReturnsUnknownWhenIdentifiersMatchDifferentRows()
+        public void LookupSalesInvoice_IgnoresProviderGeneratedPaymentReference()
         {
             var client = CreateClient(CreateHandler(Envelope(
-                InvoiceRow("EVSE-101", number: "2026-0042"),
-                InvoiceRow("EVSE-999", number: "2026-0043", reference: "STRIPE-pi_123"))));
-
-            var result = client.LookupSalesInvoice(CreateLookupRequest(), CreateCriteria());
-
-            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
-            Assert.Equal(ERacuniInvoiceLookupFailureCategory.DuplicateMatch, result.Diagnostics.FailureCategory);
-        }
-
-        [Theory]
-        [InlineData(null)]
-        [InlineData("")]
-        public void LookupSalesInvoice_DoesNotRequireSecondaryReferenceOnOrderReferenceMatch(string? reference)
-        {
-            var client = CreateClient(CreateHandler(Envelope(
-                InvoiceRow("EVSE-101", number: "2026-0042", reference: reference))));
+                InvoiceRow("EVSE-101", number: "8512/EVC/261", reference: "00 8512-261"))));
 
             var result = client.LookupSalesInvoice(CreateLookupRequest(), CreateCriteria());
 
             Assert.Equal(ERacuniInvoiceLookupOutcome.Found, result.Outcome);
+        }
+
+        [Fact]
+        public void LookupSalesInvoice_PrefersDocumentAmountOverDocumentedTotalAmount()
+        {
+            var client = CreateClient(CreateHandler(
+                "{\"response\":{\"status\":\"ok\",\"result\":[{\"date\":\"2026-01-02\",\"number\":\"2026-0042\",\"orderReference\":\"EVSE-101\",\"documentAmount\":99.00,\"documentCurrency\":\"EUR\",\"totalAmount\":12.34,\"totalCurrency\":\"EUR\"}]}}"));
+
+            var result = client.LookupSalesInvoice(CreateLookupRequest(), CreateCriteria());
+
+            Assert.Equal(ERacuniInvoiceLookupOutcome.Unknown, result.Outcome);
+            Assert.Equal(ERacuniInvoiceLookupFailureCategory.AmountMismatch, result.Diagnostics.FailureCategory);
         }
 
         [Theory]
@@ -560,7 +539,6 @@ namespace OCPP.Core.Server.Tests
         private static ERacuniSalesInvoiceLookupCriteria CreateCriteria() => new()
         {
             OrderReference = "EVSE-101",
-            Reference = "STRIPE-pi_123",
             TotalAmount = 12.34m,
             Currency = "EUR"
         };
@@ -576,8 +554,8 @@ namespace OCPP.Core.Server.Tests
             {
                 ["date"] = date,
                 ["orderReference"] = orderReference == null ? JValue.CreateNull() : new JValue(orderReference),
-                ["totalAmount"] = totalAmount,
-                ["totalCurrency"] = "EUR",
+                ["documentAmount"] = totalAmount,
+                ["documentCurrency"] = "EUR",
                 ["buyerName"] = "Synthetic Buyer"
             };
             if (number != null)

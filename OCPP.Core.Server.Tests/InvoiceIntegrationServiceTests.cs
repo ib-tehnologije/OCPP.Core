@@ -699,7 +699,6 @@ namespace OCPP.Core.Server.Tests
             Assert.DoesNotContain("apiTransactionId", serializedParameters, StringComparison.OrdinalIgnoreCase);
             var criteria = apiClient.LastLookupCriteria!;
             Assert.Equal("EVSE-101", criteria.OrderReference);
-            Assert.Equal("STRIPE-pi_123", criteria.Reference);
             Assert.Equal(12.35m, criteria.TotalAmount);
             Assert.Equal("EUR", criteria.Currency);
             Assert.Equal("ProviderUnknown", Assert.Single(dbContext.InvoiceSubmissionLogs).Status);
@@ -897,8 +896,7 @@ namespace OCPP.Core.Server.Tests
                         {
                             Date = "2026-01-02",
                             DocumentCurrency = draft.Currency,
-                            OrderReference = $"EVSE-{draft.TransactionId}",
-                            Reference = $"STRIPE-{draft.StripePaymentIntentId}"
+                            OrderReference = $"EVSE-{draft.TransactionId}"
                         }
                     }
                 };

@@ -608,7 +608,6 @@ namespace OCPP.Core.Server.Payments.Invoices
             return new ERacuniSalesInvoiceLookupCriteria
             {
                 OrderReference = salesInvoice?.OrderReference,
-                Reference = salesInvoice?.Reference,
                 TotalAmount = draft == null
                     ? null
                     : Math.Round(draft.TotalAmount, 2, MidpointRounding.AwayFromZero),

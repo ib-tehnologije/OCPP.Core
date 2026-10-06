@@ -171,7 +171,6 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             }
 
             var expectedOrderReference = criteria.OrderReference.Trim();
-            var expectedReference = string.IsNullOrWhiteSpace(criteria.Reference) ? null : criteria.Reference.Trim();
             var candidates = new List<JObject>();
             foreach (var row in rows)
             {
@@ -197,9 +196,7 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
                         responseShape);
                 }
 
-                // Either identifier makes a row a candidate. Absence is proven only when neither matches.
-                if (IdentifierEquals(invoice, "orderReference", expectedOrderReference) ||
-                    (expectedReference != null && IdentifierEquals(invoice, "reference", expectedReference)))
+                if (IdentifierEquals(invoice, "orderReference", expectedOrderReference))
                 {
                     candidates.Add(invoice);
                 }
@@ -225,25 +222,16 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
             }
 
             var match = candidates[0];
-            var matchReference = ReadString(match, "reference");
-            if (!IdentifierEquals(match, "orderReference", expectedOrderReference) ||
-                (expectedReference != null &&
-                 !string.IsNullOrWhiteSpace(matchReference) &&
-                 !IdentifierEquals(match, "reference", expectedReference)))
-            {
-                return Unknown(
-                    "Provider lookup candidate has contradicting order reference or reference identifiers.",
-                    requestAttempted,
-                    ERacuniInvoiceLookupFailureCategory.IdentifierMismatch,
-                    status,
-                    responseShape);
-            }
-
-            if (!TryReadAmount(match.GetValue("totalAmount", StringComparison.OrdinalIgnoreCase), out var totalAmount) ||
+            // SalesInvoiceList rows carry the gross total as documentAmount/documentCurrency; the
+            // documented totalAmount/totalCurrency names are accepted only when those are absent.
+            var amountToken = match.GetValue("documentAmount", StringComparison.OrdinalIgnoreCase) ??
+                              match.GetValue("totalAmount", StringComparison.OrdinalIgnoreCase);
+            var currency = ReadString(match, "documentCurrency") ?? ReadString(match, "totalCurrency");
+            if (!TryReadAmount(amountToken, out var totalAmount) ||
                 totalAmount != criteria.TotalAmount.Value ||
                 (!string.IsNullOrWhiteSpace(criteria.Currency) &&
                  !string.Equals(
-                     ReadString(match, "totalCurrency")?.Trim(),
+                     currency?.Trim(),
                      criteria.Currency.Trim(),
                      StringComparison.OrdinalIgnoreCase)))
             {
