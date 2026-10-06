@@ -928,8 +928,14 @@
 
             statEnergy.textContent = Number.isFinite(sessionEnergy) ? fmtNumber(sessionEnergy, 1) : "-";
             const pricePerKwh = parseAmount(data?.pricePerKwh);
+            const nightPricePerKwh = parseAmount(data?.nightPricePerKwh);
+            const nightEnergyKwh = Number.isFinite(sessionEnergy) && nightPricePerKwh !== null
+                ? Math.min(Math.max(Number(data?.transactionNightEnergyKwh) || 0, 0), sessionEnergy)
+                : 0;
+            // Night energy is allocated server-side from accepted meter readings; the rest is billed at the day price.
             const liveEnergyCost = Number.isFinite(sessionEnergy) && pricePerKwh !== null
-                ? roundAmount(sessionEnergy * pricePerKwh)
+                ? roundAmount(roundAmount((sessionEnergy - nightEnergyKwh) * pricePerKwh) +
+                    (nightEnergyKwh > 0 ? roundAmount(nightEnergyKwh * nightPricePerKwh) : 0))
                 : null;
             const persistedEnergyCost = parseAmount(data?.transactionEnergyCost);
             const preferLiveEnergyCost = state === "charging" || state === "waitingForDisconnect";
@@ -957,7 +963,11 @@
 
             const idleFeeMinutes = data?.liveIdleFeeMinutes != null ? data.liveIdleFeeMinutes : data?.transactionIdleFeeMinutes;
             bdEnergy.textContent = energyCost !== null ? fmtAmount(energyCost, currency) : "-";
-            bdEnergySub.textContent = Number.isFinite(sessionEnergy) ? `${fmtNumber(sessionEnergy, 1)} kWh` : "-";
+            bdEnergySub.textContent = Number.isFinite(sessionEnergy)
+                ? (nightEnergyKwh > 0.05
+                    ? `${fmtNumber(sessionEnergy, 1)} kWh · ${t("status.label.nightEnergy")} ${fmtNumber(nightEnergyKwh, 1)} kWh`
+                    : `${fmtNumber(sessionEnergy, 1)} kWh`)
+                : "-";
             bdSessionFee.textContent = sessionFeeAmount !== null ? fmtAmount(sessionFeeAmount, currency) : "-";
             bdIdleFee.textContent = idleFeeAmount !== null ? fmtAmount(idleFeeAmount, currency) : "-";
             bdIdleSub.textContent = idlePausedByWindow

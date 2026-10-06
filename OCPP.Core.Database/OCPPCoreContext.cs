@@ -86,6 +86,7 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.OwnerCommissionFixedPerKwh).HasColumnType("decimal(18,4)");
 
                 entity.Property(e => e.ConnectorUsageFeePerMinute).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.NightPricePerKwh).HasColumnType("decimal(18,4)");
 
                 entity.Property(e => e.UsageFeeAfterChargingEnds).HasColumnType("bit");
                 entity.Property(e => e.Latitude).HasColumnType("float");
@@ -403,6 +404,8 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.OwnerPayoutTotal).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.UsageFeeAmount).HasColumnType("decimal(18,4)");
                 entity.Property(e => e.IdleUsageFeeAmount).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.NightEnergyCost).HasColumnType("decimal(18,4)");
+                entity.Property(e => e.NightTariffTimeZoneId).HasMaxLength(100);
 
                 entity.HasOne(d => d.ChargePoint)
                     .WithMany(p => p.Transactions)
@@ -443,6 +446,10 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.PricePerKwh)
                     .HasColumnType("decimal(18,4)");
+                entity.Property(e => e.NightPricePerKwh)
+                    .HasColumnType("decimal(18,4)");
+                entity.Property(e => e.NightTariffTimeZoneId)
+                    .HasMaxLength(100);
                 entity.Property(e => e.UserSessionFee)
                     .HasColumnType("decimal(18,4)");
                 entity.Property(e => e.OwnerSessionFee)

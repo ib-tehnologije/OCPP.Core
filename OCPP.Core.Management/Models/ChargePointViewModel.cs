@@ -65,6 +65,17 @@ namespace OCPP.Core.Management.Models
         [Range(0, 10000)]
         public decimal? PricePerKwh { get; set; }
 
+        public bool NightTariffEnabled { get; set; }
+
+        [Range(0, 10000)]
+        public decimal? NightPricePerKwh { get; set; }
+
+        [RegularExpression(@"^([01]\d|2[0-3]):[0-5]\d$")]
+        public string NightTariffStart { get; set; } = "22:00";
+
+        [RegularExpression(@"^([01]\d|2[0-3]):[0-5]\d$")]
+        public string NightTariffEnd { get; set; } = "07:00";
+
         [Range(0, 10000)]
         public decimal? UserSessionFee { get; set; }
 

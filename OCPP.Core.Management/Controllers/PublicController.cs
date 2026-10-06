@@ -290,6 +290,12 @@ namespace OCPP.Core.Management.Controllers
             return vm;
         }
 
+        private static string FormatMinuteOfDay(int minute)
+        {
+            minute = ((minute % 1440) + 1440) % 1440;
+            return $"{minute / 60:00}:{minute % 60:00}";
+        }
+
         private async Task<PublicStartViewModel> BuildViewModelAsync(string chargePointId, int? requestedConnectorId)
         {
             var model = new PublicStartViewModel
@@ -320,6 +326,11 @@ namespace OCPP.Core.Management.Controllers
             model.PublicDisplayCode = NormalizePublicDisplayCode(chargePoint.PublicDisplayCode);
             model.LocationDescription = chargePoint.LocationDescription;
             model.PricePerKwh = chargePoint.PricePerKwh;
+            model.NightTariffEnabled = chargePoint.NightTariffEnabled &&
+                                       chargePoint.NightTariffStartMinute != chargePoint.NightTariffEndMinute;
+            model.NightPricePerKwh = chargePoint.NightPricePerKwh;
+            model.NightTariffStart = FormatMinuteOfDay(chargePoint.NightTariffStartMinute);
+            model.NightTariffEnd = FormatMinuteOfDay(chargePoint.NightTariffEndMinute);
             model.UserSessionFee = chargePoint.UserSessionFee;
             model.MaxSessionKwh = chargePoint.MaxSessionKwh;
             model.StartUsageFeeAfterMinutes = chargePoint.StartUsageFeeAfterMinutes;
@@ -330,7 +341,8 @@ namespace OCPP.Core.Management.Controllers
             model.MaxUsageFeeBillableMinutes = Math.Max(0, model.MaxUsageFeeMinutes - model.StartUsageFeeAfterMinutes);
 
             // Approximate max preauthorization similar to backend: energy cap + idle cap + session fee
-            decimal energyCap = (decimal)model.MaxSessionKwh * model.PricePerKwh;
+            decimal energyCap = (decimal)model.MaxSessionKwh *
+                                Math.Max(model.PricePerKwh, model.NightTariffEnabled ? model.NightPricePerKwh : 0m);
             decimal idleCap = model.ConnectorUsageFeePerMinute * model.MaxUsageFeeBillableMinutes;
             model.EstimatedMaxHold = Math.Max(0, energyCap) + Math.Max(0, idleCap) + Math.Max(0, model.UserSessionFee);
 

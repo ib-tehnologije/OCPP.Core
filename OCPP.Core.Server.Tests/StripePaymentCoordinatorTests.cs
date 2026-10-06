@@ -1314,6 +1314,118 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CreateCheckoutSession_NightTariff_FreezesWindowAndHoldsAtTheHigherPrice()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-NIGHT",
+                MaxSessionKwh = 10,
+                PricePerKwh = 0.25m,
+                NightTariffEnabled = true,
+                NightPricePerKwh = 0.40m,
+                NightTariffStartMinute = 22 * 60,
+                NightTariffEndMinute = 7 * 60
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_night", Url = "https://checkout/session/night", PaymentIntentId = "pi_night" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            var result = coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-NIGHT",
+                ChargeTagId = "TAG-NIGHT",
+                ConnectorId = 1
+            });
+
+            Assert.Equal(0.25m, result.Reservation.PricePerKwh);
+            Assert.Equal(0.40m, result.Reservation.NightPricePerKwh);
+            Assert.Equal(22 * 60, result.Reservation.NightTariffStartMinute);
+            Assert.Equal(7 * 60, result.Reservation.NightTariffEndMinute);
+            Assert.Equal("Europe/Zagreb", result.Reservation.NightTariffTimeZoneId);
+            // 10 kWh at the higher (night) price = 400 cents.
+            Assert.Equal(400, result.Reservation.MaxAmountCents);
+        }
+
+        [Fact]
+        public void CreateCheckoutSession_NightTariffDisabled_KeepsSinglePrice()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-DAY",
+                MaxSessionKwh = 10,
+                PricePerKwh = 0.35m,
+                NightTariffEnabled = false,
+                NightPricePerKwh = 0.10m
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_day", Url = "https://checkout/session/day", PaymentIntentId = "pi_day" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            var result = coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-DAY",
+                ChargeTagId = "TAG-DAY",
+                ConnectorId = 1
+            });
+
+            Assert.Null(result.Reservation.NightPricePerKwh);
+            Assert.Null(result.Reservation.NightTariffStartMinute);
+            Assert.Equal(350, result.Reservation.MaxAmountCents);
+        }
+
+        [Fact]
+        public void MarkTransactionStarted_CopiesReservationNightWindowToTransaction()
+        {
+            using var context = CreateContext();
+            var startUtc = new DateTime(2026, 7, 20, 19, 0, 0, DateTimeKind.Utc);
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-NIGHT",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-NIGHT",
+                OcppIdTag = "TAG-NIGHT",
+                Status = PaymentReservationStatus.Authorized,
+                PricePerKwh = 0.40m,
+                NightPricePerKwh = 0.25m,
+                NightTariffStartMinute = 22 * 60,
+                NightTariffEndMinute = 7 * 60,
+                NightTariffTimeZoneId = "Europe/Zagreb",
+                Currency = "eur",
+                CreatedAtUtc = startUtc.AddMinutes(-2),
+                UpdatedAtUtc = startUtc.AddMinutes(-2)
+            });
+            context.Transactions.Add(new Transaction
+            {
+                TransactionId = 3001,
+                ChargePointId = "CP-NIGHT",
+                ConnectorId = 1,
+                StartTagId = "TAG-NIGHT",
+                StartTime = startUtc,
+                MeterStart = 10
+            });
+            context.SaveChanges();
+
+            var coordinator = CreateCoordinator(context, new FakeSessionService(), new FakePaymentIntentService());
+            coordinator.MarkTransactionStarted(context, "CP-NIGHT", 1, "TAG-NIGHT", 3001);
+
+            var transaction = context.Transactions.Single(t => t.TransactionId == 3001);
+            Assert.Equal(22 * 60, transaction.NightTariffStartMinute);
+            Assert.Equal(7 * 60, transaction.NightTariffEndMinute);
+            Assert.Equal("Europe/Zagreb", transaction.NightTariffTimeZoneId);
+        }
+
+        [Fact]
         public void MarkTransactionStarted_RelinksActiveReservationAndClosesSupersededTransaction()
         {
             using var context = CreateContext();

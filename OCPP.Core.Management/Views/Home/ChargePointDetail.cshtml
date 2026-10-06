@@ -202,6 +202,51 @@
             <div class="row">
                 <div class="col-sm-2 align-self-center">
                     <div class="form-group">
+                        <label class="inline-label" for="NightTariffEnabled">@Localizer["NightTariffEnabledLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input type="checkbox" class="form-check-input" id="NightTariffEnabled" name="NightTariffEnabled" value="true" @(Model.NightTariffEnabled ? "checked" : "") />
+                        <input type="hidden" name="NightTariffEnabled" value="false" />
+                        <small class="form-text text-muted">@Localizer["NightTariffEnabledHint"]</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="NightPricePerKwh">@Localizer["NightPricePerKwhLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <input class="form-control" id="NightPricePerKwh" name="NightPricePerKwh" type="number" step="0.0001" min="0" value="@Model.NightPricePerKwh" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="NightTariffStart">@Localizer["NightTariffWindowLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-3">
+                    <div class="form-group">
+                        <div class="d-flex align-items-center gap-2">
+                            <input class="form-control" id="NightTariffStart" name="NightTariffStart" type="time" value="@Model.NightTariffStart" />
+                            <span>–</span>
+                            <input class="form-control" id="NightTariffEnd" name="NightTariffEnd" type="time" value="@Model.NightTariffEnd" aria-label="@Localizer["NightTariffWindowLabel"]" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
                         <label class="inline-label" for="UserSessionFee">@Localizer["UserSessionFeeLabel"]</label>
                     </div>
                 </div>

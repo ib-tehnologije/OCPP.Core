@@ -288,4 +288,16 @@
   <data name="ManageCharger" xml:space="preserve">
     <value>Manage charger</value>
   </data>
+  <data name="NightTariffEnabledLabel" xml:space="preserve">
+    <value>Night tariff</value>
+  </data>
+  <data name="NightTariffEnabledHint" xml:space="preserve">
+    <value>Energy inside the window is billed at the night price, also for sessions already charging. Applies to sessions started after saving.</value>
+  </data>
+  <data name="NightPricePerKwhLabel" xml:space="preserve">
+    <value>Night price per kWh</value>
+  </data>
+  <data name="NightTariffWindowLabel" xml:space="preserve">
+    <value>Night window (local time)</value>
+  </data>
 </root>

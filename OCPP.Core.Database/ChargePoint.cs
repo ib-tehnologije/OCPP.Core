@@ -50,6 +50,10 @@ namespace OCPP.Core.Database
         public int MaxUsageFeeMinutes { get; set; }
         public decimal ConnectorUsageFeePerMinute { get; set; }
         public bool UsageFeeAfterChargingEnds { get; set; }
+        public bool NightTariffEnabled { get; set; }
+        public decimal NightPricePerKwh { get; set; }
+        public int NightTariffStartMinute { get; set; } = 22 * 60;
+        public int NightTariffEndMinute { get; set; } = 7 * 60;
         public double? Latitude { get; set; }
         public double? Longitude { get; set; }
         public string LocationDescription { get; set; }

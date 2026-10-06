@@ -17,6 +17,7 @@ namespace OCPP.Core.Server.Payments
                 EnableReservationProfile = fallback?.EnableReservationProfile ?? configuration?.GetValue<bool?>("Payments:EnableReservationProfile") ?? false,
                 IdleFeeExcludedWindow = fallback?.IdleFeeExcludedWindow ?? configuration?.GetValue<string>("Payments:IdleFeeExcludedWindow"),
                 IdleFeeExcludedTimeZoneId = fallback?.IdleFeeExcludedTimeZoneId ?? configuration?.GetValue<string>("Payments:IdleFeeExcludedTimeZoneId") ?? DefaultIdleFeeExcludedTimeZoneId,
+                NightTariffTimeZoneId = fallback?.NightTariffTimeZoneId ?? configuration?.GetValue<string>("Payments:NightTariffTimeZoneId"),
                 IdleAutoStopMinutes = fallback?.IdleAutoStopMinutes ?? configuration?.GetValue<int?>("Payments:IdleAutoStopMinutes") ?? 0,
                 MinimumSessionFeeKwh = fallback?.MinimumSessionFeeKwh ?? configuration?.GetValue<decimal?>("Payments:MinimumSessionFeeKwh") ?? 1.0m,
                 MinimumChargeAmountCents = fallback?.MinimumChargeAmountCents ?? configuration?.GetValue<long?>("Payments:MinimumChargeAmountCents") ?? 50
@@ -59,6 +60,11 @@ namespace OCPP.Core.Server.Payments
             if (string.IsNullOrWhiteSpace(options.IdleFeeExcludedTimeZoneId))
             {
                 options.IdleFeeExcludedTimeZoneId = DefaultIdleFeeExcludedTimeZoneId;
+            }
+
+            if (string.IsNullOrWhiteSpace(options.NightTariffTimeZoneId))
+            {
+                options.NightTariffTimeZoneId = options.IdleFeeExcludedTimeZoneId;
             }
 
             return options;

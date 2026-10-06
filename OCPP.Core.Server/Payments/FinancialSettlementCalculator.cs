@@ -29,9 +29,19 @@ namespace OCPP.Core.Server.Payments
                 hasValidDeliveredEnergy,
                 flowOptions,
                 out var noChargeReason);
-            var energyCostCents = shouldNoCharge
+            var nightTariff = NightTariffWindow.ForReservation(reservation) != null &&
+                              NightTariffWindow.ForTransaction(transaction) != null;
+            var nightEnergyKwh = nightTariff && double.IsFinite(transaction.NightEnergyKwh)
+                ? Math.Clamp(transaction.NightEnergyKwh, 0d, actualEnergyKwh)
+                : 0d;
+            var dayEnergyKwh = Math.Max(0d, actualEnergyKwh - nightEnergyKwh);
+            var nightEnergyCostCents = shouldNoCharge || nightEnergyKwh <= 0
                 ? 0L
-                : CalculateAmountInCents(actualEnergyKwh, reservation.PricePerKwh);
+                : CalculateAmountInCents(nightEnergyKwh, reservation.NightPricePerKwh.GetValueOrDefault());
+            var dayEnergyCostCents = shouldNoCharge
+                ? 0L
+                : CalculateAmountInCents(dayEnergyKwh, reservation.PricePerKwh);
+            var energyCostCents = checked(dayEnergyCostCents + nightEnergyCostCents);
             var configuredSessionFeeCents = CalculateFlatAmountInCents(reservation.UserSessionFee);
             string sessionFeeSuppressionReason = null;
             var shouldChargeSessionFee = !shouldNoCharge && ShouldChargeSessionFee(
@@ -74,6 +84,8 @@ namespace OCPP.Core.Server.Payments
                 SessionFeeSuppressionReason = sessionFeeSuppressionReason,
                 ActualEnergyKwh = actualEnergyKwh,
                 EnergyCostCents = energyCostCents,
+                NightEnergyKwh = nightEnergyKwh,
+                NightEnergyCostCents = nightEnergyCostCents,
                 SessionFeeCents = sessionFeeCents,
                 UsageFeeMinutes = usageFeeMinutes,
                 UsageFeeCents = usageFeeCents,
@@ -194,6 +206,8 @@ namespace OCPP.Core.Server.Payments
         public string SessionFeeSuppressionReason { get; init; }
         public double ActualEnergyKwh { get; init; }
         public long EnergyCostCents { get; init; }
+        public double NightEnergyKwh { get; init; }
+        public long NightEnergyCostCents { get; init; }
         public long SessionFeeCents { get; init; }
         public int UsageFeeMinutes { get; init; }
         public long UsageFeeCents { get; init; }

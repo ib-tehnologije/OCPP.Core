@@ -149,6 +149,19 @@ Important edge cases:
 - A `ReviewRequired` or `PermanentFailure` authorization-release state is terminal for automated retries and requires operator investigation; the application never captures or invoices as part of release reconciliation.
 - Server API and UI status pages must be validated together after payment changes.
 
+### Night energy tariff
+
+Each station can enable a night energy price in the operator portal (station detail: night tariff switch, night price per kWh, night window start and end in local time, default 22:00–07:00).
+
+- **Snapshot at checkout.** The reservation freezes the night price, window and time zone. The time zone comes from `Payments:NightTariffTimeZoneId`, falling back to `Payments:IdleFeeExcludedTimeZoneId`, then `Europe/Zagreb`. Later station edits never reprice a paid session. Stations without the switch keep single-price behaviour.
+- **Window semantics.** The window is half-open in local civil time: the start minute is night, the end minute is day. Daylight-saving nights therefore last 8 or 10 elapsed hours. An unknown time zone disables the discount instead of guessing.
+- **Energy allocation.** When the transaction starts, the window is copied onto it. Every *accepted* meter reading then adds the night share of its increase to `Transaction.NightEnergyKwh`, assuming even power between two readings (chargers typically report about once a minute). Rejected or review-required readings never move the split. A session that charges across 22:00 or 07:00 switches price at the boundary without restarting.
+- **Settlement.** Day and night energy are priced and rounded separately, and night energy is clamped to the delivered total. The below-minimum-energy no-charge rule, session fee and idle fees are unchanged. The Stripe hold covers the maximum energy at the higher of the two prices.
+- **Invoices.** The e-računi draft gets separate day (`Energy`) and night (`EnergyNight`) lines that sum exactly to the energy cost. `EnergyNight` uses `Invoices:ERacuni:LineItems:EnergyNight` when configured, otherwise the `Energy` product.
+- **Customer view.** The public start page shows the night price and window. The status page shows the live split and includes `nightPricePerKwh`, `nightTariffStart`, `nightTariffEnd`, `transactionNightEnergyKwh` and `transactionNightEnergyCost` in the status JSON.
+
+Design record: `docs/superpowers/specs/2026-09-30-night-energy-tariff-design.md`.
+
 ## Invoice and Email Integrations
 
 Company invoice requests support a confirmed reservation-bound buyer snapshot. The public start page collects and validates the complete buyer details before creating Stripe Checkout, so a session cannot finish before the invoice intent and buyer snapshot exist. Croatian companies retain strict OIB checksum validation. Foreign companies provide an ISO two-letter country, legal name and address, billing email, a required tax/VAT/company identifier, and an optional legal registration number. A foreign identifier marked as a VAT registration must carry the selected country's VIES prefix and match the European Commission's published structure; presentation spaces, dots, and hyphens are removed and the canonical uppercase value is used downstream. Greece maps `GR` to the `EL` VAT prefix, while Northern Ireland maps `GB` to `XI`. Foreign identifiers not marked as VAT registrations retain their existing free-form behavior.

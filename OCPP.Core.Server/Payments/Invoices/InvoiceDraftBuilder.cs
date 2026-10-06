@@ -74,15 +74,39 @@ namespace OCPP.Core.Server.Payments.Invoices
                 return;
             }
 
-            draft.Lines.Add(new InvoiceDraftLine
+            var nightKwh = reservation.NightPricePerKwh.HasValue
+                ? Math.Clamp(transaction.NightEnergyKwh, 0d, transaction.EnergyKwh)
+                : 0d;
+            var nightCost = nightKwh > 0 ? Math.Clamp(transaction.NightEnergyCost, 0m, transaction.EnergyCost) : 0m;
+            var dayKwh = transaction.EnergyKwh - nightKwh;
+            var dayCost = transaction.EnergyCost - nightCost;
+
+            // Day and night lines are priced and rounded separately at settlement, so they sum exactly to EnergyCost.
+            if (dayKwh > 0 && dayCost > 0)
             {
-                Type = "Energy",
-                Description = "Charging energy",
-                Quantity = Convert.ToDecimal(transaction.EnergyKwh, CultureInfo.InvariantCulture),
-                UnitCode = "kWh",
-                UnitPrice = reservation.PricePerKwh,
-                LineAmount = transaction.EnergyCost
-            });
+                draft.Lines.Add(new InvoiceDraftLine
+                {
+                    Type = "Energy",
+                    Description = nightKwh > 0 ? "Charging energy (day tariff)" : "Charging energy",
+                    Quantity = Convert.ToDecimal(dayKwh, CultureInfo.InvariantCulture),
+                    UnitCode = "kWh",
+                    UnitPrice = reservation.PricePerKwh,
+                    LineAmount = dayCost
+                });
+            }
+
+            if (nightKwh > 0 && nightCost > 0)
+            {
+                draft.Lines.Add(new InvoiceDraftLine
+                {
+                    Type = "EnergyNight",
+                    Description = "Charging energy (night tariff)",
+                    Quantity = Convert.ToDecimal(nightKwh, CultureInfo.InvariantCulture),
+                    UnitCode = "kWh",
+                    UnitPrice = reservation.NightPricePerKwh.Value,
+                    LineAmount = nightCost
+                });
+            }
         }
 
         private static void AddSessionFeeLine(InvoiceDraft draft, ChargePaymentReservation reservation, Transaction transaction)

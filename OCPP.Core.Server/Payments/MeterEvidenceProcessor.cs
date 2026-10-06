@@ -190,6 +190,7 @@ namespace OCPP.Core.Server.Payments
                     MeterEvidenceReason.PhysicalCapacityUnavailable);
             }
 
+            AccumulateNightEnergy(transaction, normalizedMeterKwh, observedAtUtc);
             transaction.AcceptedMeterKwh = normalizedMeterKwh;
             transaction.AcceptedMeterAtUtc = observedAtUtc;
             transaction.AcceptedMeterToleranceKwh = meterToleranceKwh;
@@ -298,6 +299,31 @@ namespace OCPP.Core.Server.Payments
                 Reason = reason,
                 NormalizedMeterKwh = normalizedMeterKwh
             };
+        }
+
+        /// <summary>
+        /// Adds the night-window share of an accepted meter increase to the transaction's night energy.
+        /// Only accepted evidence moves this total, so rejected or review-required readings never affect pricing.
+        /// </summary>
+        private static void AccumulateNightEnergy(Transaction transaction, double acceptedMeterKwh, DateTime observedAtUtc)
+        {
+            var window = NightTariffWindow.ForTransaction(transaction);
+            if (window == null ||
+                !transaction.AcceptedMeterKwh.HasValue ||
+                !transaction.AcceptedMeterAtUtc.HasValue)
+            {
+                return;
+            }
+
+            var increaseKwh = acceptedMeterKwh - transaction.AcceptedMeterKwh.Value;
+            if (!double.IsFinite(increaseKwh) || increaseKwh <= 0)
+            {
+                return;
+            }
+
+            transaction.NightEnergyKwh += increaseKwh * window.NightShare(
+                NormalizeUtc(transaction.AcceptedMeterAtUtc.Value),
+                observedAtUtc);
         }
 
         private static void SeedAcceptedProjection(Transaction transaction)
