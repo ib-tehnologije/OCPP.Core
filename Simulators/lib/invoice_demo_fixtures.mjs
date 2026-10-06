@@ -172,7 +172,11 @@ INSERT INTO ChargePoint (
   UsageFeeAfterChargingEnds,
   Latitude,
   Longitude,
-  LocationDescription
+  LocationDescription,
+  NightTariffEnabled,
+  NightPricePerKwh,
+  NightTariffStartMinute,
+  NightTariffEndMinute
 ) VALUES (
   ${sqlQuote(chargePointId)},
   'Local invoice demo',
@@ -191,7 +195,11 @@ INSERT INTO ChargePoint (
   1,
   0.0,
   0.0,
-  'Local-only test location'
+  'Local-only test location',
+  0,
+  0.00,
+  1320,
+  420
 );
 
 INSERT INTO ConnectorStatus (

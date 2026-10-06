@@ -75,7 +75,11 @@ INSERT INTO ChargePoint (
   UsageFeeAfterChargingEnds,
   Latitude,
   Longitude,
-  LocationDescription
+  LocationDescription,
+  NightTariffEnabled,
+  NightPricePerKwh,
+  NightTariffStartMinute,
+  NightTariffEndMinute
 ) VALUES
 (
   ${sqlQuote(cp16Id)},
@@ -95,7 +99,11 @@ INSERT INTO ChargePoint (
   1,
   44.8666,
   13.8496,
-  'Simulator 1.6 location'
+  'Simulator 1.6 location',
+  0,
+  0.00,
+  1320,
+  420
 ),
 (
   ${sqlQuote(cp20Id)},
@@ -115,7 +123,11 @@ INSERT INTO ChargePoint (
   1,
   44.8680,
   13.8510,
-  'Simulator 2.0.1 location'
+  'Simulator 2.0.1 location',
+  0,
+  0.00,
+  1320,
+  420
 ),
 (
   ${sqlQuote(cp21Id)},
@@ -135,7 +147,11 @@ INSERT INTO ChargePoint (
   1,
   44.8694,
   13.8524,
-  'Simulator 2.1 location'
+  'Simulator 2.1 location',
+  0,
+  0.00,
+  1320,
+  420
 ),
 (
   ${sqlQuote(invoiceCp16Id)},
@@ -155,7 +171,11 @@ INSERT INTO ChargePoint (
   1,
   44.8650,
   13.8480,
-  'Invoice validation 1.6 location'
+  'Invoice validation 1.6 location',
+  0,
+  0.00,
+  1320,
+  420
 ),
 (
   ${sqlQuote(invoiceCp20Id)},
@@ -175,7 +195,11 @@ INSERT INTO ChargePoint (
   1,
   44.8640,
   13.8470,
-  'Invoice validation 2.0.1 location'
+  'Invoice validation 2.0.1 location',
+  0,
+  0.00,
+  1320,
+  420
 ),
 (
   'MAP-MIXED-01',
@@ -195,7 +219,11 @@ INSERT INTO ChargePoint (
   1,
   44.8708,
   13.8538,
-  'Mixed status validation station'
+  'Mixed status validation station',
+  0,
+  0.00,
+  1320,
+  420
 ),
 (
   'MAP-OFFLINE-01',
@@ -215,7 +243,11 @@ INSERT INTO ChargePoint (
   1,
   44.8722,
   13.8552,
-  'Offline status validation station'
+  'Offline status validation station',
+  0,
+  0.00,
+  1320,
+  420
 ),
 (
   'map-case-01',
@@ -235,7 +267,11 @@ INSERT INTO ChargePoint (
   1,
   44.8736,
   13.8566,
-  'Case-insensitive status validation station'
+  'Case-insensitive status validation station',
+  0,
+  0.00,
+  1320,
+  420
 );
 DELETE FROM ConnectorStatus WHERE ChargePointId IN (${sqlQuote(cp16Id)}, ${sqlQuote(cp20Id)}, ${sqlQuote(cp21Id)}, ${sqlQuote(invoiceCp16Id)}, ${sqlQuote(invoiceCp20Id)}, 'MAP-MIXED-01', 'MAP-OFFLINE-01', 'map-case-01', 'MAP-CASE-01');
 INSERT INTO ConnectorStatus (ChargePointId, ConnectorId, ConnectorName, LastStatus, LastStatusTime) VALUES
