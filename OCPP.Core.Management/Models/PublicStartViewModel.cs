@@ -30,6 +30,10 @@ namespace OCPP.Core.Management.Models
         public bool BuyerDataConfirmed { get; set; }
         public double MaxSessionKwh { get; set; }
         public decimal PricePerKwh { get; set; }
+        public bool NightTariffEnabled { get; set; }
+        public decimal NightPricePerKwh { get; set; }
+        public string NightTariffStart { get; set; }
+        public string NightTariffEnd { get; set; }
         public decimal UserSessionFee { get; set; }
         public int StartUsageFeeAfterMinutes { get; set; }
         public int MaxUsageFeeMinutes { get; set; }

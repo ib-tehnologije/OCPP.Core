@@ -327,6 +327,8 @@
       "start.tapToSwitch": "Dodirnite za promjenu",
       "start.connectorSelected": "Odabrani priključak",
       "start.energy": "Energija",
+      "start.nightEnergy": "Noćna tarifa",
+      "start.nightWindowNote": "Od {from} do {to} energija se naplaćuje po noćnoj cijeni, i za punjenje koje je već u tijeku.",
       "start.free": "Besplatno",
       "start.energyUnit": "energija",
       "start.sessionFee": "Naknada sesije",
@@ -368,6 +370,8 @@
       "start.tapToSwitch": "Tap to switch",
       "start.connectorSelected": "Selected connector",
       "start.energy": "Energy",
+      "start.nightEnergy": "Night rate",
+      "start.nightWindowNote": "From {from} to {to} energy is charged at the night rate, including sessions already charging.",
       "start.free": "Free",
       "start.energyUnit": "energy",
       "start.sessionFee": "Session fee",
@@ -409,6 +413,8 @@
       "start.tapToSwitch": "Tapnite za zamenjavo",
       "start.connectorSelected": "Izbrani priključek",
       "start.energy": "Energija",
+      "start.nightEnergy": "Nočna tarifa",
+      "start.nightWindowNote": "Od {from} do {to} se energija zaračuna po nočni ceni, tudi za polnjenje, ki že poteka.",
       "start.free": "Brezplačno",
       "start.energyUnit": "energija",
       "start.sessionFee": "Pristojbina seje",
@@ -450,6 +456,8 @@
       "start.tapToSwitch": "Tocca per cambiare",
       "start.connectorSelected": "Connettore selezionato",
       "start.energy": "Energia",
+      "start.nightEnergy": "Tariffa notturna",
+      "start.nightWindowNote": "Dalle {from} alle {to} l'energia è addebitata alla tariffa notturna, anche per le ricariche già in corso.",
       "start.free": "Gratis",
       "start.energyUnit": "energia",
       "start.sessionFee": "Costo sessione",
@@ -491,6 +499,8 @@
       "start.tapToSwitch": "Zum Wechseln tippen",
       "start.connectorSelected": "Ausgewählter Anschluss",
       "start.energy": "Energie",
+      "start.nightEnergy": "Nachttarif",
+      "start.nightWindowNote": "Von {from} bis {to} wird Energie zum Nachttarif berechnet, auch bei bereits laufenden Ladevorgängen.",
       "start.free": "Kostenlos",
       "start.energyUnit": "Energie",
       "start.sessionFee": "Sitzungsgebühr",
@@ -532,6 +542,8 @@
       "start.tapToSwitch": "Touchez pour changer",
       "start.connectorSelected": "Connecteur sélectionné",
       "start.energy": "Énergie",
+      "start.nightEnergy": "Tarif de nuit",
+      "start.nightWindowNote": "De {from} à {to}, l'énergie est facturée au tarif de nuit, y compris pour les recharges déjà en cours.",
       "start.free": "Gratuit",
       "start.energyUnit": "énergie",
       "start.sessionFee": "Frais de session",
@@ -586,6 +598,7 @@
       "status.section.costSummary": "Sažetak troškova",
       "status.section.invoice": "Račun",
       "status.label.energy": "Energija",
+      "status.label.nightEnergy": "od toga noću",
       "status.label.sessionFee": "Naknada sesije",
       "status.label.idleFee": "Idle naknada",
       "status.label.chargingStarted": "Punjenje započelo",
@@ -688,6 +701,7 @@
       "status.section.costSummary": "Cost summary",
       "status.section.invoice": "Invoice",
       "status.label.energy": "Energy",
+      "status.label.nightEnergy": "of which at night",
       "status.label.sessionFee": "Session fee",
       "status.label.idleFee": "Idle fee",
       "status.label.chargingStarted": "Charging started",
@@ -790,6 +804,7 @@
       "status.section.costSummary": "Povzetek stroškov",
       "status.section.invoice": "Račun",
       "status.label.energy": "Energija",
+      "status.label.nightEnergy": "od tega ponoči",
       "status.label.sessionFee": "Pristojbina seje",
       "status.label.idleFee": "Pristojbina mirovanja",
       "status.label.chargingStarted": "Polnjenje začeto",
@@ -892,6 +907,7 @@
       "status.section.costSummary": "Riepilogo costi",
       "status.section.invoice": "Fattura",
       "status.label.energy": "Energia",
+      "status.label.nightEnergy": "di cui di notte",
       "status.label.sessionFee": "Costo sessione",
       "status.label.idleFee": "Costo inattività",
       "status.label.chargingStarted": "Ricarica iniziata",
@@ -994,6 +1010,7 @@
       "status.section.costSummary": "Kostenzusammenfassung",
       "status.section.invoice": "Rechnung",
       "status.label.energy": "Energie",
+      "status.label.nightEnergy": "davon nachts",
       "status.label.sessionFee": "Sitzungsgebühr",
       "status.label.idleFee": "Standgebühr",
       "status.label.chargingStarted": "Laden gestartet",
@@ -1096,6 +1113,7 @@
       "status.section.costSummary": "Résumé des coûts",
       "status.section.invoice": "Facture",
       "status.label.energy": "Énergie",
+      "status.label.nightEnergy": "dont la nuit",
       "status.label.sessionFee": "Frais de session",
       "status.label.idleFee": "Frais d'inactivité",
       "status.label.chargingStarted": "Recharge démarrée",
@@ -1515,6 +1533,16 @@
       if (value) {
         element.textContent = value;
       }
+    });
+
+    document.querySelectorAll("[data-i18n-format]").forEach((element) => {
+      let values = {};
+      try {
+        values = JSON.parse(element.getAttribute("data-i18n-values") || "{}");
+      } catch {
+        values = {};
+      }
+      element.textContent = formatTextFor(lang, element.getAttribute("data-i18n-format"), values);
     });
 
     document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {

@@ -136,6 +136,14 @@ namespace OCPP.Core.Server.Payments
 
             double maxEnergyKwh = chargePoint.MaxSessionKwh;
             decimal pricePerKwh = chargePoint.PricePerKwh;
+            var flowOptions = ResolveFlowOptions(dbContext);
+            var nightTariffTimeZoneId = string.IsNullOrWhiteSpace(flowOptions.NightTariffTimeZoneId)
+                ? NightTariffWindow.DefaultTimeZoneId
+                : flowOptions.NightTariffTimeZoneId.Trim();
+            var nightTariff = chargePoint.NightTariffEnabled && chargePoint.NightPricePerKwh >= 0
+                ? NightTariffWindow.TryCreate(chargePoint.NightTariffStartMinute, chargePoint.NightTariffEndMinute, nightTariffTimeZoneId)
+                : null;
+            decimal? nightPricePerKwh = nightTariff != null ? chargePoint.NightPricePerKwh : null;
             decimal userSessionFee = chargePoint.UserSessionFee;
             decimal ownerSessionFee = chargePoint.OwnerSessionFee;
             decimal ownerCommissionPercent = chargePoint.OwnerCommissionPercent;
@@ -156,7 +164,8 @@ namespace OCPP.Core.Server.Payments
 
             EnsureChargeTagExists(dbContext, normalizedTag);
 
-            var maxEnergyCents = CalculateAmountInCents(maxEnergyKwh, pricePerKwh);
+            // The hold must cover the whole session at the higher of the two energy prices.
+            var maxEnergyCents = CalculateAmountInCents(maxEnergyKwh, Math.Max(pricePerKwh, nightPricePerKwh ?? 0m));
             var maxUsageFeeCents = CalculateUsageFeeInCents(
                 Math.Max(0, maxUsageFeeMinutes - startUsageFeeAfterMinutes),
                 usageFeePerMinute);
@@ -188,6 +197,10 @@ namespace OCPP.Core.Server.Payments
                 ChargeTagId = normalizedTag,
                 MaxEnergyKwh = maxEnergyKwh,
                 PricePerKwh = pricePerKwh,
+                NightPricePerKwh = nightPricePerKwh,
+                NightTariffStartMinute = nightTariff?.StartMinute,
+                NightTariffEndMinute = nightTariff?.EndMinute,
+                NightTariffTimeZoneId = nightTariff != null ? nightTariffTimeZoneId : null,
                 UserSessionFee = userSessionFee,
                 OwnerSessionFee = ownerSessionFee,
                 OwnerCommissionPercent = ownerCommissionPercent,
@@ -1302,7 +1315,7 @@ namespace OCPP.Core.Server.Payments
 
             var transaction = dbContext.Transactions.Find(transactionId);
             CloseSupersededTransactions(dbContext, reservation, transaction);
-            RelinkReservationToTransaction(reservation, transactionId, transaction?.StartTime);
+            RelinkReservationToTransaction(reservation, transactionId, transaction);
             reservation.Status = PaymentReservationStatus.Charging;
             reservation.UpdatedAtUtc = _utcNow();
             dbContext.SaveChanges();
@@ -1428,7 +1441,7 @@ namespace OCPP.Core.Server.Payments
             if (recoveryAssessment == null)
             {
                 CloseSupersededTransactions(dbContext, reservation, transaction);
-                RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction.StartTime);
+                RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction);
                 reservation.StopTransactionAtUtc ??= transaction.StopTime ?? now;
                 reservation.UpdatedAtUtc = now;
             }
@@ -1689,7 +1702,7 @@ namespace OCPP.Core.Server.Payments
 
                 dbContext.SaveChanges();
 
-                PersistTransactionBreakdown(dbContext, transaction, reservation, actualEnergy, energyCostCents, usageFeeMinutes, usageFeeCents, sessionFeeCents, amountToCapture);
+                PersistTransactionBreakdown(dbContext, transaction, reservation, actualEnergy, energyCostCents, settlement.NightEnergyKwh, settlement.NightEnergyCostCents, usageFeeMinutes, usageFeeCents, sessionFeeCents, amountToCapture);
                 if (string.Equals(reservation.Status, PaymentReservationStatus.Completed, StringComparison.OrdinalIgnoreCase) &&
                     amountToCapture > 0)
                 {
@@ -2461,7 +2474,7 @@ namespace OCPP.Core.Server.Payments
 
             if (reservation != null)
             {
-                RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction.StartTime);
+                RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction);
                 reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
             }
@@ -2504,11 +2517,24 @@ namespace OCPP.Core.Server.Payments
         private void RelinkReservationToTransaction(
             ChargePaymentReservation reservation,
             int transactionId,
-            DateTime? transactionStartTimeUtc)
+            Transaction transaction)
         {
             if (reservation == null || transactionId <= 0)
             {
                 return;
+            }
+
+            var transactionStartTimeUtc = transaction?.StartTime;
+            if (transaction != null &&
+                transaction.TransactionId == transactionId &&
+                !transaction.NightTariffStartMinute.HasValue &&
+                NightTariffWindow.ForReservation(reservation) != null)
+            {
+                // Freeze the reservation's night window on the transaction so accepted meter readings
+                // can be split into day and night energy as they arrive.
+                transaction.NightTariffStartMinute = reservation.NightTariffStartMinute;
+                transaction.NightTariffEndMinute = reservation.NightTariffEndMinute;
+                transaction.NightTariffTimeZoneId = reservation.NightTariffTimeZoneId;
             }
 
             reservation.TransactionId = transactionId;
@@ -2745,6 +2771,8 @@ namespace OCPP.Core.Server.Payments
             ChargePaymentReservation reservation,
             double energyKwh,
             long energyCostCents,
+            double nightEnergyKwh,
+            long nightEnergyCostCents,
             int usageFeeMinutes,
             long usageFeeCents,
             long sessionFeeCents,
@@ -2774,6 +2802,8 @@ namespace OCPP.Core.Server.Payments
             bool usageAfterChargingEnds = reservation?.UsageFeeAnchorMinutes == 1;
             transaction.EnergyKwh = energyKwh;
             transaction.EnergyCost = energyCost;
+            transaction.NightEnergyKwh = nightEnergyKwh;
+            transaction.NightEnergyCost = ConvertToDecimal(nightEnergyCostCents);
             transaction.UsageFeeMinutes = usageFeeMinutes;
             transaction.UsageFeeAmount = usageFee;
             transaction.UserSessionFeeAmount = userSessionFee;

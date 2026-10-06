@@ -2855,6 +2855,13 @@ namespace OCPP.Core.Server
                 maxEnergyKwh = effectiveMaxEnergyKwh,
                 transactionMaxEnergyKwh = transaction?.MaxEnergyKwh,
                 pricePerKwh = reservation.PricePerKwh,
+                nightPricePerKwh = reservation.NightPricePerKwh,
+                nightTariffStart = reservation.NightTariffStartMinute.HasValue
+                    ? NightTariffWindow.FormatMinute(reservation.NightTariffStartMinute.Value)
+                    : null,
+                nightTariffEnd = reservation.NightTariffEndMinute.HasValue
+                    ? NightTariffWindow.FormatMinute(reservation.NightTariffEndMinute.Value)
+                    : null,
                 userSessionFee = reservation.UserSessionFee,
                 usageFeePerMinute = reservation.UsageFeePerMinute,
                 startUsageFeeAfterMinutes = reservation.StartUsageFeeAfterMinutes,
@@ -2910,6 +2917,8 @@ namespace OCPP.Core.Server
                 transactionMeterStop = transaction?.MeterStop,
                 transactionEnergyKwh = transaction?.EnergyKwh,
                 transactionEnergyCost = transaction?.EnergyCost,
+                transactionNightEnergyKwh = transaction?.NightEnergyKwh,
+                transactionNightEnergyCost = transaction?.NightEnergyCost,
                 transactionUsageFeeMinutes = transaction?.UsageFeeMinutes,
                 transactionUsageFeeAmount = transaction?.UsageFeeAmount,
                 transactionIdleFeeMinutes = transaction?.IdleUsageFeeMinutes,

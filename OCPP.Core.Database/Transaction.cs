@@ -50,6 +50,13 @@ namespace OCPP.Core.Database
         public double MaxEnergyKwh { get; set; }
         public double EnergyKwh { get; set; }
         public decimal EnergyCost { get; set; }
+        // Night tariff window copied from the paid reservation; NightEnergyKwh accumulates accepted energy
+        // inside the window and NightEnergyCost is the night part of EnergyCost after settlement.
+        public int? NightTariffStartMinute { get; set; }
+        public int? NightTariffEndMinute { get; set; }
+        public string NightTariffTimeZoneId { get; set; }
+        public double NightEnergyKwh { get; set; }
+        public decimal NightEnergyCost { get; set; }
         public int UsageFeeMinutes { get; set; }
         public decimal UsageFeeAmount { get; set; }
         public decimal UserSessionFeeAmount { get; set; }

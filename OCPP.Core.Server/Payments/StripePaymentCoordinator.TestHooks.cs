@@ -43,6 +43,8 @@ namespace OCPP.Core.Server.Payments
                 reservation,
                 energyKwh,
                 energyCostCents,
+                transaction?.NightEnergyKwh ?? 0d,
+                0L,
                 usageFeeMinutes,
                 usageFeeCents,
                 sessionFeeCents,

@@ -1,6 +1,6 @@
 # Selected-station night energy tariff — design recommendation
 
-> Status: design only (30 September 2026). Not implemented, not enabled and no rates or stations approved. Implementation requires the business decisions listed below and a separate maintainer decision to build it.
+> Status: implemented as a per-station configurable tariff (see `docs/features.md`, "Night energy tariff"). Stations, prices and window are operator settings; the boundary allocation is the linear time split described below. Customer wording is pending business approval.
 
 Source and detailed evidence: [research](2026-09-30-night-energy-tariff-research.md). Reviewed OCPP.Core `cb9f098cf86ab07d269d9b8a251e3965e95db9c5` and the operator's private deployment configuration, read-only. This is a design, not an approved tariff or implementation.
 

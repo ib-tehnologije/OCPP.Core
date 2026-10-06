@@ -183,6 +183,16 @@
                             }
                         </div>
                     </div>
+                    @if (Model.NightTariffEnabled)
+                    {
+                        <div class="tile">
+                            <div class="label" data-i18n="start.nightEnergy">Night rate</div>
+                            <div class="value">
+                                <span>@Model.NightPricePerKwh.ToString("0.##")</span><span class="unit">@Model.CurrencySymbol/kWh</span>
+                            </div>
+                            <div class="sub" data-i18n-format="start.nightWindowNote" data-i18n-values='@System.Text.Json.JsonSerializer.Serialize(new { from = Model.NightTariffStart, to = Model.NightTariffEnd })'>@Model.NightTariffStart–@Model.NightTariffEnd</div>
+                        </div>
+                    }
                     <div class="tile">
                         <div class="label" data-i18n="start.sessionFee">Session fee</div>
                         <div class="value">

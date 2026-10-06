@@ -288,4 +288,16 @@
   <data name="ManageCharger" xml:space="preserve">
     <value>Ladestation steuern</value>
   </data>
+  <data name="NightTariffEnabledLabel" xml:space="preserve">
+    <value>Nachttarif</value>
+  </data>
+  <data name="NightTariffEnabledHint" xml:space="preserve">
+    <value>Energie im Zeitfenster wird zum Nachtpreis berechnet, auch bei laufenden Ladevorgängen. Gilt für Ladevorgänge, die nach dem Speichern beginnen.</value>
+  </data>
+  <data name="NightPricePerKwhLabel" xml:space="preserve">
+    <value>Nachtpreis pro kWh</value>
+  </data>
+  <data name="NightTariffWindowLabel" xml:space="preserve">
+    <value>Nachtzeitfenster (Ortszeit)</value>
+  </data>
 </root>

@@ -149,6 +149,7 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
                             newChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
                             newChargePoint.PricePerKwh = cpvm.PricePerKwh ?? 0m;
+                            ApplyNightTariff(newChargePoint, cpvm);
                             newChargePoint.UserSessionFee = cpvm.UserSessionFee ?? 0m;
                             newChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee ?? 0m;
                             newChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent ?? 0m;
@@ -242,6 +243,7 @@ namespace OCPP.Core.Management.Controllers
                         currentChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
                         currentChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
                         currentChargePoint.PricePerKwh = cpvm.PricePerKwh ?? 0m;
+                        ApplyNightTariff(currentChargePoint, cpvm);
                         currentChargePoint.UserSessionFee = cpvm.UserSessionFee ?? 0m;
                         currentChargePoint.OwnerSessionFee = cpvm.OwnerSessionFee ?? 0m;
                         currentChargePoint.OwnerCommissionPercent = cpvm.OwnerCommissionPercent ?? 0m;
@@ -283,6 +285,10 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.ClientCertThumb = currentChargePoint.ClientCertThumb;
                         cpvm.FreeChargingEnabled = currentChargePoint.FreeChargingEnabled;
                         cpvm.PricePerKwh = currentChargePoint.PricePerKwh;
+                        cpvm.NightTariffEnabled = currentChargePoint.NightTariffEnabled;
+                        cpvm.NightPricePerKwh = currentChargePoint.NightPricePerKwh;
+                        cpvm.NightTariffStart = FormatMinuteOfDay(currentChargePoint.NightTariffStartMinute);
+                        cpvm.NightTariffEnd = FormatMinuteOfDay(currentChargePoint.NightTariffEndMinute);
                         cpvm.UserSessionFee = currentChargePoint.UserSessionFee;
                         cpvm.OwnerSessionFee = currentChargePoint.OwnerSessionFee;
                         cpvm.OwnerCommissionPercent = currentChargePoint.OwnerCommissionPercent;
@@ -315,6 +321,40 @@ namespace OCPP.Core.Management.Controllers
             }
         }
 
+        private static void ApplyNightTariff(ChargePoint chargePoint, ChargePointViewModel cpvm)
+        {
+            chargePoint.NightTariffEnabled = cpvm.NightTariffEnabled;
+            chargePoint.NightPricePerKwh = cpvm.NightPricePerKwh ?? 0m;
+            if (TryParseMinuteOfDay(cpvm.NightTariffStart, out var start))
+            {
+                chargePoint.NightTariffStartMinute = start;
+            }
+
+            if (TryParseMinuteOfDay(cpvm.NightTariffEnd, out var end))
+            {
+                chargePoint.NightTariffEndMinute = end;
+            }
+        }
+
+        private static bool TryParseMinuteOfDay(string value, out int minute)
+        {
+            minute = 0;
+            if (string.IsNullOrWhiteSpace(value) ||
+                !TimeSpan.TryParseExact(value.Trim(), @"hh\:mm", System.Globalization.CultureInfo.InvariantCulture, out var time))
+            {
+                return false;
+            }
+
+            minute = (int)time.TotalMinutes;
+            return minute >= 0 && minute < 24 * 60;
+        }
+
+        private static string FormatMinuteOfDay(int minute)
+        {
+            minute = ((minute % 1440) + 1440) % 1440;
+            return $"{minute / 60:00}:{minute % 60:00}";
+        }
+
         private string ValidatePricing(ChargePointViewModel cpvm)
         {
             if (cpvm == null) return "Invalid charge point data.";
@@ -331,6 +371,30 @@ namespace OCPP.Core.Management.Controllers
             if (!hasEnergyPrice && !hasUsageFee && !hasSessionFee)
             {
                 return "Add a price per kWh, connector usage fee, or user session fee, or enable free charging. Owner commission fields are optional.";
+            }
+
+            if (cpvm.NightTariffEnabled)
+            {
+                if (!TryParseMinuteOfDay(cpvm.NightTariffStart, out var nightStart) ||
+                    !TryParseMinuteOfDay(cpvm.NightTariffEnd, out var nightEnd))
+                {
+                    return "Night tariff start and end must be times in HH:mm format.";
+                }
+
+                if (nightStart == nightEnd)
+                {
+                    return "Night tariff start and end must differ.";
+                }
+
+                if (cpvm.NightPricePerKwh is null or < 0m)
+                {
+                    return "Set a night price per kWh (0 or more) or disable the night tariff.";
+                }
+
+                if (!hasEnergyPrice)
+                {
+                    return "The night tariff needs a regular price per kWh for the rest of the day.";
+                }
             }
 
             double maxSessionKwh = cpvm.MaxSessionKwh ?? 0d;

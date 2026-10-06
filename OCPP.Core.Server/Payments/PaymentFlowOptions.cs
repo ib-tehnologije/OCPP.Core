@@ -25,6 +25,12 @@ namespace OCPP.Core.Server.Payments
         public string IdleFeeExcludedTimeZoneId { get; set; }
 
         /// <summary>
+        /// Time zone used for per-station night energy tariffs (IANA on Linux, Windows id on Windows).
+        /// Defaults to Europe/Zagreb when empty. Each paid session freezes the value at checkout.
+        /// </summary>
+        public string NightTariffTimeZoneId { get; set; }
+
+        /// <summary>
         /// Optional automatic stop threshold for sessions that remain in SuspendedEV.
         /// Set to 0 to disable.
         /// </summary>

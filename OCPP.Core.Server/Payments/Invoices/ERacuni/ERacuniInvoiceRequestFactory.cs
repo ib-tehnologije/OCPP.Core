@@ -113,7 +113,11 @@ namespace OCPP.Core.Server.Payments.Invoices.ERacuni
         {
             if (line == null) throw new ArgumentNullException(nameof(line));
 
-            var lineOptions = ResolveLineOptions(line.Type, options);
+            // Night energy uses its own product when configured, otherwise the regular energy product.
+            var lineOptions = ResolveLineOptions(line.Type, options) ??
+                              (string.Equals(line.Type, "EnergyNight", StringComparison.OrdinalIgnoreCase)
+                                  ? ResolveLineOptions("Energy", options)
+                                  : null);
             var productCode = NullIfWhiteSpace(lineOptions?.ProductCode);
             var productCatalogueCode = NullIfWhiteSpace(lineOptions?.ProductCatalogueCode);
             var usesCatalogProduct = !string.IsNullOrWhiteSpace(productCode) || !string.IsNullOrWhiteSpace(productCatalogueCode);

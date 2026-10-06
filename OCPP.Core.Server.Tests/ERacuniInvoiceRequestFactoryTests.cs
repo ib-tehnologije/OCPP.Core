@@ -311,6 +311,54 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("Charging energy", item.Description);
         }
 
+        [Fact]
+        public void BuildCreateSalesInvoiceRequest_NightEnergyLine_FallsBackToEnergyProduct()
+        {
+            var factory = CreateFactory();
+            var draft = new InvoiceDraft
+            {
+                ReservationId = Guid.NewGuid(),
+                TransactionId = 43,
+                InvoiceKind = "Retail",
+                IssueDateUtc = new DateTime(2026, 7, 21, 6, 0, 0, DateTimeKind.Utc),
+                Currency = "EUR",
+                Lines = new List<InvoiceDraftLine>
+                {
+                    new() { Type = "Energy", Description = "Charging energy (day tariff)", Quantity = 1m, UnitCode = "kWh", UnitPrice = 0.40m, LineAmount = 0.40m },
+                    new() { Type = "EnergyNight", Description = "Charging energy (night tariff)", Quantity = 2m, UnitCode = "kWh", UnitPrice = 0.25m, LineAmount = 0.50m }
+                }
+            };
+
+            var parameters = Assert.IsType<ERacuniSalesInvoiceCreateParameters>(factory.BuildCreateSalesInvoiceRequest(draft).Parameters);
+
+            Assert.Equal(2, parameters.SalesInvoice.Items.Count);
+            Assert.All(parameters.SalesInvoice.Items, item => Assert.Equal("EV-ENERGY", item.ProductCode));
+            Assert.Equal(0.25m, parameters.SalesInvoice.Items[1].Price ?? parameters.SalesInvoice.Items[1].NetPrice);
+        }
+
+        [Fact]
+        public void BuildCreateSalesInvoiceRequest_NightEnergyLine_UsesItsOwnProductWhenConfigured()
+        {
+            var factory = CreateFactory(options =>
+                options.LineItems["EnergyNight"] = new ERacuniLineItemOptions { ProductCode = "EV-ENERGY-NIGHT", Unit = "kWh", VatPercentage = 13m });
+            var draft = new InvoiceDraft
+            {
+                ReservationId = Guid.NewGuid(),
+                TransactionId = 44,
+                InvoiceKind = "Retail",
+                IssueDateUtc = new DateTime(2026, 7, 21, 6, 0, 0, DateTimeKind.Utc),
+                Currency = "EUR",
+                Lines = new List<InvoiceDraftLine>
+                {
+                    new() { Type = "EnergyNight", Description = "Charging energy (night tariff)", Quantity = 2m, UnitCode = "kWh", UnitPrice = 0.25m, LineAmount = 0.50m }
+                }
+            };
+
+            var parameters = Assert.IsType<ERacuniSalesInvoiceCreateParameters>(factory.BuildCreateSalesInvoiceRequest(draft).Parameters);
+
+            Assert.Equal("EV-ENERGY-NIGHT", Assert.Single(parameters.SalesInvoice.Items).ProductCode);
+        }
+
         private static ERacuniInvoiceRequestFactory CreateFactory(Action<ERacuniInvoiceOptions>? configure = null)
         {
             var eracuni = new ERacuniInvoiceOptions

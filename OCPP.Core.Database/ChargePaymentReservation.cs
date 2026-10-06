@@ -31,6 +31,11 @@ namespace OCPP.Core.Database
         public string ChargeTagId { get; set; }
         public double MaxEnergyKwh { get; set; }
         public decimal PricePerKwh { get; set; }
+        // Night energy tariff frozen at checkout; NightPricePerKwh is null when the station has no night tariff.
+        public decimal? NightPricePerKwh { get; set; }
+        public int? NightTariffStartMinute { get; set; }
+        public int? NightTariffEndMinute { get; set; }
+        public string NightTariffTimeZoneId { get; set; }
         public decimal UserSessionFee { get; set; }
         public decimal OwnerSessionFee { get; set; }
         public decimal OwnerCommissionPercent { get; set; }
