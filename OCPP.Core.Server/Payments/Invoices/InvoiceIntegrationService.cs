@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
@@ -236,8 +237,9 @@ namespace OCPP.Core.Server.Payments.Invoices
 
                 if (existing != null)
                 {
-                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
-                        BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    var lookup = _eracuniApiClient.LookupSalesInvoice(
+                        BuildLookupRequest(request),
+                        BuildLookupCriteria(request, draft));
                     providerLookupCompleted = true;
                     ApplyProviderLookupEvidence(auditLog, lookup);
                     if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
@@ -265,8 +267,9 @@ namespace OCPP.Core.Server.Payments.Invoices
 
                 if (requireProviderPreflight && !providerLookupCompleted)
                 {
-                    var lookup = _eracuniApiClient.LookupSalesInvoiceByApiTransactionId(
-                        BuildLookupRequest(request, auditLog.ApiTransactionId));
+                    var lookup = _eracuniApiClient.LookupSalesInvoice(
+                        BuildLookupRequest(request),
+                        BuildLookupCriteria(request, draft));
                     ApplyProviderLookupEvidence(auditLog, lookup);
                     if (lookup.Outcome == ERacuniInvoiceLookupOutcome.Found)
                     {
@@ -562,10 +565,27 @@ namespace OCPP.Core.Server.Payments.Invoices
             auditLog.SubmissionLeaseExpiresAtUtc = null;
         }
 
-        private static ERacuniApiRequestEnvelope BuildLookupRequest(
-            ERacuniApiRequestEnvelope createRequest,
-            string apiTransactionId)
+        // SalesInvoiceList cannot filter by apiTransactionId. Ask for the documented invoice-date
+        // window around the date this lineage sends on create, then match rows locally.
+        private ERacuniApiRequestEnvelope BuildLookupRequest(ERacuniApiRequestEnvelope createRequest)
         {
+            var salesInvoice = (createRequest.Parameters as ERacuniSalesInvoiceCreateParameters)?.SalesInvoice;
+            var eracuni = _options.ERacuni ?? new ERacuniInvoiceOptions();
+            string dateFrom = null;
+            string dateTo = null;
+            if (IsValidLookupWindowOffset(eracuni.LookupWindowDaysBefore) &&
+                IsValidLookupWindowOffset(eracuni.LookupWindowDaysAfter) &&
+                DateTime.TryParseExact(
+                    salesInvoice?.Date,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var invoiceDate))
+            {
+                dateFrom = invoiceDate.AddDays(-eracuni.LookupWindowDaysBefore).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                dateTo = invoiceDate.AddDays(eracuni.LookupWindowDaysAfter).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+
             return new ERacuniApiRequestEnvelope
             {
                 Username = createRequest.Username,
@@ -574,10 +594,29 @@ namespace OCPP.Core.Server.Payments.Invoices
                 Method = "SalesInvoiceList",
                 Parameters = new ERacuniSalesInvoiceLookupParameters
                 {
-                    ApiTransactionId = apiTransactionId
+                    DateFrom = dateFrom,
+                    DateTo = dateTo
                 }
             };
         }
+
+        private static ERacuniSalesInvoiceLookupCriteria BuildLookupCriteria(
+            ERacuniApiRequestEnvelope createRequest,
+            InvoiceDraft draft)
+        {
+            var salesInvoice = (createRequest.Parameters as ERacuniSalesInvoiceCreateParameters)?.SalesInvoice;
+            return new ERacuniSalesInvoiceLookupCriteria
+            {
+                OrderReference = salesInvoice?.OrderReference,
+                TotalAmount = draft == null
+                    ? null
+                    : Math.Round(draft.TotalAmount, 2, MidpointRounding.AwayFromZero),
+                Currency = salesInvoice?.DocumentCurrency
+            };
+        }
+
+        private static bool IsValidLookupWindowOffset(int days) =>
+            days >= 0 && days < ERacuniApiClient.MaxLookupWindowDays;
 
         private static string SerializeLogPayload(object payload)
         {

@@ -493,6 +493,9 @@ namespace OCPP.Core.Server.Tests
 
             Assert.Equal(1, apiClient.LookupCount);
             Assert.Equal(0, apiClient.CreateCount);
+            Assert.Equal("SalesInvoiceList", apiClient.LastLookupRequest!.Method);
+            Assert.Equal("EVSE-101", apiClient.LastLookupCriteria!.OrderReference);
+            Assert.Equal(0.30m, apiClient.LastLookupCriteria.TotalAmount);
             var audit = Assert.Single(dbContext.InvoiceSubmissionLogs);
             Assert.Equal("Submitted", audit.Status);
             Assert.Equal("recovered-doc", audit.ExternalDocumentId);
@@ -649,6 +652,58 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("Submitted", Assert.Single(dbContext.InvoiceSubmissionLogs).Status);
         }
 
+        [Theory]
+        [InlineData(1, 1, "2026-01-01", "2026-01-03")]
+        [InlineData(0, 3, "2026-01-02", "2026-01-05")]
+        [InlineData(-1, 1, null, null)]
+        [InlineData(1, ERacuniApiClient.MaxLookupWindowDays, null, null)]
+        public void RecoverCompletedReservation_LooksUpByInvoiceDateWindowOrderReferenceAndAmount(
+            int daysBefore,
+            int daysAfter,
+            string? expectedDateFrom,
+            string? expectedDateTo)
+        {
+            var draft = CreateDraft();
+            draft.TotalAmount = 12.345m;
+            var apiClient = new StubERacuniApiClient
+            {
+                LookupResultToReturn = ERacuniInvoiceLookupResult.Unknown("synthetic stop before create")
+            };
+            var service = CreateService(
+                "Submit",
+                new StubInvoiceDraftBuilder(draft),
+                new StubERacuniInvoiceRequestFactory(),
+                apiClient,
+                eracuni =>
+                {
+                    eracuni.LookupWindowDaysBefore = daysBefore;
+                    eracuni.LookupWindowDaysAfter = daysAfter;
+                });
+
+            using var dbContext = CreateContext();
+            Assert.Throws<InvalidOperationException>(() => service.RecoverCompletedReservation(
+                dbContext,
+                new ChargePaymentReservation(),
+                new Transaction(),
+                new Session()));
+
+            Assert.Equal(1, apiClient.LookupCount);
+            Assert.Equal(0, apiClient.CreateCount);
+            var request = apiClient.LastLookupRequest!;
+            Assert.Equal("SalesInvoiceList", request.Method);
+            Assert.Equal("api-user", request.Username);
+            var parameters = Assert.IsType<ERacuniSalesInvoiceLookupParameters>(request.Parameters);
+            Assert.Equal(expectedDateFrom, parameters.DateFrom);
+            Assert.Equal(expectedDateTo, parameters.DateTo);
+            var serializedParameters = Newtonsoft.Json.JsonConvert.SerializeObject(parameters);
+            Assert.DoesNotContain("apiTransactionId", serializedParameters, StringComparison.OrdinalIgnoreCase);
+            var criteria = apiClient.LastLookupCriteria!;
+            Assert.Equal("EVSE-101", criteria.OrderReference);
+            Assert.Equal(12.35m, criteria.TotalAmount);
+            Assert.Equal("EUR", criteria.Currency);
+            Assert.Equal("ProviderUnknown", Assert.Single(dbContext.InvoiceSubmissionLogs).Status);
+        }
+
         [Fact]
         public void HandleCompletedReservation_MarksProviderUnknown_WhenCreateThrows()
         {
@@ -779,6 +834,7 @@ namespace OCPP.Core.Server.Tests
                 Currency = "EUR",
                 StripeCheckoutSessionId = "cs_test_123",
                 StripePaymentIntentId = "pi_123",
+                TotalAmount = 0.30m,
                 Lines =
                 {
                     new InvoiceDraftLine
@@ -836,7 +892,12 @@ namespace OCPP.Core.Server.Tests
                     Parameters = new ERacuniSalesInvoiceCreateParameters
                     {
                         ApiTransactionId = draft.ReservationId.ToString("N"),
-                        SalesInvoice = new ERacuniSalesInvoice()
+                        SalesInvoice = new ERacuniSalesInvoice
+                        {
+                            Date = "2026-01-02",
+                            DocumentCurrency = draft.Currency,
+                            OrderReference = $"EVSE-{draft.TransactionId}"
+                        }
                     }
                 };
             }
@@ -885,9 +946,16 @@ namespace OCPP.Core.Server.Tests
                 };
             }
 
-            public ERacuniInvoiceLookupResult LookupSalesInvoiceByApiTransactionId(ERacuniApiRequestEnvelope request)
+            public ERacuniApiRequestEnvelope? LastLookupRequest { get; private set; }
+            public ERacuniSalesInvoiceLookupCriteria? LastLookupCriteria { get; private set; }
+
+            public ERacuniInvoiceLookupResult LookupSalesInvoice(
+                ERacuniApiRequestEnvelope request,
+                ERacuniSalesInvoiceLookupCriteria criteria)
             {
                 Interlocked.Increment(ref _lookupCount);
+                LastLookupRequest = request;
+                LastLookupCriteria = criteria;
                 return LookupResultToReturn ?? ERacuniInvoiceLookupResult.Unknown("Synthetic lookup was not configured.");
             }
         }
