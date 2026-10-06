@@ -340,5 +340,6 @@ test("public FAQ selects the language from the lang query parameter", async ({ p
 
   await page.locator("#langSelect").selectOption("de");
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await expect(page.locator('[data-t="faqPayQ"]')).toHaveText("Wie bezahle ich – Karte, Apple/Google Pay, Revolut, KEKS Pay?");
   await expect(page.locator('[data-t="scanQrTitle"]')).toHaveText("📷 QR-Code scannen");
 });
