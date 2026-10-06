@@ -285,16 +285,23 @@ namespace OCPP.Core.Server.Payments
                 transaction.MaxEnergyKwh > 0 &&
                 deliveredKwh > transaction.MaxEnergyKwh + AuthorizationLimitEpsilonKwh)
             {
+                // The reading is physically plausible but exceeds what the customer authorized,
+                // typically the short overshoot after the max-energy auto-stop. Settle at the
+                // authorized maximum and keep the actual reading as anomaly evidence.
                 const string reason = MeterEvidenceReason.AuthorizationLimitExceeded;
-                transaction.MeterEvidenceState = MeterEvidenceSettlementState.ReviewRequired;
+                PersistAnomaly(dbContext, transaction, observation, observedAtUtc, normalizedMeterKwh, MeterEvidenceOutcome.FallbackAccepted, reason);
+                var limitedMeterKwh = transaction.MeterStart + transaction.MaxEnergyKwh;
+                transaction.AcceptedMeterKwh = limitedMeterKwh;
+                transaction.MeterStop = limitedMeterKwh;
+                transaction.MeterEvidenceState = MeterEvidenceSettlementState.FallbackAccepted;
                 transaction.MeterEvidenceReason = reason;
-                PersistAnomaly(dbContext, transaction, observation, observedAtUtc, normalizedMeterKwh, MeterEvidenceOutcome.ReviewRequired, reason);
                 dbContext.SaveChanges();
                 return new MeterEvidenceResult
                 {
-                    Outcome = MeterEvidenceOutcome.ReviewRequired,
+                    Outcome = MeterEvidenceOutcome.FallbackAccepted,
                     Reason = reason,
-                    NormalizedMeterKwh = normalizedMeterKwh
+                    NormalizedMeterKwh = normalizedMeterKwh,
+                    SettlementMeterKwh = limitedMeterKwh
                 };
             }
 

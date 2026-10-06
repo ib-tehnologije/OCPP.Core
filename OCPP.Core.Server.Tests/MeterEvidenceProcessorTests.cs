@@ -70,7 +70,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Process_PlausibleMaxEnergyOvershoot_RequiresReviewWithoutReplacingAcceptedProjection()
+        public void Process_PlausibleMaxEnergyOvershoot_SettlesAtAuthorizedMaximum()
         {
             using var db = CreateContext();
             var transaction = CreateTransaction(maxEnergyKwh: 5);
@@ -82,11 +82,15 @@ namespace OCPP.Core.Server.Tests
             var result = MeterEvidenceProcessor.Process(db, transaction,
                 Observation("16", "kWh", transaction.StartTime.AddHours(1), "OCPP2.1", "Ended", terminal: true));
 
-            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
-            Assert.Equal(16d, transaction.AcceptedMeterKwh);
-            Assert.Null(transaction.MeterStop);
-            Assert.Equal(MeterEvidenceSettlementState.ReviewRequired, transaction.MeterEvidenceState);
-            Assert.Equal(MeterEvidenceReason.AuthorizationLimitExceeded, Assert.Single(db.MeterEvidenceAnomalies).Reason);
+            Assert.Equal(MeterEvidenceOutcome.FallbackAccepted, result.Outcome);
+            Assert.Equal(15d, result.SettlementMeterKwh);
+            Assert.Equal(15d, transaction.MeterStop);
+            Assert.Equal(15d, transaction.AcceptedMeterKwh);
+            Assert.Equal(MeterEvidenceSettlementState.FallbackAccepted, transaction.MeterEvidenceState);
+            var anomaly = Assert.Single(db.MeterEvidenceAnomalies);
+            Assert.Equal(MeterEvidenceReason.AuthorizationLimitExceeded, anomaly.Reason);
+            Assert.Equal(16d, anomaly.NormalizedMeterKwh);
+            Assert.True(MeterEvidenceSettlementGuard.Assess(null, transaction).Ready);
         }
 
         [Fact]
@@ -472,11 +476,11 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Process_RecoveredKwhWithCoarsePrecisionAboveLimit_RequiresReview()
+        public void Process_RecoveredKwhWithCoarsePrecisionAboveLimit_SettlesAtAuthorizedMaximum()
         {
             using var db = CreateContext();
             // "31" re-formatted from a kWh double carries a 0.5 kWh string precision; it must not
-            // let 20.4 kWh pass a 20 kWh authorization boundary.
+            // let 20.4 kWh be billed against a 20 kWh authorization boundary.
             var transaction = CreateTransaction(meterStart: 10.6, maxEnergyKwh: 20);
             db.Transactions.Add(transaction);
             db.SaveChanges();
@@ -484,9 +488,10 @@ namespace OCPP.Core.Server.Tests
             var result = MeterEvidenceProcessor.Process(db, transaction,
                 Observation("31", "kWh", transaction.StartTime.AddHours(1), "Recovery", "Cleanup:LiveConnectorMeter", terminal: true));
 
-            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.FallbackAccepted, result.Outcome);
             Assert.Equal(MeterEvidenceReason.AuthorizationLimitExceeded, result.Reason);
-            Assert.False(MeterEvidenceSettlementGuard.Assess(null, transaction).Ready);
+            Assert.Equal(30.6d, transaction.MeterStop);
+            Assert.True(MeterEvidenceSettlementGuard.Assess(null, transaction).Ready);
         }
 
         [Fact]
@@ -844,7 +849,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public void Process_OverAuthorizationLimitWithFallbackCapacity_RequiresReviewAfterAcceptingReading()
+        public void Process_OverAuthorizationLimitWithFallbackCapacity_SettlesAtAuthorizedMaximum()
         {
             using var db = CreateContext();
             var transaction = CreateTransaction(maxEnergyKwh: 20);
@@ -854,10 +859,12 @@ namespace OCPP.Core.Server.Tests
             var result = MeterEvidenceProcessor.Process(db, transaction,
                 Observation("31", "kWh", transaction.StartTime.AddHours(1), "OCPP1.6", "StopTransaction", terminal: true));
 
-            Assert.Equal(MeterEvidenceOutcome.ReviewRequired, result.Outcome);
+            Assert.Equal(MeterEvidenceOutcome.FallbackAccepted, result.Outcome);
             Assert.Equal(MeterEvidenceReason.AuthorizationLimitExceeded, result.Reason);
-            Assert.Equal(31d, transaction.AcceptedMeterKwh);
-            Assert.Equal(MeterEvidenceSettlementState.ReviewRequired, transaction.MeterEvidenceState);
+            Assert.Equal(30d, transaction.MeterStop);
+            Assert.Equal(MeterEvidenceSettlementState.FallbackAccepted, transaction.MeterEvidenceState);
+            Assert.Equal(31d, Assert.Single(db.MeterEvidenceAnomalies).NormalizedMeterKwh);
+            Assert.True(MeterEvidenceSettlementGuard.Assess(null, transaction).Ready);
         }
 
         [Fact]

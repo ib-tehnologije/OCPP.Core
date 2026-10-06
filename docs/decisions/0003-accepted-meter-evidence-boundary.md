@@ -38,6 +38,7 @@ Related corrections:
 - The authorization boundary (`MaxEnergyKwh`) is compared with a floating-point epsilon only, both in the processor and in the settlement guard. Reading precision is not used there because some paths re-derive it from formatted kWh values.
 - With a fallback ceiling, a non-terminal increase that is plausible only under newly higher (ceiling-capped) offered power is accepted and raises the trusted capacity, instead of latching every later reading against the stale lower capacity. A terminal reading in that situation, and any such reading in strict mode, still requires review.
 - Connector-Available recovery ignores connector meters once a later session started on the same connector, and settles from the transaction's own accepted projection.
+- A physically plausible terminal reading above `MaxEnergyKwh` no longer requires review. It is typically the short overshoot after the server's own max-energy auto-stop, which every session reaching its limit produces. It settles at the authorized maximum (`MeterStart + MaxEnergyKwh`) as `FallbackAccepted` with reason `AuthorizationLimitExceeded`, and the actual reading is kept as anomaly evidence. This supersedes the earlier statement that a plausible authorization overshoot remains `ReviewRequired`.
 
 ## Consequences
 
@@ -47,4 +48,4 @@ Related corrections:
 - Replays reuse the same projection and do not duplicate anomaly rows in the normal retry path.
 - SQL Server deployments require migrations `AddMeterEvidenceSafeguard` and `AddMeterEvidencePowerCandidateProvenance`; SQLite test databases must be recreated through their existing `EnsureCreated()` workflow.
 - Operators must review sessions whose physical plausibility cannot be established from accepted evidence.
-- With the default fallback ceiling, missing offered-power evidence alone no longer requires review; only impossible, malformed, or authorization-exceeding terminal evidence does.
+- With the default fallback ceiling, missing offered-power evidence alone no longer requires review. Review remains for terminal evidence without a safe projection and for terminal readings that continue from a rejected impossible jump; authorization overshoot settles at the authorized maximum.
