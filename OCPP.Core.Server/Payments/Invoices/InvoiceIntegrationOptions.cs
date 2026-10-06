@@ -39,6 +39,8 @@ namespace OCPP.Core.Server.Payments.Invoices
         public bool SendIssuedInvoiceByEmail { get; set; }
         public bool GeneratePublicUrl { get; set; }
         public int MinimumRequestIntervalMilliseconds { get; set; } = 1100;
+        public int LookupWindowDaysBefore { get; set; } = 1;
+        public int LookupWindowDaysAfter { get; set; } = 1;
         public bool RequireBuyerTaxNumberForR1 { get; set; } = true;
         public Dictionary<string, ERacuniLineItemOptions> LineItems { get; set; } = new Dictionary<string, ERacuniLineItemOptions>();
     }

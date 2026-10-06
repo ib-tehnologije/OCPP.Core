@@ -78,6 +78,8 @@ Any exception after a provider call may have crossed the network boundary. Such 
 
 ## Provider lookup boundary
 
+> Superseded: `SalesInvoiceList` does not support an `apiTransactionId` filter. The implemented lookup uses a bounded invoice-date window matched on order reference and amount; see `docs/decisions/0004-eracuni-invoice-lookup-by-date-window.md`.
+
 The e-racuni client exposes an exact `apiTransactionId` lookup. The adapter treats transport errors, non-success status, schema drift, duplicate exact matches, and missing required identifiers as `Unknown`. Only one exact match is `Found`; an unambiguous empty successful result is `NotFound`. Request and response logging stays sanitized according to the existing invoice integration rules.
 
 ## Operator command and reporting
