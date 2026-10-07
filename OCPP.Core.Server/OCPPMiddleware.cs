@@ -2874,8 +2874,29 @@ namespace OCPP.Core.Server
                 invoiceBuyerVatVerificationCheckedAtUtc =
                     reservation.InvoiceBuyerVatVerificationCheckedAtUtc,
                 invoiceBuyer = !reservation.InvoiceBuyerConfirmedAtUtc.HasValue
-                    ? null
-                    : new
+                    ? (!reservation.InvoiceR1RequestedAtUtc.HasValue
+                        ? null
+                        : (object)new
+                        {
+                            editable = !customerBuyerDataLocked,
+                            version = (DateTime?)null,
+                            country = (string)null,
+                            companyName = (string)null,
+                            street = (string)null,
+                            postalCode = (string)null,
+                            city = (string)null,
+                            email = reservation.InvoiceBuyerEmail,
+                            taxIdentifier = (string)null,
+                            registrationNumber = (string)null,
+                            identifierIsVatRegistration = (bool?)null,
+                            confirmed = false,
+                            lockedReason = !invoiceStateKnown || hasIndeterminateOrActiveInvoice
+                                ? "InvoiceStateUnavailable"
+                                : hasSubmittedOrExternalInvoice
+                                    ? "InvoiceAlreadyIssued"
+                                    : null
+                        })
+                    : (object)new
                     {
                         editable = !customerBuyerDataLocked,
                         version = reservation.InvoiceBuyerConfirmedAtUtc,

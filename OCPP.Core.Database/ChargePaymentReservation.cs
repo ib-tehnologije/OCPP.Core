@@ -86,6 +86,8 @@ namespace OCPP.Core.Database
         public string InvoiceBuyerRegistrationNumber { get; set; }
         public bool? InvoiceBuyerIdentifierIsVatRegistration { get; set; }
         public DateTime? InvoiceBuyerConfirmedAtUtc { get; set; }
+        // Set when the customer asked for an R1 invoice at start; buyer details may follow during charging.
+        public DateTime? InvoiceR1RequestedAtUtc { get; set; }
         public string AuthorizationReleaseState { get; set; }
         public int AuthorizationReleaseAttemptCount { get; set; }
         public DateTime? AuthorizationReleaseLastAttemptAtUtc { get; set; }

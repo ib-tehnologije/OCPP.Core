@@ -21,7 +21,9 @@ namespace OCPP.Core.Server.Payments.Invoices
             {
                 ReservationId = reservation.ReservationId,
                 TransactionId = transaction.TransactionId,
-                InvoiceKind = reservation.InvoiceBuyerConfirmedAtUtc.HasValue || IsR1Requested(checkoutSession) ? "R1" : "Retail",
+                InvoiceKind = HasR1BuyerData(reservation, checkoutSession) ? "R1" : "Retail",
+                R1BuyerDetailsMissing = !HasR1BuyerData(reservation, checkoutSession) &&
+                    (reservation.InvoiceR1RequestedAtUtc.HasValue || IsR1Requested(checkoutSession)),
                 IssueDateUtc = reservation.CapturedAtUtc ?? transaction.StopTime ?? reservation.UpdatedAtUtc,
                 ServiceDateFromUtc = transaction.StartTime,
                 ServiceDateToUtc = transaction.StopTime,
@@ -46,7 +48,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 BuyerIdentifierIsVatRegistration = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
                     ? reservation.InvoiceBuyerIdentifierIsVatRegistration
                     : null,
-                BuyerEmail = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
+                BuyerEmail = reservation.InvoiceBuyerConfirmedAtUtc.HasValue || !string.IsNullOrWhiteSpace(reservation.InvoiceBuyerEmail)
                     ? reservation.InvoiceBuyerEmail
                     : checkoutSession?.CustomerDetails?.Email?.Trim(),
                 ChargePointId = reservation.ChargePointId,
@@ -153,6 +155,19 @@ namespace OCPP.Core.Server.Payments.Invoices
                 UnitPrice = reservation.UsageFeePerMinute,
                 LineAmount = amount
             });
+        }
+
+        // R1 needs confirmed buyer data, or legacy checkout metadata that carries the tax identifier.
+        private static bool HasR1BuyerData(ChargePaymentReservation reservation, Session checkoutSession)
+        {
+            if (reservation.InvoiceBuyerConfirmedAtUtc.HasValue)
+            {
+                return true;
+            }
+
+            return IsR1Requested(checkoutSession) &&
+                (!string.IsNullOrWhiteSpace(GetMetadataValue(checkoutSession, "buyer_tax_identifier")) ||
+                 !string.IsNullOrWhiteSpace(GetMetadataValue(checkoutSession, "buyer_oib")));
         }
 
         private static bool IsR1Requested(Session checkoutSession)

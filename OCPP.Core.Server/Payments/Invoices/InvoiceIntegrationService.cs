@@ -120,6 +120,14 @@ namespace OCPP.Core.Server.Payments.Invoices
             var providerCallStarted = false;
             var providerLookupCompleted = false;
 
+            if (draft.R1BuyerDetailsMissing)
+            {
+                _logger.LogWarning(
+                    "Invoice/Integration => R1 requested but buyer details were not completed; issuing retail invoice reservation={ReservationId} transaction={TransactionId}",
+                    draft.ReservationId,
+                    draft.TransactionId);
+            }
+
             _logger.LogInformation(
                 "Invoice/Integration => Prepared draft provider={Provider} mode={Mode} reservation={ReservationId} transaction={TransactionId} kind={InvoiceKind} total={TotalAmount} currency={Currency} lines={LineCount}",
                 provider,

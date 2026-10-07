@@ -69,17 +69,7 @@ namespace OCPP.Core.Management.Controllers
             int requestedConnectorId = request?.ConnectorId ?? 1;
             var model = await BuildViewModelAsync(request?.ChargePointId, requestedConnectorId);
             model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
-            model.BuyerCompanyName = request?.BuyerCompanyName;
-            model.BuyerOib = request?.BuyerOib;
-            model.BuyerCountry = request?.BuyerCountry ?? "HR";
-            model.BuyerStreet = request?.BuyerStreet;
-            model.BuyerPostalCode = request?.BuyerPostalCode;
-            model.BuyerCity = request?.BuyerCity;
             model.BuyerEmail = request?.BuyerEmail;
-            model.BuyerTaxIdentifier = request?.BuyerTaxIdentifier;
-            model.BuyerRegistrationNumber = request?.BuyerRegistrationNumber;
-            model.BuyerIdentifierIsVatRegistration = request?.BuyerIdentifierIsVatRegistration ?? false;
-            model.BuyerDataConfirmed = request?.BuyerDataConfirmed ?? false;
 
             if (string.IsNullOrWhiteSpace(model.ChargePointId))
             {
@@ -103,19 +93,8 @@ namespace OCPP.Core.Management.Controllers
                 connectorId = model.ConnectorId,
                 chargeTagId = chargeTagId,
                 requestR1Invoice = model.RequestR1Invoice,
-                buyerCompanyName = model.BuyerCompanyName,
-                buyerOib = string.Equals(model.BuyerCountry, "HR", StringComparison.OrdinalIgnoreCase)
-                    ? model.BuyerTaxIdentifier
-                    : model.BuyerOib,
-                buyerCountry = model.BuyerCountry,
-                buyerStreet = model.BuyerStreet,
-                buyerPostalCode = model.BuyerPostalCode,
-                buyerCity = model.BuyerCity,
-                buyerEmail = model.BuyerEmail,
-                buyerTaxIdentifier = model.BuyerTaxIdentifier,
-                buyerRegistrationNumber = model.BuyerRegistrationNumber,
-                buyerIdentifierIsVatRegistration = model.BuyerIdentifierIsVatRegistration,
-                buyerDataConfirmed = model.BuyerDataConfirmed,
+                // Company details are completed on the status page during charging.
+                buyerEmail = model.RequestR1Invoice ? model.BuyerEmail : null,
                 origin = "public",
                 returnBaseUrl = $"{Request.Scheme}://{Request.Host}"
             });

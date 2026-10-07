@@ -157,17 +157,22 @@ namespace OCPP.Core.Server.Payments
                 ("OIB", buyerOib)
             };
 
+            // R1 was requested at start with only an email; company details are still to be entered.
+            bool detailsPending = string.IsNullOrWhiteSpace(buyerCompanyName) && string.IsNullOrWhiteSpace(buyerOib);
+
             SendTemplatedEmail(
                 toEmail,
                 "Enter details for your R1 invoice",
                 "R1 invoice requested",
                 "You requested a company (R1) invoice for this charging session.",
                 details,
-                string.IsNullOrWhiteSpace(statusUrl) ? null : "Review or edit invoice details",
+                string.IsNullOrWhiteSpace(statusUrl)
+                    ? null
+                    : detailsPending ? "Enter company details" : "Review or edit invoice details",
                 statusUrl,
                 "You can review or correct the buyer details through this link until the invoice is issued. After issuance, contact support for corrections.",
                 reservation?.ReservationId,
-                "R1InvoiceRequested");
+                detailsPending ? "R1InvoiceDetailsPending" : "R1InvoiceRequested");
         }
 
         public void SendR1InvoiceReady(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl)
@@ -500,6 +505,20 @@ namespace OCPP.Core.Server.Payments
                         "#f8fafc",
                         "#e2e8f0",
                         "#64748b");
+                case "R1InvoiceDetailsPending":
+                    return new EmailTemplateMetadata(
+                        "Unesite podatke za R1 račun",
+                        "Enter Your R1 Invoice Details",
+                        "Zatražili ste poslovni (R1) račun. Unesite podatke tvrtke tijekom punjenja.",
+                        "You requested a company (R1) invoice. Please enter your company details while charging.",
+                        "&#128203; R1 zatražen",
+                        "#faf5ff",
+                        "#e9d5ff",
+                        "#7c3aed",
+                        "Podatke tvrtke unesite putem poveznice prije završetka punjenja. Ako podaci nedostaju kad se račun izdaje, izdat će se običan račun. <span style=\"color:#64748b;\">/ Enter the company details through the link before charging ends. If they are missing when the session is invoiced, a standard receipt is issued instead.</span>",
+                        "#f8fafc",
+                        "#e2e8f0",
+                        "#64748b");
                 case "R1InvoiceReady":
                     return new EmailTemplateMetadata(
                         "R1 račun spreman",
@@ -564,6 +583,7 @@ namespace OCPP.Core.Server.Payments
                 "Open R1 invoice" => "Otvori R1 račun / Open R1 invoice",
                 "Open session" => "Otvori sesiju / Open session",
                 "Review or edit invoice details" => "Provjeri ili ispravi podatke za račun / Review or edit invoice details",
+                "Enter company details" => "Unesi podatke tvrtke / Enter company details",
                 _ => Encode(actionText)
             };
         }

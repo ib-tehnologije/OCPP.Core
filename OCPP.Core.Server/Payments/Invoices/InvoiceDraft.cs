@@ -8,6 +8,8 @@ namespace OCPP.Core.Server.Payments.Invoices
         public Guid ReservationId { get; set; }
         public int TransactionId { get; set; }
         public string InvoiceKind { get; set; }
+        // R1 was requested but buyer details were never completed; issued as Retail instead.
+        public bool R1BuyerDetailsMissing { get; set; }
         public DateTime IssueDateUtc { get; set; }
         public DateTime ServiceDateFromUtc { get; set; }
         public DateTime? ServiceDateToUtc { get; set; }
