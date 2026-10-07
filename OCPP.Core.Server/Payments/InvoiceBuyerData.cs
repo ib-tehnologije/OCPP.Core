@@ -182,6 +182,39 @@ namespace OCPP.Core.Server.Payments
             }, requireCompleteBuyerDetails: true);
         }
 
+        // R1 requested at start with only a contact email; buyer details are completed during charging.
+        public static bool IsEmailOnlyRequest(PaymentSessionRequest request)
+        {
+            return request != null &&
+                string.IsNullOrWhiteSpace(request.BuyerCompanyName) &&
+                string.IsNullOrWhiteSpace(request.BuyerOib) &&
+                string.IsNullOrWhiteSpace(request.BuyerStreet) &&
+                string.IsNullOrWhiteSpace(request.BuyerPostalCode) &&
+                string.IsNullOrWhiteSpace(request.BuyerCity) &&
+                string.IsNullOrWhiteSpace(request.BuyerTaxIdentifier) &&
+                string.IsNullOrWhiteSpace(request.BuyerRegistrationNumber);
+        }
+
+        public static InvoiceBuyerDataValidationResult ValidatePendingR1Email(string email)
+        {
+            var field = Field("BuyerEmail", email, 254, true);
+            if (field.Error != null)
+            {
+                return Invalid("InvalidBuyerData", field.Name, field.Error);
+            }
+            if (!IsValidEmail(field.Value))
+            {
+                return Invalid("InvalidBuyerData", "BuyerEmail", "Enter a valid billing email address.");
+            }
+
+            return new InvoiceBuyerDataValidationResult
+            {
+                Success = true,
+                Status = "Valid",
+                Data = new InvoiceBuyerData { Email = field.Value }
+            };
+        }
+
         private static (string Name, string Value, string Error) Field(string name, string value, int maxLength, bool required)
         {
             var normalized = Trim(value);

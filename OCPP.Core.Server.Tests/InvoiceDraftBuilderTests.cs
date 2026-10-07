@@ -111,6 +111,78 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void Build_FallsBackToRetail_WhenR1DetailsWereNeverCompleted()
+        {
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-R1-PENDING",
+                ConnectorId = 1,
+                PricePerKwh = 0.40m,
+                Currency = "EUR",
+                InvoiceR1RequestedAtUtc = new DateTime(2026, 10, 7, 16, 0, 0, DateTimeKind.Utc),
+                InvoiceBuyerEmail = "billing@example.hr"
+            };
+
+            var transaction = new Transaction
+            {
+                TransactionId = 8,
+                StartTime = new DateTime(2026, 10, 7, 16, 5, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 10, 7, 17, 0, 0, DateTimeKind.Utc),
+                EnergyKwh = 5,
+                EnergyCost = 2.00m
+            };
+
+            var session = new Session
+            {
+                CustomerDetails = new SessionCustomerDetails { Email = "card-holder@example.com" },
+                Metadata = new System.Collections.Generic.Dictionary<string, string> { ["invoice_type"] = "R1" }
+            };
+
+            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, session);
+
+            Assert.Equal("Retail", draft.InvoiceKind);
+            Assert.True(draft.R1BuyerDetailsMissing);
+            Assert.Equal("billing@example.hr", draft.BuyerEmail);
+            Assert.Null(draft.BuyerOib);
+        }
+
+        [Fact]
+        public void Build_UsesR1_WhenPendingRequestWasCompletedDuringCharging()
+        {
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP-R1-DONE",
+                ConnectorId = 1,
+                PricePerKwh = 0.40m,
+                Currency = "EUR",
+                InvoiceR1RequestedAtUtc = new DateTime(2026, 10, 7, 16, 0, 0, DateTimeKind.Utc),
+                InvoiceBuyerConfirmedAtUtc = new DateTime(2026, 10, 7, 16, 20, 0, DateTimeKind.Utc),
+                InvoiceBuyerCountry = "HR",
+                InvoiceBuyerCompanyName = "Acme d.o.o.",
+                InvoiceBuyerTaxIdentifier = "12345678903",
+                InvoiceBuyerEmail = "billing@example.hr"
+            };
+
+            var transaction = new Transaction
+            {
+                TransactionId = 10,
+                StartTime = new DateTime(2026, 10, 7, 16, 5, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2026, 10, 7, 17, 0, 0, DateTimeKind.Utc),
+                EnergyKwh = 5,
+                EnergyCost = 2.00m
+            };
+
+            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, checkoutSession: null);
+
+            Assert.Equal("R1", draft.InvoiceKind);
+            Assert.False(draft.R1BuyerDetailsMissing);
+            Assert.Equal("Acme d.o.o.", draft.BuyerCompanyName);
+            Assert.Equal("12345678903", draft.BuyerOib);
+        }
+
+        [Fact]
         public void Build_UsesUsageFeeLine_WhenTimeFeeIsNotIdleAnchored()
         {
             var reservation = new ChargePaymentReservation

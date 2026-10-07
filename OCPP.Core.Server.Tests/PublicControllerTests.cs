@@ -1341,7 +1341,7 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public async Task Start_PostForwardsConfirmedInvoiceBuyer()
+        public async Task Start_PostForwardsR1RequestWithEmailOnly()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-r1-post-{Guid.NewGuid():N}.sqlite");
 
@@ -1385,27 +1385,16 @@ namespace OCPP.Core.Server.Tests
                     ChargePointId = "CP-R1-POST",
                     ConnectorId = 1,
                     RequestR1Invoice = true,
-                    BuyerCountry = "CZ",
-                    BuyerCompanyName = "Example s.r.o.",
-                    BuyerStreet = "Pražská 1",
-                    BuyerPostalCode = "110 00",
-                    BuyerCity = "Praha",
-                    BuyerEmail = "billing@example.cz",
-                    BuyerTaxIdentifier = "CZ 123-ABC",
-                    BuyerRegistrationNumber = "C 12345",
-                    BuyerIdentifierIsVatRegistration = true,
-                    BuyerDataConfirmed = true
+                    BuyerEmail = "billing@example.cz"
                 });
 
                 var redirect = Assert.IsType<RedirectResult>(result);
                 Assert.Equal("https://checkout.example/r1", redirect.Url);
                 Assert.NotNull(postedBody);
-                Assert.Contains("\"buyerCountry\":\"CZ\"", postedBody, StringComparison.Ordinal);
-                Assert.Contains("\"buyerCompanyName\":\"Example s.r.o.\"", postedBody, StringComparison.Ordinal);
-                Assert.Contains("\"buyerStreet\":\"Pražská 1\"", postedBody, StringComparison.Ordinal);
-                Assert.Contains("\"buyerTaxIdentifier\":\"CZ 123-ABC\"", postedBody, StringComparison.Ordinal);
-                Assert.Contains("\"buyerIdentifierIsVatRegistration\":true", postedBody, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("\"buyerDataConfirmed\":true", postedBody, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("\"requestR1Invoice\":true", postedBody, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("\"buyerEmail\":\"billing@example.cz\"", postedBody, StringComparison.Ordinal);
+                Assert.DoesNotContain("buyerCompanyName", postedBody, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("buyerTaxIdentifier", postedBody, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("rememberInvoiceBuyer", postedBody, StringComparison.OrdinalIgnoreCase);
             }
             finally

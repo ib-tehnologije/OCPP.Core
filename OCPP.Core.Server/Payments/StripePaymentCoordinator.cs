@@ -118,7 +118,17 @@ namespace OCPP.Core.Server.Payments
             cancellationToken.ThrowIfCancellationRequested();
 
             InvoiceBuyerData invoiceBuyer = null;
-            if (request.RequestR1Invoice)
+            string pendingR1Email = null;
+            if (request.RequestR1Invoice && InvoiceBuyerDataValidator.IsEmailOnlyRequest(request))
+            {
+                var emailValidation = InvoiceBuyerDataValidator.ValidatePendingR1Email(request.BuyerEmail);
+                if (!emailValidation.Success)
+                {
+                    throw new InvoiceBuyerValidationException(emailValidation.Status, emailValidation.Field, emailValidation.Error);
+                }
+                pendingR1Email = emailValidation.Data.Email;
+            }
+            else if (request.RequestR1Invoice)
             {
                 var validation = InvoiceBuyerDataValidator.ValidateAndNormalize(request);
                 if (!validation.Success)
@@ -220,6 +230,14 @@ namespace OCPP.Core.Server.Payments
             {
                 ApplyConfirmedBuyer(reservation, invoiceBuyer, now, viesVerification);
             }
+            if (request.RequestR1Invoice)
+            {
+                reservation.InvoiceR1RequestedAtUtc = now;
+            }
+            if (pendingR1Email != null)
+            {
+                reservation.InvoiceBuyerEmail = pendingR1Email;
+            }
 
             _logger.LogInformation(
                 "Stripe/CreateCheckout => reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} tag={ChargeTagId} maxTotalCents={MaxTotalCents} currency={Currency} maxEnergyKwh={MaxEnergyKwh} pricePerKwh={PricePerKwh} sessionFee={SessionFee} usageFeePerMin={UsageFeePerMinute} maxUsageMinutes={MaxUsageMinutes}",
@@ -270,6 +288,10 @@ namespace OCPP.Core.Server.Payments
                 SetOrRemoveMetadata(metadata, "buyer_tax_identifier", TrimMetadataValue(invoiceBuyer.TaxIdentifier, 64));
                 SetOrRemoveMetadata(metadata, "buyer_company", TrimMetadataValue(invoiceBuyer.CompanyName, 200));
             }
+            else if (pendingR1Email != null)
+            {
+                metadata["invoice_type"] = "R1";
+            }
 
             var sessionOptions = new SessionCreateOptions
             {
@@ -278,6 +300,7 @@ namespace OCPP.Core.Server.Payments
                 CancelUrl = cancelUrl,
                 // Stripe remains payment-only. The reservation owns confirmed company-invoice data.
                 BillingAddressCollection = "auto",
+                CustomerEmail = pendingR1Email,
                 PaymentIntentData = new SessionPaymentIntentDataOptions
                 {
                     CaptureMethod = "manual",
@@ -1796,12 +1819,15 @@ namespace OCPP.Core.Server.Payments
             }
 
             var session = TryGetCheckoutSession(reservation.StripeCheckoutSessionId, reservation.ReservationId, "R1Requested");
-            if (!IsR1InvoiceRequested(session))
+            if (!reservation.InvoiceR1RequestedAtUtc.HasValue && !IsR1InvoiceRequested(session))
             {
                 return;
             }
 
-            var recipientEmail = session?.CustomerDetails?.Email;
+            bool buyerConfirmed = reservation.InvoiceBuyerConfirmedAtUtc.HasValue;
+            var recipientEmail = !string.IsNullOrWhiteSpace(reservation.InvoiceBuyerEmail)
+                ? reservation.InvoiceBuyerEmail
+                : session?.CustomerDetails?.Email;
             if (string.IsNullOrWhiteSpace(recipientEmail))
             {
                 _logger.LogDebug("Stripe/Notify => R1 requested email skipped due to missing recipient reservation={ReservationId}", reservation.ReservationId);
@@ -1817,8 +1843,8 @@ namespace OCPP.Core.Server.Payments
                     reservation,
                     chargePoint,
                     statusUrl,
-                    GetMetadataValue(session, "buyer_company"),
-                    GetMetadataValue(session, "buyer_oib"));
+                    buyerConfirmed ? reservation.InvoiceBuyerCompanyName : GetMetadataValue(session, "buyer_company"),
+                    buyerConfirmed ? reservation.InvoiceBuyerTaxIdentifier : GetMetadataValue(session, "buyer_oib"));
             }
             catch (Exception ex)
             {
@@ -1869,7 +1895,11 @@ namespace OCPP.Core.Server.Payments
                     invoiceNumber,
                     invoiceUrl);
 
-                if (IsR1InvoiceRequested(session))
+                bool r1Issued = !string.IsNullOrWhiteSpace(invoiceLog?.InvoiceKind)
+                    ? string.Equals(invoiceLog.InvoiceKind, "R1", StringComparison.OrdinalIgnoreCase)
+                    : reservation.InvoiceBuyerConfirmedAtUtc.HasValue ||
+                        (IsR1InvoiceRequested(session) && !reservation.InvoiceR1RequestedAtUtc.HasValue);
+                if (r1Issued)
                 {
                     _emailNotificationService.SendR1InvoiceReady(
                         recipientEmail,

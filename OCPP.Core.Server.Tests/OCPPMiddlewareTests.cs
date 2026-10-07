@@ -267,6 +267,62 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task HandlePaymentStatusAsync_IncludesPendingR1BuyerWithEmailOnly()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-status-pending-r1-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+            var requestedAt = new DateTime(2026, 10, 7, 16, 0, 0, DateTimeKind.Utc);
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-STATUS",
+                        ConnectorId = 1,
+                        ChargeTagId = "TAG-STATUS",
+                        StripeCheckoutSessionId = "sess_pending_r1",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Charging,
+                        InvoiceR1RequestedAtUtc = requestedAt,
+                        InvoiceBuyerEmail = "billing@example.hr",
+                        CreatedAtUtc = requestedAt,
+                        UpdatedAtUtc = requestedAt
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var httpContext = new DefaultHttpContext();
+                httpContext.Request.Method = "GET";
+                httpContext.Request.QueryString = new QueryString($"?reservationId={reservationId}");
+                httpContext.Response.Body = new MemoryStream();
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentStatusAsync(middleware, httpContext, actionContext);
+                }
+
+                httpContext.Response.Body.Position = 0;
+                var payload = JObject.Parse(await new StreamReader(httpContext.Response.Body).ReadToEndAsync());
+                var buyer = payload["invoiceBuyer"];
+
+                Assert.NotNull(buyer);
+                Assert.True(buyer?["editable"]?.Value<bool>());
+                Assert.False(buyer?["confirmed"]?.Value<bool>());
+                Assert.Equal(JTokenType.Null, buyer?["version"]?.Type);
+                Assert.Equal("billing@example.hr", buyer?["email"]?.Value<string>());
+                Assert.Equal(JTokenType.Null, buyer?["companyName"]?.Type);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         [Theory]
         [InlineData("Submitting")]
         [InlineData("ProviderUnknown")]

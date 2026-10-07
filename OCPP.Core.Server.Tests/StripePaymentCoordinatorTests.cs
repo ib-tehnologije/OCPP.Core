@@ -520,6 +520,79 @@ namespace OCPP.Core.Server.Tests
             Assert.Empty(context.ChargePaymentReservations);
         }
 
+        [Fact]
+        public void CreateCheckoutSession_EmailOnlyR1_CreatesPendingRequestWithoutBuyerData()
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1-EMAIL",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var requestedAt = new DateTime(2026, 10, 7, 16, 0, 0, DateTimeKind.Utc);
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_r1_email", Url = "https://checkout/r1", PaymentIntentId = "pi_r1_email" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService(), now: () => requestedAt);
+
+            coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1-EMAIL",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1-EMAIL",
+                RequestR1Invoice = true,
+                BuyerEmail = " billing@example.hr "
+            });
+
+            var reservation = context.ChargePaymentReservations.Single();
+            Assert.Equal(requestedAt, reservation.InvoiceR1RequestedAtUtc);
+            Assert.Null(reservation.InvoiceBuyerConfirmedAtUtc);
+            Assert.Equal("billing@example.hr", reservation.InvoiceBuyerEmail);
+            Assert.Null(reservation.InvoiceBuyerCompanyName);
+            Assert.Null(reservation.InvoiceBuyerTaxIdentifier);
+            Assert.Equal("billing@example.hr", sessionService.LastCreateOptions.CustomerEmail);
+            Assert.Equal("R1", sessionService.LastCreateOptions.Metadata["invoice_type"]);
+            Assert.False(sessionService.LastCreateOptions.Metadata.ContainsKey("buyer_oib"));
+            Assert.False(sessionService.LastCreateOptions.Metadata.ContainsKey("buyer_company"));
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("not-an-email")]
+        public void CreateCheckoutSession_EmailOnlyR1_RejectsMissingOrInvalidEmailBeforeCallingStripe(string? email)
+        {
+            using var context = CreateContext();
+            context.ChargePoints.Add(new ChargePoint
+            {
+                ChargePointId = "CP-R1-BAD-EMAIL",
+                MaxSessionKwh = 1,
+                PricePerKwh = 1m
+            });
+            context.SaveChanges();
+            var sessionService = new FakeSessionService
+            {
+                CreateResponse = new Session { Id = "sess_r1", Url = "https://checkout/r1", PaymentIntentId = "pi_r1" }
+            };
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService());
+
+            var error = Assert.Throws<InvoiceBuyerValidationException>(() => coordinator.CreateCheckoutSession(context, new PaymentSessionRequest
+            {
+                ChargePointId = "CP-R1-BAD-EMAIL",
+                ConnectorId = 1,
+                ChargeTagId = "TAG-R1-BAD-EMAIL",
+                RequestR1Invoice = true,
+                BuyerEmail = email
+            }));
+
+            Assert.Equal("InvalidBuyerData", error.Status);
+            Assert.Equal("BuyerEmail", error.Field);
+            Assert.Null(sessionService.LastCreateOptions);
+            Assert.Empty(context.ChargePaymentReservations);
+        }
+
         [Theory]
         [InlineData(ViesVerificationStatus.Valid)]
         [InlineData(ViesVerificationStatus.Invalid)]
@@ -1311,6 +1384,47 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("r1@example.com", emailService.LastToEmail);
             Assert.Equal("Acme d.o.o.", emailService.LastBuyerCompanyName);
             Assert.Equal("12345678901", emailService.LastBuyerOib);
+        }
+
+        [Fact]
+        public void MarkTransactionStarted_SendsPendingR1EmailToReservationEmail()
+        {
+            using var context = CreateContext();
+            context.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = Guid.NewGuid(),
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripeCheckoutSessionId = "sess_r1_pending",
+                Status = PaymentReservationStatus.Authorized,
+                Currency = "eur",
+                InvoiceR1RequestedAtUtc = DateTime.UtcNow,
+                InvoiceBuyerEmail = "billing@example.hr",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            context.SaveChanges();
+
+            var sessionService = new FakeSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_r1_pending",
+                    CustomerDetails = new SessionCustomerDetails { Email = "card-holder@example.com" },
+                    Metadata = new Dictionary<string, string> { ["invoice_type"] = "R1" }
+                }
+            };
+
+            var emailService = new FakeEmailNotificationService();
+            var coordinator = CreateCoordinator(context, sessionService, new FakePaymentIntentService(), emailService: emailService);
+
+            coordinator.MarkTransactionStarted(context, "CP1", 1, "TAG1", 556);
+
+            Assert.Equal(1, emailService.R1InvoiceRequestedCount);
+            Assert.Equal("billing@example.hr", emailService.LastToEmail);
+            Assert.Null(emailService.LastBuyerCompanyName);
+            Assert.Null(emailService.LastBuyerOib);
         }
 
         [Fact]

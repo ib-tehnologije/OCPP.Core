@@ -287,6 +287,9 @@
                 <div class="divider"></div>
                 <div class="info-section-title" data-i18n="status.r1.title">R1 invoice (company)</div>
                 <p class="field-help" data-i18n="status.r1.subtitle">Review or correct the invoice buyer details until the invoice is issued.</p>
+                <div class="alert-box info alert-box--section" id="r1-pending-prompt" hidden>
+                    <span data-i18n="status.r1.pendingPrompt">Enter the company details before charging ends. If they are missing when the session is invoiced, a standard receipt is issued instead.</span>
+                </div>
 
                 <form id="r1-edit-form">
                     <input type="hidden" id="buyerDataVersion" />
@@ -440,6 +443,7 @@
         const doneInvoiceLink = document.getElementById("done-invoice-link");
 
         const r1EditSection = document.getElementById("r1-edit-section");
+        const r1PendingPrompt = document.getElementById("r1-pending-prompt");
         const r1EditForm = document.getElementById("r1-edit-form");
         const r1EditMessage = document.getElementById("r1-edit-message");
         const r1EditLocked = document.getElementById("r1-edit-locked");
@@ -473,6 +477,7 @@
         let r1Dirty = false;
         let r1Saving = false;
         let r1RenderedVersion = null;
+        let r1FormFilled = false;
         let statusRequestGeneration = 0;
 
         const errorTitle = document.getElementById("error-title");
@@ -764,6 +769,7 @@
             buyerIdentifierIsVatRegistration.checked = buyer?.identifierIsVatRegistration === true;
             buyerDataConfirmed.checked = false;
             r1RenderedVersion = buyer?.version || null;
+            r1FormFilled = true;
         };
 
         const renderInvoiceBuyer = (buyer) => {
@@ -777,11 +783,12 @@
             r1EditSection.hidden = false;
             const serverVersion = buyer.version || null;
             const editable = buyer.editable === true;
+            if (r1PendingPrompt) r1PendingPrompt.hidden = buyer.confirmed !== false || !editable;
             if (!editable) {
                 fillBuyerForm(buyer);
                 r1Dirty = false;
                 if (r1EditMessage) r1EditMessage.textContent = "";
-            } else if (!r1Dirty && r1RenderedVersion !== serverVersion) {
+            } else if (!r1Dirty && (!r1FormFilled || r1RenderedVersion !== serverVersion)) {
                 fillBuyerForm(buyer);
             } else if (r1Dirty && r1RenderedVersion !== serverVersion && r1EditMessage) {
                 r1EditMessage.textContent = t("status.r1.changed");
