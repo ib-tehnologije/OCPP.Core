@@ -3589,6 +3589,14 @@ namespace OCPP.Core.Server
             _reservationLinkService?.LinkReservation(dbContext, chargePointId, connectorId, idTag, transactionId, startTime);
         }
 
+        internal static void ResetConnectionDbContext(OCPPCoreContext dbContext)
+        {
+            // Entities tracked by an earlier message can be stale (e.g. buyer data confirmed by the portal
+            // during charging) and a failed SaveChanges leaves its pending changes behind. Either would
+            // otherwise make every later SaveChanges on this connection fail until the charger reconnects.
+            dbContext?.ChangeTracker.Clear();
+        }
+
         public void NotifyTransactionCompleted(OCPPCoreContext dbContext, Transaction transaction)
         {
             _paymentCoordinator?.CompleteReservation(dbContext, transaction);

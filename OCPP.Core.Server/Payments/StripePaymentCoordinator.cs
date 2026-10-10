@@ -2494,7 +2494,7 @@ namespace OCPP.Core.Server.Payments
                         r.StartTransactionId == transaction.TransactionId);
             }
 
-            if (reservation != null) return reservation;
+            if (reservation != null) return RefreshTrackedReservation(dbContext, reservation);
 
             reservation = FindActiveReservationByTag(
                 dbContext,
@@ -2504,9 +2504,26 @@ namespace OCPP.Core.Server.Payments
 
             if (reservation != null)
             {
+                reservation = RefreshTrackedReservation(dbContext, reservation);
+                if (reservation == null) return null;
                 RelinkReservationToTransaction(reservation, transaction.TransactionId, transaction);
                 reservation.UpdatedAtUtc = _utcNow();
                 dbContext.SaveChanges();
+            }
+
+            return reservation;
+        }
+
+        private static ChargePaymentReservation RefreshTrackedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation)
+        {
+            // A long-lived context (e.g. a charge point WebSocket) can hold a copy loaded before the buyer confirmed
+            // R1 invoice data in the portal. That write bumps the InvoiceBuyerConfirmedAtUtc concurrency token,
+            // so settle against the current row instead of the cached one.
+            var entry = dbContext.Entry(reservation);
+            if (entry.State == EntityState.Unchanged)
+            {
+                entry.Reload();
+                if (entry.State == EntityState.Detached) return null;
             }
 
             return reservation;

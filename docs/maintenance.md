@@ -76,6 +76,7 @@ Also inspect the generated migration and model snapshot manually for provider-sp
 - Payment reservation state touches connector locks, remote start/stop, Stripe, cleanup services, status UI, invoice logs, and emails.
 - Timeouts and idle-fee behavior depend on UTC timestamps, configured local time zones, and sweep intervals.
 - OCPP 1.6, 2.0.1, and 2.1 can need protocol-specific behavior even when a feature name is shared.
+- `ChargePaymentReservation.InvoiceBuyerConfirmedAtUtc` is an optimistic concurrency token and the public portal can change it while a session is charging. Code that updates a reservation from a long-lived context must work on a freshly loaded row (see `RefreshTrackedReservation` in `StripePaymentCoordinator`); otherwise the write fails with `DbUpdateConcurrencyException`.
 - Public portal changes may require Razor, CSS, JavaScript, server API, and Playwright updates.
 
 ## Recurring Maintenance Tasks
