@@ -23,6 +23,62 @@ namespace OCPP.Core.Server.Tests
     public class OCPPMiddlewareTests
     {
         [Fact]
+        public void ResetConnectionDbContext_RecoversConnectionAfterStaleBuyerConcurrencyFailure()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-middleware-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using var connectionContext = CreateContext(databasePath);
+                connectionContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                {
+                    ReservationId = reservationId,
+                    ChargePointId = "CP-STALE",
+                    ConnectorId = 1,
+                    ChargeTagId = "PAY-STALE",
+                    Status = PaymentReservationStatus.Charging,
+                    Currency = "eur",
+                    CreatedAtUtc = DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.UtcNow
+                });
+                connectionContext.SaveChanges();
+
+                // A charge point connection keeps its DbContext for hours; the portal confirms R1 buyer data meanwhile.
+                var trackedReservation = connectionContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                using (var portalContext = CreateContext(databasePath))
+                {
+                    var portalReservation = portalContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    portalReservation.InvoiceBuyerConfirmedAtUtc = DateTime.UtcNow;
+                    portalContext.SaveChanges();
+                }
+
+                trackedReservation.Status = PaymentReservationStatus.WaitingForDisconnect;
+                Assert.Throws<DbUpdateConcurrencyException>(() => connectionContext.SaveChanges());
+
+                // Without the reset every later write on this connection (StartTransaction, message log, ...) replays the stale update.
+                connectionContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId).UpdatedAtUtc = DateTime.UtcNow;
+                Assert.Throws<DbUpdateConcurrencyException>(() => connectionContext.SaveChanges());
+
+                OCPPMiddleware.ResetConnectionDbContext(connectionContext);
+
+                var freshReservation = connectionContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                Assert.NotNull(freshReservation.InvoiceBuyerConfirmedAtUtc);
+                freshReservation.Status = PaymentReservationStatus.WaitingForDisconnect;
+                connectionContext.SaveChanges();
+
+                using var verifyContext = CreateContext(databasePath);
+                Assert.Equal(
+                    PaymentReservationStatus.WaitingForDisconnect,
+                    verifyContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId).Status);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task TryStartChargingAsync_PreservesCompletedReservation_WhenRemoteStartCompletesLate()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-middleware-{Guid.NewGuid():N}.sqlite");

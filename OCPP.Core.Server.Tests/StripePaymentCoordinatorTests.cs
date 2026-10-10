@@ -2432,6 +2432,67 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CompleteReservation_UsesBuyerDataConfirmedByAnotherContextDuringCharging()
+        {
+            var databaseName = Guid.NewGuid().ToString();
+            using var connectionContext = CreateContext(databaseName);
+            var reservationId = Guid.NewGuid();
+            var reservation = new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                ChargeTagId = "TAG1",
+                StripePaymentIntentId = "pi_buyer_during_charging",
+                Status = PaymentReservationStatus.Charging,
+                PricePerKwh = 0.50m,
+                UserSessionFee = 0.50m,
+                Currency = "eur"
+            };
+            connectionContext.ChargePaymentReservations.Add(reservation);
+            var transaction = new Transaction
+            {
+                TransactionId = 43,
+                ChargePointId = "CP1",
+                ConnectorId = 1,
+                StartTagId = "TAG1",
+                StartTime = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+                StopTime = new DateTime(2025, 1, 1, 12, 5, 0, DateTimeKind.Utc),
+                MeterStart = 0,
+                MeterStop = 1
+            };
+            connectionContext.Transactions.Add(transaction);
+            connectionContext.SaveChanges();
+
+            // The portal confirms R1 buyer data through its own context while the charge point
+            // connection still tracks the reservation loaded at transaction start.
+            var confirmedAt = new DateTime(2025, 1, 1, 12, 3, 0, DateTimeKind.Utc);
+            using (var portalContext = CreateContext(databaseName))
+            {
+                var portalReservation = portalContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                portalReservation.InvoiceBuyerCompanyName = "Kupac d.o.o.";
+                portalReservation.InvoiceBuyerConfirmedAtUtc = confirmedAt;
+                portalContext.SaveChanges();
+            }
+
+            var intentService = new FakePaymentIntentService
+            {
+                GetResponse = new PaymentIntent { Id = "pi_buyer_during_charging", Status = "requires_capture", Amount = 10_000 }
+            };
+            var coordinator = CreateCoordinator(connectionContext, new FakeSessionService(), intentService, now: () => new DateTime(2025, 1, 1, 12, 10, 0, DateTimeKind.Utc));
+
+            coordinator.CompleteReservation(connectionContext, transaction);
+
+            Assert.Equal(PaymentReservationStatus.Completed, reservation.Status);
+            Assert.True(intentService.CaptureCalled);
+            using var verifyContext = CreateContext(databaseName);
+            var stored = verifyContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+            Assert.Equal(PaymentReservationStatus.Completed, stored.Status);
+            Assert.Equal(confirmedAt, stored.InvoiceBuyerConfirmedAtUtc);
+            Assert.Equal("Kupac d.o.o.", stored.InvoiceBuyerCompanyName);
+        }
+
+        [Fact]
         public void CompleteReservation_ReviewRequiredMeterEvidence_DoesNotCaptureInvoiceOrNotify()
         {
             using var context = CreateContext();

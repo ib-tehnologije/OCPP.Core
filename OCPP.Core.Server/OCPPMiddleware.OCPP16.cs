@@ -140,6 +140,10 @@ namespace OCPP.Core.Server
                                         ProcessRawIncomingMessageSinks(chargePointStatus.Protocol, chargePointStatus.Id, msgIn);
                                     });
 
+                                    // The WebSocket keeps one DbContext for its whole lifetime: start every message
+                                    // from a clean change tracker so stale or failed entities cannot leak between messages.
+                                    ResetConnectionDbContext(dbContext);
+
                                     if (msgIn.MessageType == "2")
                                     {
                                         // Request from chargepoint to OCPP server

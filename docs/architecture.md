@@ -116,6 +116,7 @@ Locations: `OCPP.Core.Server.Tests/`, `OCPP.Core.Test/`, `Simulators/`
 - Hangfire jobs and dashboard require SQL Server configuration.
 - Payment behavior is spread across `OCPP.Core.Server`, `OCPP.Core.Management`, and database state; do not validate only one layer.
 - Financial recovery is an explicit operator command, not an HTTP endpoint or hosted service. Keep manifests and private evidence outside the repository.
+- A charge point WebSocket session reuses one request-scoped `OCPPCoreContext` for its whole lifetime. `ResetConnectionDbContext` clears its change tracker before every incoming OCPP message so stale entities (for example a reservation whose R1 buyer data the portal confirmed during charging) or changes left by a failed `SaveChanges` cannot break later messages on the same connection. Do not rely on entities tracked across messages.
 
 ## Fragile or Risky Areas
 
