@@ -225,51 +225,95 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
-        public async Task Start_PreparingConnector_IsOccupiedAndGenericUrlSelectsAvailableConnector()
+        public async Task Start_FreshPreparingConnector_ShowsPreparingAndIsSelectedByDefault()
         {
-            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-preparing-start-{Guid.NewGuid():N}.sqlite");
+            var model = await StartWithConnectorStatusesAsync(
+                "CP-PREPARING-START",
+                null,
+                ("Available", DateTime.UtcNow),
+                ("Preparing", DateTime.UtcNow.AddMinutes(-2)));
+
+            Assert.Equal(2, model.ConnectorId);
+            Assert.Equal("Preparing", model.LastStatus);
+            Assert.False(model.HasAvailabilityMessage);
+
+            var preparingConnector = model.Connectors.Single(c => c.ConnectorId == 2);
+            Assert.Equal("Preparing", preparingConnector.LastStatus);
+            Assert.Null(preparingConnector.AvailabilityMessage);
+            Assert.True(preparingConnector.IsSelected);
+            Assert.False(model.Connectors.Single(c => c.ConnectorId == 1).IsSelected);
+        }
+
+        [Fact]
+        public async Task Start_StalePreparingConnector_GenericUrlSelectsAvailableConnector()
+        {
+            var model = await StartWithConnectorStatusesAsync(
+                "CP-PREPARING-STALE",
+                null,
+                ("Preparing", DateTime.UtcNow.AddMinutes(-12)),
+                ("Available", DateTime.UtcNow));
+
+            Assert.Equal(2, model.ConnectorId);
+            Assert.Equal("Available", model.LastStatus);
+            Assert.Equal("Preparing", model.Connectors.Single(c => c.ConnectorId == 1).LastStatus);
+            Assert.False(model.Connectors.Single(c => c.ConnectorId == 1).IsSelected);
+        }
+
+        [Fact]
+        public async Task Start_TwoPreparingConnectors_FallsBackToDefaultOrder()
+        {
+            var model = await StartWithConnectorStatusesAsync(
+                "CP-PREPARING-BOTH",
+                null,
+                ("Preparing", DateTime.UtcNow),
+                ("Preparing", DateTime.UtcNow));
+
+            Assert.Equal(1, model.ConnectorId);
+            Assert.All(model.Connectors, c => Assert.Equal("Preparing", c.LastStatus));
+        }
+
+        [Fact]
+        public async Task Start_ExplicitConnectorUrl_OverridesPreparingDefault()
+        {
+            var model = await StartWithConnectorStatusesAsync(
+                "CP-PREPARING-EXPLICIT",
+                1,
+                ("Available", DateTime.UtcNow),
+                ("Preparing", DateTime.UtcNow));
+
+            Assert.Equal(1, model.ConnectorId);
+            Assert.Equal("Available", model.LastStatus);
+            Assert.False(model.Connectors.Single(c => c.ConnectorId == 2).IsSelected);
+        }
+
+        private static async Task<PublicStartViewModel> StartWithConnectorStatusesAsync(
+            string chargePointId,
+            int? requestedConnectorId,
+            params (string Status, DateTime StatusTime)[] connectorStatuses)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-{chargePointId.ToLowerInvariant()}-{Guid.NewGuid():N}.sqlite");
 
             try
             {
                 using (var setupContext = CreateContext(databasePath))
                 {
-                    SeedChargePoint(setupContext, "CP-PREPARING-START", "Preparing start test");
-                    setupContext.ConnectorStatuses.AddRange(
-                        new ConnectorStatus
-                        {
-                            ChargePointId = "CP-PREPARING-START",
-                            ConnectorId = 1,
-                            LastStatus = "Preparing",
-                            LastStatusTime = DateTime.UtcNow
-                        },
-                        new ConnectorStatus
-                        {
-                            ChargePointId = "CP-PREPARING-START",
-                            ConnectorId = 2,
-                            LastStatus = "Available",
-                            LastStatusTime = DateTime.UtcNow
-                        });
+                    SeedChargePoint(setupContext, chargePointId, chargePointId);
+                    setupContext.ConnectorStatuses.AddRange(connectorStatuses.Select((status, index) => new ConnectorStatus
+                    {
+                        ChargePointId = chargePointId,
+                        ConnectorId = index + 1,
+                        LastStatus = status.Status,
+                        LastStatusTime = status.StatusTime
+                    }));
                     setupContext.SaveChanges();
                 }
 
                 using var actionContext = CreateContext(databasePath);
                 var controller = CreateController(actionContext);
 
-                var result = await controller.Start("CP-PREPARING-START", null);
+                var result = await controller.Start(chargePointId, requestedConnectorId);
                 var viewResult = Assert.IsType<ViewResult>(result);
-                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
-
-                Assert.Equal(2, model.ConnectorId);
-                Assert.Equal("Available", model.LastStatus);
-
-                var preparingConnector = model.Connectors.Single(c => c.ConnectorId == 1);
-                Assert.Equal("Occupied", preparingConnector.LastStatus);
-                Assert.Contains("currently in use", preparingConnector.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
-                Assert.False(preparingConnector.IsSelected);
-
-                var availableConnector = model.Connectors.Single(c => c.ConnectorId == 2);
-                Assert.Equal("Available", availableConnector.LastStatus);
-                Assert.True(availableConnector.IsSelected);
+                return Assert.IsType<PublicStartViewModel>(viewResult.Model);
             }
             finally
             {

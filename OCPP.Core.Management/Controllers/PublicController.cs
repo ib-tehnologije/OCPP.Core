@@ -22,6 +22,8 @@ namespace OCPP.Core.Management.Controllers
     [AllowAnonymous]
     public class PublicController : BaseController
     {
+        private static readonly TimeSpan PreparingDefaultSelectionWindow = TimeSpan.FromMinutes(10);
+
         private readonly IDataProtector _recoveryProtector;
 
         public PublicController(
@@ -235,7 +237,7 @@ namespace OCPP.Core.Management.Controllers
 
                 int connectorCount = connectorStates.Count;
                 int availableConnectorCount = connectorStates.Count(s => IsAvailableStatus(s.EffectiveStatus));
-                int occupiedConnectorCount = connectorStates.Count(s => string.Equals(s.EffectiveStatus, "Occupied", StringComparison.OrdinalIgnoreCase));
+                int occupiedConnectorCount = connectorStates.Count(s => IsOccupiedOrPreparingStatus(s.EffectiveStatus));
                 int offlineConnectorCount = connectorCount - availableConnectorCount - occupiedConnectorCount;
                 string aggregatedStatus = BuildAggregateConnectorStatus(availableConnectorCount, occupiedConnectorCount);
                 DateTime? statusTime = connectorStates
@@ -354,7 +356,7 @@ namespace OCPP.Core.Management.Controllers
                 int selectedConnectorId = requestedConnectorId.HasValue && requestedConnectorId.Value > 0 &&
                     connectorStates.Any(c => c.ConnectorId == requestedConnectorId.Value)
                     ? requestedConnectorId.Value
-                    : connectorStates.FirstOrDefault(c => IsAvailableStatus(c.EffectiveStatus))?.ConnectorId ?? connectorStates.First().ConnectorId;
+                    : FindDefaultConnectorId(connectorStates, nowUtc).Value;
 
                 model.ConnectorId = selectedConnectorId;
                 model.Connectors = connectorStates
@@ -702,6 +704,11 @@ namespace OCPP.Core.Management.Controllers
                 return "Offline";
             }
 
+            if (IsPreparingStatus(effectiveRawStatus))
+            {
+                return "Preparing";
+            }
+
             return "Occupied";
         }
 
@@ -758,6 +765,40 @@ namespace OCPP.Core.Management.Controllers
         private static bool IsAvailableStatus(string status)
         {
             return string.Equals(status, "Available", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPreparingStatus(string status)
+        {
+            return string.Equals(NormalizeConnectorStatus(status), "Preparing", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsOccupiedOrPreparingStatus(string status)
+        {
+            return string.Equals(status, "Occupied", StringComparison.OrdinalIgnoreCase) ||
+                   IsPreparingStatus(status);
+        }
+
+        private static int? FindDefaultConnectorId(IReadOnlyList<PublicConnectorState> connectorStates, DateTime nowUtc)
+        {
+            if (connectorStates == null || connectorStates.Count == 0)
+            {
+                return null;
+            }
+
+            // A driver who just plugged in usually scans the charger QR next, so prefer that connector.
+            // Only when exactly one connector is freshly preparing; an old or ambiguous plug-in falls back.
+            var freshPreparing = connectorStates
+                .Where(c => IsPreparingStatus(c.EffectiveStatus) &&
+                            c.EffectiveStatusTime.HasValue &&
+                            c.EffectiveStatusTime.Value >= nowUtc.Subtract(PreparingDefaultSelectionWindow))
+                .ToList();
+            if (freshPreparing.Count == 1)
+            {
+                return freshPreparing[0].ConnectorId;
+            }
+
+            return connectorStates.FirstOrDefault(c => IsAvailableStatus(c.EffectiveStatus))?.ConnectorId
+                ?? connectorStates[0].ConnectorId;
         }
 
         private static bool IsOfflineLikeStatus(string status)
