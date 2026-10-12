@@ -1324,15 +1324,15 @@ html.public-theme-light {
 
 .connector-selector {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
+  grid-template-columns: 1fr;
+  gap: 8px;
 }
 
 .connector-option {
   display: block;
   position: relative;
   overflow: hidden;
-  padding: 14px 16px;
+  padding: 10px 14px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--public-field-bg);
@@ -1364,9 +1364,22 @@ html.public-theme-light {
 
 .connector-option-top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.connector-option-top .status-badge {
+  flex-shrink: 0;
+}
+
+.connector-option-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
 }
 
 .connector-option-label {
@@ -1376,7 +1389,7 @@ html.public-theme-light {
 }
 
 .connector-option-sub {
-  margin-top: 4px;
+  margin-top: 2px;
   font-size: 0.78rem;
   color: var(--text-3);
 }
@@ -1390,7 +1403,6 @@ html.public-theme-light {
 }
 
 .connector-option-code {
-  margin-top: 10px;
   font: 600 0.78rem var(--mono);
   color: var(--accent);
   letter-spacing: 0.02em;
@@ -1401,7 +1413,7 @@ html.public-theme-light {
 }
 
 .connector-option-meta {
-  margin-top: 8px;
+  margin-left: auto;
   font-size: 0.78rem;
   color: var(--text-3);
   line-height: 1.4;
@@ -1418,7 +1430,7 @@ html.public-theme-light {
 }
 
 .connector-option.selected .connector-option-meta span {
-  padding: 6px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: var(--public-selected-connector-meta-bg);
   border: 1px solid var(--public-selected-connector-meta-border);
@@ -1902,20 +1914,8 @@ html.public-theme-light {
     padding: 12px 14px;
   }
 
-  .connector-selector {
-    grid-template-columns: 1fr;
-  }
-
   .connector-option {
-    padding: 16px;
-  }
-
-  .connector-option-top {
-    flex-direction: column;
-  }
-
-  .connector-option-top .status-badge {
-    align-self: flex-start;
+    padding: 10px 12px;
   }
 
   .public-code-row {

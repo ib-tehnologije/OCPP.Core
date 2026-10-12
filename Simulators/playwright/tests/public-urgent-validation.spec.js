@@ -139,20 +139,29 @@ test("public map shows mixed availability, offline normalization, and case-insen
   await expect(caseMismatchCard.locator(".cc-status")).toHaveText("Available");
 });
 
-test("public start treats Preparing as occupied and selects the available sibling", async ({ page }) => {
+test("public start shows a freshly plugged-in connector as Preparing and selects it", async ({ page }) => {
+  const databasePath = process.env.SQLITE_DB_PATH ?? runtimeInfo().databasePath;
+  // The plugged-in connector is only preferred while its Preparing status is recent.
+  await runSqlite(databasePath, `
+UPDATE ConnectorStatus
+SET LastStatusTime = datetime('now')
+WHERE ChargePointId = 'MAP-MIXED-01' AND ConnectorId = 1;
+`);
+
   await page.goto("/Public/Start?cp=MAP-MIXED-01");
 
-  await expect(page.locator("#charger-sub")).toHaveText("Right connector");
-  await expect(page.locator("#connector-status-text")).toHaveText("Available");
+  await expect(page.locator("#charger-sub")).toHaveText("Left connector");
+  await expect(page.locator("#connector-status-text")).toHaveText("Preparing");
+  await expect(page.locator("#availability-message")).toBeHidden();
 
   const preparingConnector = page.locator('.connector-option[data-connector-id="1"]');
-  await expect(preparingConnector).toHaveAttribute("data-last-status", "Occupied");
-  await expect(preparingConnector).toContainText("Occupied");
-  await expect(preparingConnector).not.toHaveClass(/selected/);
+  await expect(preparingConnector).toHaveAttribute("data-last-status", "Preparing");
+  await expect(preparingConnector).toContainText("Preparing");
+  await expect(preparingConnector).toHaveClass(/selected/);
 
   const availableConnector = page.locator('.connector-option[data-connector-id="2"]');
   await expect(availableConnector).toHaveAttribute("data-last-status", "Available");
-  await expect(availableConnector).toHaveClass(/selected/);
+  await expect(availableConnector).not.toHaveClass(/selected/);
 });
 
 test("public map keeps charging primary and offers navigation only for valid stored coordinates", async ({ page }) => {

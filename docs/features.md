@@ -97,7 +97,9 @@ Known behavior:
 - Anonymous public map and start pages.
 - Routes include `cp/{cp}` and `cp/{cp}/{conn:int}`.
 - Connector selection, busy/offline handling, and recovery cookie handling.
-- Public availability exposes only genuine `Available` connector state; raw `Preparing` remains visible to operators but follows the existing public `Occupied` status, counts, messaging, and default-selection behavior.
+- Public availability exposes only genuine `Available` connector state. A `Preparing` connector (vehicle plugged in, no session yet) is shown on the start page as its own `Preparing` status without the in-use warning, and the map counts it as occupied, never available.
+- On the generic charger URL (`cp/{cp}`), the start page selects the connector that is the only one to have entered `Preparing` in the last 10 minutes; otherwise it selects the first `Available` connector, then the lowest connector. An explicit `cp/{cp}/{conn}` always wins.
+- Connector choices are shown as compact cards stacked one below the other.
 - Public payment redirect/status flow.
 - Public stop request path.
 - R1/company invoice data submission with OIB validation.

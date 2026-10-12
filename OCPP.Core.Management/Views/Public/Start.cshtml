@@ -146,18 +146,20 @@
                                         <span data-i18n-status="@connectorStatusLabel">@connectorStatusLabel</span>
                                     </div>
                                 </div>
-                                @if (!string.IsNullOrWhiteSpace(connector.PublicConnectorCode))
-                                {
-                                    <div class="connector-option-code">@connector.PublicConnectorCode</div>
-                                }
-                                <div class="connector-option-meta">
-                                    <span data-i18n-option-state="@(connector.IsSelected ? "selected" : "default")"
-                                          data-i18n-default-text="start.tapToSwitch"
-                                          data-i18n-selected-text="start.connectorSelected"
-                                          data-default-text="Tap to switch"
-                                          data-selected-text="Selected connector">
-                                        @(connector.IsSelected ? "Selected connector" : "Tap to switch")
-                                    </span>
+                                <div class="connector-option-bottom">
+                                    @if (!string.IsNullOrWhiteSpace(connector.PublicConnectorCode))
+                                    {
+                                        <div class="connector-option-code">@connector.PublicConnectorCode</div>
+                                    }
+                                    <div class="connector-option-meta">
+                                        <span data-i18n-option-state="@(connector.IsSelected ? "selected" : "default")"
+                                              data-i18n-default-text="start.tapToSwitch"
+                                              data-i18n-selected-text="start.connectorSelected"
+                                              data-default-text="Tap to switch"
+                                              data-selected-text="Selected connector">
+                                            @(connector.IsSelected ? "Selected connector" : "Tap to switch")
+                                        </span>
+                                    </div>
                                 </div>
                             </a>
                         }
