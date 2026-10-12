@@ -127,39 +127,31 @@
                                data-public-short-code="@connector.PublicConnectorShortCode"
                                aria-current="@(connector.IsSelected ? "page" : null)">
                                 <div class="connector-option-top">
-                                    <div>
-                                        @if (connectorPrimaryLabelIsGeneric)
-                                        {
-                                            <div class="connector-option-label" data-i18n-template="status.connectorFallback" data-i18n-param-id="@connector.ConnectorId">@connectorPrimaryLabel</div>
-                                        }
-                                        else
-                                        {
-                                            <div class="connector-option-label">@connectorPrimaryLabel</div>
-                                        }
-                                        @if (!string.IsNullOrWhiteSpace(connectorSecondaryLabel))
-                                        {
-                                            <div class="connector-option-sub">@connectorSecondaryLabel</div>
-                                        }
-                                    </div>
-                                    <div class="status-badge @connectorBadgeClass">
-                                        <span class="dot"></span>
-                                        <span data-i18n-status="@connectorStatusLabel">@connectorStatusLabel</span>
-                                    </div>
-                                </div>
-                                <div class="connector-option-bottom">
-                                    @if (!string.IsNullOrWhiteSpace(connector.PublicConnectorCode))
+                                    @if (connectorPrimaryLabelIsGeneric)
                                     {
-                                        <div class="connector-option-code">@connector.PublicConnectorCode</div>
+                                        <div class="connector-option-label" data-i18n-template="status.connectorFallback" data-i18n-param-id="@connector.ConnectorId">@connectorPrimaryLabel</div>
                                     }
-                                    <div class="connector-option-meta">
-                                        <span data-i18n-option-state="@(connector.IsSelected ? "selected" : "default")"
-                                              data-i18n-default-text="start.tapToSwitch"
-                                              data-i18n-selected-text="start.connectorSelected"
-                                              data-default-text="Tap to switch"
-                                              data-selected-text="Selected connector">
-                                            @(connector.IsSelected ? "Selected connector" : "Tap to switch")
-                                        </span>
-                                    </div>
+                                    else
+                                    {
+                                        <div class="connector-option-label">@connectorPrimaryLabel</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(connectorSecondaryLabel))
+                                    {
+                                        <div class="connector-option-sub">@connectorSecondaryLabel</div>
+                                    }
+                                </div>
+                                <div class="status-badge @connectorBadgeClass">
+                                    <span class="dot"></span>
+                                    <span data-i18n-status="@connectorStatusLabel">@connectorStatusLabel</span>
+                                </div>
+                                <div class="connector-option-meta">
+                                    <span data-i18n-option-state="@(connector.IsSelected ? "selected" : "default")"
+                                          data-i18n-default-text="start.tapToSwitch"
+                                          data-i18n-selected-text="start.connectorSelected"
+                                          data-default-text="Tap to switch"
+                                          data-selected-text="Selected">
+                                        @(connector.IsSelected ? "Selected" : "Tap to switch")
+                                    </span>
                                 </div>
                             </a>
                         }

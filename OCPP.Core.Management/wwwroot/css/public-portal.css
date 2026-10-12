@@ -47,7 +47,6 @@
   --public-selected-connector-bg: linear-gradient(160deg, rgba(0, 212, 170, 0.24), rgba(17, 34, 46, 0.95) 45%, rgba(108, 92, 231, 0.24));
   --public-selected-connector-text: #f7fffd;
   --public-selected-connector-sub: rgba(225, 255, 248, 0.76);
-  --public-selected-connector-code: #8ff7e2;
   --public-selected-connector-meta: rgba(233, 255, 250, 0.88);
   --public-selected-connector-meta-bg: rgba(255, 255, 255, 0.08);
   --public-selected-connector-meta-border: rgba(143, 247, 226, 0.18);
@@ -103,7 +102,6 @@
   --public-selected-connector-bg: linear-gradient(160deg, var(--public-success-bg), #ffffff 60%, var(--public-accent-2-bg));
   --public-selected-connector-text: var(--public-text);
   --public-selected-connector-sub: var(--public-text-3);
-  --public-selected-connector-code: var(--public-accent);
   --public-selected-connector-meta: var(--public-text-2);
   --public-selected-connector-meta-bg: #ffffff;
   --public-selected-connector-meta-border: var(--public-success-border);
@@ -1324,12 +1322,15 @@ html.public-theme-light {
 
 .connector-selector {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
 }
 
 .connector-option {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   position: relative;
   overflow: hidden;
   padding: 10px 14px;
@@ -1363,34 +1364,21 @@ html.public-theme-light {
 }
 
 .connector-option-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.connector-option-top .status-badge {
-  flex-shrink: 0;
-}
-
-.connector-option-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .connector-option-label {
-  font-size: 0.96rem;
-  font-weight: 600;
+  overflow-wrap: anywhere;
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
   letter-spacing: -0.01em;
 }
 
 .connector-option-sub {
   margin-top: 2px;
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   color: var(--text-3);
 }
 
@@ -1402,21 +1390,14 @@ html.public-theme-light {
   color: var(--public-selected-connector-sub);
 }
 
-.connector-option-code {
-  font: 600 0.78rem var(--mono);
-  color: var(--accent);
-  letter-spacing: 0.02em;
-}
-
-.connector-option.selected .connector-option-code {
-  color: var(--public-selected-connector-code);
-}
-
 .connector-option-meta {
-  margin-left: auto;
   font-size: 0.78rem;
   color: var(--text-3);
   line-height: 1.4;
+}
+
+.connector-option:not(.selected) .connector-option-meta {
+  visibility: hidden;
 }
 
 .connector-option-meta span {

@@ -99,7 +99,7 @@ Known behavior:
 - Connector selection, busy/offline handling, and recovery cookie handling.
 - Public availability exposes only genuine `Available` connector state. A `Preparing` connector (vehicle plugged in, no session yet) is shown on the start page as its own `Preparing` status without the in-use warning, and the map counts it as occupied, never available.
 - On the generic charger URL (`cp/{cp}`), the start page selects the connector that is the only one to have entered `Preparing` in the last 10 minutes; otherwise it selects the first `Available` connector, then the lowest connector. An explicit `cp/{cp}/{conn}` always wins.
-- Connector choices are shown as compact cards stacked one below the other.
+- Connector choices are shown as compact cards side by side (left/right). Each card shows the configured connector name (for example `1A`, `Lijevo`) as a large main label, a small short code without the operator prefix (for example `E5202601*1`) underneath, and the status. The full `HR*...` connector code appears only once, in the header pill for the selected connector. A connector without a configured name falls back to its short code.
 - Public payment redirect/status flow.
 - Public stop request path.
 - R1/company invoice data submission with OIB validation.
