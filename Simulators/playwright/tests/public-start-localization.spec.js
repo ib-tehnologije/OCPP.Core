@@ -169,14 +169,14 @@ test("public portal translations localize Italian start-flow labels", async ({ p
               data-i18n-default-text="start.tapToSwitch"
               data-i18n-selected-text="start.connectorSelected"
               data-default-text="Tap to switch"
-              data-selected-text="Selected connector">Tap to switch</span>
+              data-selected-text="Selected">Tap to switch</span>
             <span
               id="connector-meta-selected"
               data-i18n-option-state="selected"
               data-i18n-default-text="start.tapToSwitch"
               data-i18n-selected-text="start.connectorSelected"
               data-default-text="Tap to switch"
-              data-selected-text="Selected connector">Selected connector</span>
+              data-selected-text="Selected">Selected</span>
             <div data-i18n="start.energy">Energy</div>
             <div data-i18n="start.sessionFee">Session fee</div>
             <div data-i18n="start.idleFee">Idle fee</div>
@@ -204,7 +204,7 @@ test("public portal translations localize Italian start-flow labels", async ({ p
   await expect(page.locator("#connector-status-text")).toHaveText("Disponibile");
   await expect(page.locator(".connector-card-status")).toHaveText("Disponibile");
   await expect(page.locator("#connector-meta-default")).toHaveText("Tocca per cambiare");
-  await expect(page.locator("#connector-meta-selected")).toHaveText("Connettore selezionato");
+  await expect(page.locator("#connector-meta-selected")).toHaveText("Selezionato");
   await expect(page.locator('[data-i18n="start.energy"]')).toHaveText("Energia");
   await expect(page.locator('[data-i18n="start.sessionFee"]')).toHaveText("Costo sessione");
   await expect(page.locator('[data-i18n="start.idleFee"]')).toHaveText("Costo inattività");
