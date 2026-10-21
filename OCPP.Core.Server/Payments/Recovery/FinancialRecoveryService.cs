@@ -140,20 +140,24 @@ namespace OCPP.Core.Server.Payments.Recovery
 
             if (execute)
             {
-                if (_paymentCoordinator == null || !_paymentCoordinator.IsEnabled)
+                // The reservation's own provider must be usable, not the active one (IsOperational); the
+                // coordinator still fails closed when that provider is unknown or not configured.
+                if (_paymentCoordinator == null || !_paymentCoordinator.IsOperational)
                 {
                     return Blocked(entry, "Payment provider integration is unavailable or disabled.");
                 }
 
                 var originalState = reservation.AuthorizationReleaseState;
                 var originalNextAttempt = reservation.AuthorizationReleaseNextAttemptAtUtc;
+                var originalAttemptCount = reservation.AuthorizationReleaseAttemptCount;
                 var originalUpdatedAt = reservation.UpdatedAtUtc;
                 var armedByRecovery = !PaymentAuthorizationReleaseState.IsArmed(originalState);
+                var armedAtUtc = DateTime.UtcNow;
                 if (armedByRecovery)
                 {
-                    reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
-                    reservation.AuthorizationReleaseNextAttemptAtUtc = null;
-                    reservation.UpdatedAtUtc = DateTime.UtcNow;
+                    // A new retry budget, so the reconciliation can cancel a hold an earlier run gave up on.
+                    PaymentCoordinator.ArmAuthorizationReleaseState(reservation);
+                    reservation.UpdatedAtUtc = armedAtUtc;
                     dbContext.SaveChanges();
                 }
 
@@ -164,10 +168,14 @@ namespace OCPP.Core.Server.Payments.Recovery
                 if (armedByRecovery &&
                     string.Equals(result.Outcome, PaymentAuthorizationReleaseOutcome.SkippedNotEligible, StringComparison.OrdinalIgnoreCase))
                 {
-                    reservation.AuthorizationReleaseState = originalState;
-                    reservation.AuthorizationReleaseNextAttemptAtUtc = originalNextAttempt;
-                    reservation.UpdatedAtUtc = originalUpdatedAt;
-                    dbContext.SaveChanges();
+                    RestoreUnusedRecoveryArming(
+                        dbContext,
+                        reservation,
+                        armedAtUtc,
+                        originalState,
+                        originalNextAttempt,
+                        originalAttemptCount,
+                        originalUpdatedAt);
                 }
 
                 dbContext.Entry(reservation).Reload();
@@ -193,6 +201,51 @@ namespace OCPP.Core.Server.Payments.Recovery
             return Eligible(entry, "DryRunEligibleProviderRecheckRequired");
         }
 
+        /// <summary>
+        /// Undoes the arming written by recovery for a reconciliation that did not run, but only while the row still
+        /// holds exactly that arming. A release, a release lease or a new arming that another request wrote in the
+        /// meantime stays.
+        /// </summary>
+        private static void RestoreUnusedRecoveryArming(
+            OCPPCoreContext dbContext,
+            ChargePaymentReservation reservation,
+            DateTime armedAtUtc,
+            string originalState,
+            DateTime? originalNextAttempt,
+            int originalAttemptCount,
+            DateTime originalUpdatedAt)
+        {
+            var reservationId = reservation.ReservationId;
+            var stillArmedByRecovery = dbContext.ChargePaymentReservations
+                .Where(row =>
+                    row.ReservationId == reservationId &&
+                    row.AuthorizationReleaseState == PaymentAuthorizationReleaseState.Pending &&
+                    row.AuthorizationReleaseAttemptCount == 0 &&
+                    row.AuthorizationReleaseNextAttemptAtUtc == null &&
+                    row.UpdatedAtUtc == armedAtUtc);
+            if (dbContext.Database.IsRelational())
+            {
+                stillArmedByRecovery.ExecuteUpdate(setters => setters
+                    .SetProperty(row => row.AuthorizationReleaseState, originalState)
+                    .SetProperty(row => row.AuthorizationReleaseNextAttemptAtUtc, originalNextAttempt)
+                    .SetProperty(row => row.AuthorizationReleaseAttemptCount, originalAttemptCount)
+                    .SetProperty(row => row.UpdatedAtUtc, originalUpdatedAt));
+                return;
+            }
+
+            // The in-memory test provider has no conditional update.
+            if (!stillArmedByRecovery.AsNoTracking().Any())
+            {
+                return;
+            }
+
+            reservation.AuthorizationReleaseState = originalState;
+            reservation.AuthorizationReleaseNextAttemptAtUtc = originalNextAttempt;
+            reservation.AuthorizationReleaseAttemptCount = originalAttemptCount;
+            reservation.UpdatedAtUtc = originalUpdatedAt;
+            dbContext.SaveChanges();
+        }
+
         private FinancialRecoveryReportItem RunInvoice(
             OCPPCoreContext dbContext,
             FinancialRecoveryManifestEntry entry,
@@ -215,7 +268,7 @@ namespace OCPP.Core.Server.Payments.Recovery
                     return Blocked(entry, "Invoice integration service is unavailable.");
                 }
 
-                _invoiceIntegrationService.RecoverCompletedReservation(dbContext, reservation, transaction, checkoutSession: null);
+                _invoiceIntegrationService.RecoverCompletedReservation(dbContext, reservation, transaction, checkoutDetails: null);
             }
 
             return Eligible(entry, execute ? "Executed" : "DryRunEligibleProviderLookupRequired");

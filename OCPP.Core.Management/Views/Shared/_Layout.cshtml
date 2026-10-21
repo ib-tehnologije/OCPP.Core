@@ -72,11 +72,10 @@
     <div class="container">
         @if (User?.Identity?.IsAuthenticated == true && User.IsInRole(Constants.AdminRoleName))
         {
-            var webhookSecret = Config?["Stripe:WebhookSecret"];
-            if (string.IsNullOrWhiteSpace(webhookSecret))
+            if (OCPP.Core.Management.Helpers.PaymentProviderConfiguration.ShouldWarnMissingStripeWebhookSecret(Config))
             {
                 <div class="alert alert-warning mt-3" role="alert">
-                    <strong>Stripe webhook secret is not set.</strong> Webhook requests are processed without signature verification; configure <code>STRIPE_WEBHOOK_SECRET</code> (Stripe signing secret) before going live.
+                    <strong>Stripe webhook secret is not set.</strong> The server rejects Stripe webhooks without a signing secret (or, with <code>Stripe:AllowInsecureWebhooks=true</code>, processes them without signature verification); configure <code>Stripe:WebhookSecret</code> (environment variable <code>Stripe__WebhookSecret</code>, the Stripe signing secret) before going live.
                 </div>
             }
         }

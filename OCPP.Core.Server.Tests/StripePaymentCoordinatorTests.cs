@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
+using OCPP.Core.Server.Payments.Providers;
 using OCPP.Core.Server.Payments.Recovery;
 using System.Linq;
 using System.Collections.Generic;
@@ -1829,7 +1830,7 @@ namespace OCPP.Core.Server.Tests
                     EnergyKwh = 1,
                     EnergyCost = 1
                 },
-                sessionService.GetResponse);
+                StripePaymentGateway.ToCheckoutDetails(sessionService.GetResponse));
 
             Assert.Equal("Changed s.r.o.", draft.BuyerCompanyName);
             Assert.Equal("CZ12345678", draft.BuyerTaxIdentifier);
@@ -4178,7 +4179,9 @@ namespace OCPP.Core.Server.Tests
 
             coordinator.CompleteReservation(context, transaction);
 
-            Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
+            // A transient (503) capture failure keeps the reservation for a settlement retry instead of failing it.
+            Assert.Equal(PaymentReservationStatus.WaitingForDisconnect, reservation.Status);
+            Assert.Equal("settlement_retry_pending", reservation.FailureCode);
             Assert.Equal(5, transaction.IdleUsageFeeMinutes);
             Assert.Equal(1.0m, transaction.IdleUsageFeeAmount);
             Assert.Null(transaction.ChargingEndedAtUtc);
@@ -5373,7 +5376,7 @@ namespace OCPP.Core.Server.Tests
         public string? LastR1InvoiceNumber { get; private set; }
         public string? LastR1InvoiceUrl { get; private set; }
 
-        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session, string statusUrl)
+        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, PaymentCheckoutDetails checkoutDetails, string statusUrl)
         {
             PaymentAuthorizedCount++;
             LastToEmail = toEmail;
@@ -5574,10 +5577,10 @@ namespace OCPP.Core.Server.Tests
         public bool ThrowOnHandle { get; set; }
         public ChargePaymentReservation? LastReservation { get; private set; }
         public Transaction? LastTransaction { get; private set; }
-        public Session? LastCheckoutSession { get; private set; }
-        public Action<OCPPCoreContext, ChargePaymentReservation, Transaction, Session>? OnHandle { get; set; }
+        public PaymentCheckoutDetails? LastCheckoutSession { get; private set; }
+        public Action<OCPPCoreContext, ChargePaymentReservation, Transaction, PaymentCheckoutDetails>? OnHandle { get; set; }
 
-        public void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
+        public void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutSession)
         {
             HandleCompletedReservationCount++;
             LastReservation = reservation;
@@ -5626,6 +5629,8 @@ namespace OCPP.Core.Server.Tests
 
     internal class TestIdleWarningEmailService : IdleFeeWarningEmailService
     {
+        private readonly StripeOptions _stripeOptions;
+
         public Session? SessionToReturn { get; set; }
 
         public TestIdleWarningEmailService(
@@ -5635,8 +5640,9 @@ namespace OCPP.Core.Server.Tests
             IOptions<NotificationOptions> notificationOptions,
             IOptions<StripeOptions> stripeOptions,
             Func<DateTime> utcNow)
-            : base(scopeFactory, logger, configuration, notificationOptions, stripeOptions, utcNow)
+            : base(scopeFactory, logger, configuration, notificationOptions, PaymentCheckoutSettings.Resolve(new PaymentProviderOptions(), stripeOptions.Value), utcNow)
         {
+            _stripeOptions = stripeOptions.Value;
         }
 
         public TestIdleWarningEmailService(
@@ -5647,12 +5653,20 @@ namespace OCPP.Core.Server.Tests
             IOptions<StripeOptions> stripeOptions,
             IOptions<PaymentFlowOptions> flowOptions,
             Func<DateTime> utcNow)
-            : base(scopeFactory, logger, configuration, notificationOptions, stripeOptions, flowOptions, utcNow)
+            : base(scopeFactory, logger, configuration, notificationOptions, PaymentCheckoutSettings.Resolve(new PaymentProviderOptions(), stripeOptions.Value), flowOptions, utcNow)
         {
+            _stripeOptions = stripeOptions.Value;
         }
 
         public Task RunOnce(CancellationToken token = default) => SweepAsync(token);
 
-        protected override Session GetCheckoutSession(string checkoutSessionId, Guid reservationId) => SessionToReturn ?? new Session();
+        // The harness registers no payment coordinator; mirror the Stripe gate the options describe.
+        protected override bool ArePaymentsEnabled(IServiceProvider scopedServices) =>
+            _stripeOptions.Enabled &&
+            !string.IsNullOrWhiteSpace(_stripeOptions.ApiKey) &&
+            !string.IsNullOrWhiteSpace(_stripeOptions.ReturnBaseUrl);
+
+        protected override PaymentCheckoutDetails GetCheckoutDetails(IServiceProvider scopedServices, ChargePaymentReservation reservation) =>
+            StripePaymentGateway.ToCheckoutDetails(SessionToReturn ?? new Session());
     }
 }

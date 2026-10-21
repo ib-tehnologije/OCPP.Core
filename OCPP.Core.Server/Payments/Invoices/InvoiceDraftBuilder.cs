@@ -1,18 +1,18 @@
 using System;
 using System.Globalization;
-using Stripe.Checkout;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments.Providers;
 
 namespace OCPP.Core.Server.Payments.Invoices
 {
     public interface IInvoiceDraftBuilder
     {
-        InvoiceDraft Build(ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession);
+        InvoiceDraft Build(ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutDetails);
     }
 
     public class InvoiceDraftBuilder : IInvoiceDraftBuilder
     {
-        public InvoiceDraft Build(ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
+        public InvoiceDraft Build(ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutDetails)
         {
             if (reservation == null) throw new ArgumentNullException(nameof(reservation));
             if (transaction == null) throw new ArgumentNullException(nameof(transaction));
@@ -21,36 +21,36 @@ namespace OCPP.Core.Server.Payments.Invoices
             {
                 ReservationId = reservation.ReservationId,
                 TransactionId = transaction.TransactionId,
-                InvoiceKind = HasR1BuyerData(reservation, checkoutSession) ? "R1" : "Retail",
-                R1BuyerDetailsMissing = !HasR1BuyerData(reservation, checkoutSession) &&
-                    (reservation.InvoiceR1RequestedAtUtc.HasValue || IsR1Requested(checkoutSession)),
+                InvoiceKind = HasR1BuyerData(reservation, checkoutDetails) ? "R1" : "Retail",
+                R1BuyerDetailsMissing = !HasR1BuyerData(reservation, checkoutDetails) &&
+                    (reservation.InvoiceR1RequestedAtUtc.HasValue || IsR1Requested(checkoutDetails)),
                 IssueDateUtc = reservation.CapturedAtUtc ?? transaction.StopTime ?? reservation.UpdatedAtUtc,
                 ServiceDateFromUtc = transaction.StartTime,
                 ServiceDateToUtc = transaction.StopTime,
                 Currency = NormalizeCurrency(reservation.Currency ?? transaction.Currency),
                 BuyerCompanyName = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
                     ? reservation.InvoiceBuyerCompanyName
-                    : GetMetadataValue(checkoutSession, "buyer_company"),
-                BuyerPersonalName = checkoutSession?.CustomerDetails?.Name?.Trim(),
+                    : GetMetadataValue(checkoutDetails, "buyer_company"),
+                BuyerPersonalName = checkoutDetails?.CustomerName?.Trim(),
                 BuyerOib = reservation.InvoiceBuyerConfirmedAtUtc.HasValue && string.Equals(reservation.InvoiceBuyerCountry, "HR", StringComparison.OrdinalIgnoreCase)
                     ? reservation.InvoiceBuyerTaxIdentifier
-                    : GetMetadataValue(checkoutSession, "buyer_oib"),
+                    : GetMetadataValue(checkoutDetails, "buyer_oib"),
                 BuyerCountry = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
                     ? reservation.InvoiceBuyerCountry
-                    : GetMetadataValue(checkoutSession, "buyer_country") ?? "HR",
+                    : GetMetadataValue(checkoutDetails, "buyer_country") ?? "HR",
                 BuyerStreet = reservation.InvoiceBuyerStreet,
                 BuyerPostalCode = reservation.InvoiceBuyerPostalCode,
                 BuyerCity = reservation.InvoiceBuyerCity,
                 BuyerTaxIdentifier = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
                     ? reservation.InvoiceBuyerNormalizedVatIdentifier ?? reservation.InvoiceBuyerTaxIdentifier
-                    : GetMetadataValue(checkoutSession, "buyer_tax_identifier") ?? GetMetadataValue(checkoutSession, "buyer_oib"),
+                    : GetMetadataValue(checkoutDetails, "buyer_tax_identifier") ?? GetMetadataValue(checkoutDetails, "buyer_oib"),
                 BuyerRegistrationNumber = reservation.InvoiceBuyerRegistrationNumber,
                 BuyerIdentifierIsVatRegistration = reservation.InvoiceBuyerConfirmedAtUtc.HasValue
                     ? reservation.InvoiceBuyerIdentifierIsVatRegistration
                     : null,
                 BuyerEmail = reservation.InvoiceBuyerConfirmedAtUtc.HasValue || !string.IsNullOrWhiteSpace(reservation.InvoiceBuyerEmail)
                     ? reservation.InvoiceBuyerEmail
-                    : checkoutSession?.CustomerDetails?.Email?.Trim(),
+                    : checkoutDetails?.CustomerEmail?.Trim(),
                 ChargePointId = reservation.ChargePointId,
                 ConnectorId = reservation.ConnectorId,
                 StripeCheckoutSessionId = reservation.StripeCheckoutSessionId,
@@ -158,38 +158,26 @@ namespace OCPP.Core.Server.Payments.Invoices
         }
 
         // R1 needs confirmed buyer data, or legacy checkout metadata that carries the tax identifier.
-        private static bool HasR1BuyerData(ChargePaymentReservation reservation, Session checkoutSession)
+        private static bool HasR1BuyerData(ChargePaymentReservation reservation, PaymentCheckoutDetails checkoutDetails)
         {
             if (reservation.InvoiceBuyerConfirmedAtUtc.HasValue)
             {
                 return true;
             }
 
-            return IsR1Requested(checkoutSession) &&
-                (!string.IsNullOrWhiteSpace(GetMetadataValue(checkoutSession, "buyer_tax_identifier")) ||
-                 !string.IsNullOrWhiteSpace(GetMetadataValue(checkoutSession, "buyer_oib")));
+            return IsR1Requested(checkoutDetails) &&
+                (!string.IsNullOrWhiteSpace(GetMetadataValue(checkoutDetails, "buyer_tax_identifier")) ||
+                 !string.IsNullOrWhiteSpace(GetMetadataValue(checkoutDetails, "buyer_oib")));
         }
 
-        private static bool IsR1Requested(Session checkoutSession)
+        private static bool IsR1Requested(PaymentCheckoutDetails checkoutDetails)
         {
-            var invoiceType = GetMetadataValue(checkoutSession, "invoice_type");
+            var invoiceType = GetMetadataValue(checkoutDetails, "invoice_type");
             return string.Equals(invoiceType, "R1", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string GetMetadataValue(Session checkoutSession, string key)
-        {
-            if (checkoutSession?.Metadata == null || string.IsNullOrWhiteSpace(key))
-            {
-                return null;
-            }
-
-            if (checkoutSession.Metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                return value.Trim();
-            }
-
-            return null;
-        }
+        private static string GetMetadataValue(PaymentCheckoutDetails checkoutDetails, string key) =>
+            checkoutDetails?.GetMetadataValue(key);
 
         private static string NormalizeCurrency(string currency)
         {

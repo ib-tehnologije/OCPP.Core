@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
-using Stripe.Checkout;
+using OCPP.Core.Server.Payments.Providers;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -145,7 +145,7 @@ namespace OCPP.Core.Server.Tests
                 service.SendPaymentAuthorized(
                     "driver@example.com",
                     reservation,
-                    new Session { Id = "sess_email_sink" },
+                    new PaymentCheckoutDetails { SessionReference = "sess_email_sink" },
                     statusUrl);
 
                 string sinkFile = Assert.Single(Directory.GetFiles(sinkDirectory, "*.json"));

@@ -46,8 +46,17 @@ namespace OCPP.Core.Database
         public int MaxUsageFeeMinutes { get; set; }
         public int UsageFeeAnchorMinutes { get; set; } // 0 = from session start, 1 = from charging end
         public string Currency { get; set; }
+        // Payment provider references. The column names predate provider selection: they hold the
+        // checkout reference (Stripe Checkout Session id, Saferpay PaymentPage token) and the
+        // authorization reference (Stripe PaymentIntent id, Saferpay Transaction id) of PaymentProvider.
         public string StripeCheckoutSessionId { get; set; }
         public string StripePaymentIntentId { get; set; }
+        /// <summary>Payment provider that created this reservation. Rows created before provider tracking are Stripe.</summary>
+        public string PaymentProvider { get; set; } = "Stripe";
+        /// <summary>Payer e-mail reported by the payment provider at authorization (receipts, warnings, invoices).</summary>
+        public string PayerEmail { get; set; }
+        /// <summary>Payer name reported by the payment provider at authorization.</summary>
+        public string PayerName { get; set; }
         public string Status { get; set; }
         public DateTime CreatedAtUtc { get; set; }
         public DateTime UpdatedAtUtc { get; set; }

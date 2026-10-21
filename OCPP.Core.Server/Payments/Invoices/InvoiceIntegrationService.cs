@@ -7,17 +7,17 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
-using Stripe.Checkout;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments.Providers;
 using OCPP.Core.Server.Payments.Invoices.ERacuni;
 
 namespace OCPP.Core.Server.Payments.Invoices
 {
     public interface IInvoiceIntegrationService
     {
-        void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession);
-        void RecoverCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession) =>
-            HandleCompletedReservation(dbContext, reservation, transaction, checkoutSession);
+        void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutDetails);
+        void RecoverCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutDetails) =>
+            HandleCompletedReservation(dbContext, reservation, transaction, checkoutDetails);
     }
 
     public class InvoiceIntegrationService : IInvoiceIntegrationService
@@ -43,17 +43,17 @@ namespace OCPP.Core.Server.Payments.Invoices
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
+        public void HandleCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutDetails)
         {
             HandleCompletedReservationCore(
                 dbContext,
                 reservation,
                 transaction,
-                checkoutSession,
+                checkoutDetails,
                 requireProviderPreflight: false);
         }
 
-        public void RecoverCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
+        public void RecoverCompletedReservation(OCPPCoreContext dbContext, ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutDetails)
         {
             if (!_options.Enabled)
             {
@@ -69,7 +69,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 dbContext,
                 reservation,
                 transaction,
-                checkoutSession,
+                checkoutDetails,
                 requireProviderPreflight: true);
         }
 
@@ -77,7 +77,7 @@ namespace OCPP.Core.Server.Payments.Invoices
             OCPPCoreContext dbContext,
             ChargePaymentReservation reservation,
             Transaction transaction,
-            Session checkoutSession,
+            PaymentCheckoutDetails checkoutDetails,
             bool requireProviderPreflight)
         {
             if (!_options.Enabled || reservation == null || transaction == null)
@@ -115,7 +115,7 @@ namespace OCPP.Core.Server.Payments.Invoices
                 reservation = durableReservation;
             }
 
-            var draft = _draftBuilder.Build(reservation, transaction, checkoutSession);
+            var draft = _draftBuilder.Build(reservation, transaction, checkoutDetails);
             var auditLog = CreateAuditLog(draft, reservation, provider, mode);
             var providerCallStarted = false;
             var providerLookupCompleted = false;

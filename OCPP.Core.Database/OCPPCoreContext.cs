@@ -444,6 +444,17 @@ namespace OCPP.Core.Database
                 entity.Property(e => e.StripePaymentIntentId)
                     .HasMaxLength(200);
 
+                entity.Property(e => e.PaymentProvider)
+                    .IsRequired()
+                    .HasMaxLength(32)
+                    .HasDefaultValue("Stripe");
+
+                entity.Property(e => e.PayerEmail)
+                    .HasMaxLength(254);
+
+                entity.Property(e => e.PayerName)
+                    .HasMaxLength(200);
+
                 entity.Property(e => e.PricePerKwh)
                     .HasColumnType("decimal(18,4)");
                 entity.Property(e => e.NightPricePerKwh)

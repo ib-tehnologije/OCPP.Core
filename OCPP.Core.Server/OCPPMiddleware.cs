@@ -23,10 +23,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using Newtonsoft.Json;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
+using OCPP.Core.Server.Payments.Providers;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -82,6 +84,10 @@ namespace OCPP.Core.Server
         private bool ReservationProfileEnabled => false;
         private readonly ConcurrentDictionary<int, DateTime> _idleAutoStopTransactions = new ConcurrentDictionary<int, DateTime>();
         private readonly ConcurrentDictionary<int, DateTime> _maxEnergyAutoStopTransactions = new ConcurrentDictionary<int, DateTime>();
+        // Set once the deprecated Stripe webhook path warning was logged (see LogDeprecatedStripeWebhookPath).
+        private int _deprecatedStripeWebhookPathWarned;
+        // Payment reservations with a remote start in progress on this server instance (see TryStartChargingAsync).
+        private readonly ConcurrentDictionary<Guid, byte> _remoteStartsInFlight = new ConcurrentDictionary<Guid, byte>();
 
         // Dictionary with status objects for each charge point
         private static readonly ConcurrentDictionary<string, ChargePointStatus> _chargePointStatusDict =
@@ -888,17 +894,94 @@ namespace OCPP.Core.Server
             return await TryStartChargingAsync(dbContext, reservation, caller);
         }
 
+        /// <summary>
+        /// Starts charging (or waits for the cable) for a paid reservation after the payer return (Confirm), a resume
+        /// or a verified provider notification. The reservation is re-read from the database and started only while it
+        /// is <c>Authorized</c> and no start is under way: not after a start was requested or charging began, not while
+        /// the plug-in (<c>Preparing</c>) trigger owns the start, and not within <c>Payments:ChargerResponseTimeoutMs</c>
+        /// of the last remote start result. Repeated returns and parallel triggers therefore send one remote start.
+        /// </summary>
+        private async Task<(string Status, string Reason)> TryStartPaymentReservationAsync(OCPPCoreContext dbContext, Guid reservationId, string caller)
+        {
+            var reservation = await LoadFreshReservationAsync(dbContext, reservationId);
+            if (reservation == null)
+            {
+                _logger.LogWarning("TryStartPaymentReservation => Reservation not found reservation={ReservationId} caller={Caller}", reservationId, caller);
+                return ("Error", "NoReservation");
+            }
+
+            if (!string.Equals(reservation.Status, PaymentReservationStatus.Authorized, StringComparison.OrdinalIgnoreCase))
+            {
+                bool alreadyStarted =
+                    string.Equals(reservation.Status, PaymentReservationStatus.StartRequested, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(reservation.Status, PaymentReservationStatus.Charging, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(reservation.Status, PaymentReservationStatus.WaitingForDisconnect, StringComparison.OrdinalIgnoreCase);
+                _logger.LogInformation("TryStartPaymentReservation => Skipping start reservation={ReservationId} status={Status} caller={Caller}",
+                    reservation.ReservationId,
+                    reservation.Status ?? "(null)",
+                    caller);
+                return (reservation.Status ?? "InvalidStatus", alreadyStarted ? "AlreadyRequested" : "NotAuthorized");
+            }
+
+            if (reservation.TransactionId.HasValue)
+            {
+                return (reservation.Status, "AlreadyAdvanced");
+            }
+
+            DateTime nowUtc = _utcNow();
+            if (IsWithinRemoteStartWindow(reservation, nowUtc))
+            {
+                // A charger that did not answer in time (Timeout keeps the reservation Authorized) may still start;
+                // a second start right after it can be rejected and end the reservation.
+                _logger.LogInformation("TryStartPaymentReservation => Skipping start after recent remote start reservation={ReservationId} remoteStartAt={RemoteStartAt:u} result={RemoteStartResult} caller={Caller}",
+                    reservation.ReservationId,
+                    reservation.RemoteStartSentAtUtc,
+                    reservation.RemoteStartResult ?? "(null)",
+                    caller);
+                return (reservation.Status, "RecentRemoteStart");
+            }
+
+            if (reservation.AwaitingPlug == true)
+            {
+                _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var cpStatus);
+                if (RequirePreparingBeforeRemoteStart() && !IsConnectorPreparing(dbContext, reservation, cpStatus))
+                {
+                    // The Preparing status notification starts it when the cable is plugged in.
+                    return (reservation.Status, "AwaitingPlug");
+                }
+
+                // The cable is already in (the Preparing trigger may have run before AwaitingPlug was saved). Claim the
+                // start the same way the trigger does, so only one of them sends it.
+                var claimed = await ClaimAwaitingPlugReservationAsync(dbContext, reservation, reservation.ConnectorId, nowUtc, autoReassigned: false);
+                if (claimed == null)
+                {
+                    _logger.LogInformation("TryStartPaymentReservation => Awaiting-plug start already claimed reservation={ReservationId} caller={Caller}",
+                        reservationId,
+                        caller);
+                    return (PaymentReservationStatus.Authorized, "StartInProgress");
+                }
+
+                return await TryStartChargingAsync(dbContext, claimed, caller);
+            }
+
+            return await TryStartChargingOrAwaitPlugAsync(dbContext, reservation, caller);
+        }
+
         private IQueryable<ChargePaymentReservation> BuildAwaitingPlugReservationQuery(
             OCPPCoreContext dbContext,
             string chargePointId,
             DateTime nowUtc)
         {
+            // A reservation inside the remote-start window is left out (and keeps AwaitingPlug): its earlier start
+            // may still be accepted late, and claiming it now would use up the flag without sending a start.
+            var remoteStartWindowStart = nowUtc.AddMilliseconds(-TimoutWaitForCharger);
             return dbContext.ChargePaymentReservations
                 .Where(r =>
                     r.ChargePointId == chargePointId &&
                     r.Status == PaymentReservationStatus.Authorized &&
                     r.TransactionId == null &&
                     r.AwaitingPlug == true &&
+                    (!r.RemoteStartSentAtUtc.HasValue || r.RemoteStartSentAtUtc <= remoteStartWindowStart) &&
                     (!r.StartDeadlineAtUtc.HasValue || r.StartDeadlineAtUtc > nowUtc));
         }
 
@@ -983,6 +1066,7 @@ namespace OCPP.Core.Server
             }
 
             int originalConnectorId = reservation.ConnectorId;
+            var remoteStartWindowStart = nowUtc.AddMilliseconds(-TimoutWaitForCharger);
 
             try
             {
@@ -990,7 +1074,8 @@ namespace OCPP.Core.Server
                     .Where(r =>
                         r.ReservationId == reservation.ReservationId &&
                         r.Status == PaymentReservationStatus.Authorized &&
-                        r.AwaitingPlug == true)
+                        r.AwaitingPlug == true &&
+                        (!r.RemoteStartSentAtUtc.HasValue || r.RemoteStartSentAtUtc <= remoteStartWindowStart))
                     .ExecuteUpdateAsync(s => s
                         .SetProperty(r => r.ConnectorId, preparingConnectorId)
                         .SetProperty(r => r.AwaitingPlug, (bool?)false)
@@ -1614,12 +1699,14 @@ namespace OCPP.Core.Server
             {
                 // format: /API/<command>[/chargepointId[/connectorId[/parameter]]]
                 string[] urlParts = context.Request.Path.Value.Split('/');
-                bool isStripeWebhook = urlParts.Length >= 4 &&
-                                       string.Equals(urlParts[2], "Payments", StringComparison.OrdinalIgnoreCase) &&
-                                       string.Equals(urlParts[3], "Webhook", StringComparison.OrdinalIgnoreCase);
+                // PSP notifications (/API/Payments/Webhook[/{provider}]) cannot send our API key;
+                // the payment provider authenticates them instead (signature or server-side lookup).
+                bool isPaymentProviderWebhook = urlParts.Length >= 4 &&
+                                                string.Equals(urlParts[2], "Payments", StringComparison.OrdinalIgnoreCase) &&
+                                                string.Equals(urlParts[3], "Webhook", StringComparison.OrdinalIgnoreCase);
 
                 // Check authentication (X-API-Key)
-                if (!isStripeWebhook)
+                if (!isPaymentProviderWebhook)
                 {
                     string apiKeyConfig = _configuration.GetValue<string>("ApiKey");
                     if (!string.IsNullOrWhiteSpace(apiKeyConfig))
@@ -1647,7 +1734,7 @@ namespace OCPP.Core.Server
                 }
                 else
                 {
-                    _logger.LogDebug("OCPPMiddleware => Skipping API key check for Stripe webhook");
+                    _logger.LogDebug("OCPPMiddleware => Skipping API key check for payment provider webhook");
                 }
 
                 if (urlParts.Length >= 3)
@@ -2144,11 +2231,18 @@ namespace OCPP.Core.Server
 
             if (string.Equals(action, "Webhook", StringComparison.OrdinalIgnoreCase))
             {
-                await HandlePaymentWebhookAsync(context, dbContext);
+                await HandlePaymentWebhookAsync(context, dbContext, urlParts);
                 return;
             }
 
-            if (_paymentCoordinator == null || !_paymentCoordinator.IsEnabled)
+            // New checkouts need the active provider (IsEnabled). Every other action works on an existing
+            // reservation, which only needs its own provider (IsOperational): a previous provider's
+            // reservations keep confirming, stopping and reporting status after Payments:Provider changes.
+            // The coordinator still fails closed per reservation when its own provider is unusable.
+            bool isCreate = string.Equals(action, "Create", StringComparison.OrdinalIgnoreCase);
+            bool paymentsAvailable = _paymentCoordinator != null &&
+                                     (isCreate ? _paymentCoordinator.IsEnabled : _paymentCoordinator.IsOperational);
+            if (!paymentsAvailable)
             {
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 context.Response.ContentType = "application/json";
@@ -2156,7 +2250,7 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            if (string.Equals(action, "Create", StringComparison.OrdinalIgnoreCase))
+            if (isCreate)
             {
                 await HandlePaymentCreateAsync(context, dbContext);
             }
@@ -2336,7 +2430,9 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            if (request == null || request.ReservationId == Guid.Empty || string.IsNullOrWhiteSpace(request.CheckoutSessionId))
+            // CheckoutSessionId is optional here: some providers return the payer without a checkout
+            // reference, so the coordinator validates it against the provider that owns the reservation.
+            if (request == null || request.ReservationId == Guid.Empty)
             {
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 return;
@@ -2344,7 +2440,7 @@ namespace OCPP.Core.Server
 
             _logger.LogInformation("Payments/Confirm => Incoming request reservation={ReservationId} checkoutSession={CheckoutSessionId} ip={RemoteIp}",
                 request.ReservationId,
-                request.CheckoutSessionId,
+                string.IsNullOrWhiteSpace(request.CheckoutSessionId) ? "(none)" : request.CheckoutSessionId,
                 context.Connection.RemoteIpAddress?.ToString() ?? "(unknown)");
 
             var confirmation = _paymentCoordinator.ConfirmReservation(dbContext, request.ReservationId, request.CheckoutSessionId);
@@ -2356,8 +2452,12 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            var reservation = confirmation.Reservation;
-            var tryStart = await TryStartChargingOrAwaitPlugAsync(dbContext, reservation, "Confirm");
+            // A confirmed reservation may already be starting or charging (a repeated return, or a provider
+            // notification that started it first); only an Authorized reservation without a start under way is started.
+            var tryStart = await TryStartPaymentReservationAsync(
+                dbContext,
+                confirmation.Reservation?.ReservationId ?? request.ReservationId,
+                "Confirm");
 
             context.Response.StatusCode = (int)HttpStatusCode.OK;
             context.Response.ContentType = "application/json";
@@ -2409,6 +2509,35 @@ namespace OCPP.Core.Server
                 error = resume.Error,
                 locksConnector = PaymentReservationStatus.LocksConnector(resume.Reservation?.Status)
             }));
+
+            if (!resume.Success || !string.Equals(resume.Status, "Status", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            // "Status" sends the payer to the status page. A reservation that Resume confirmed (the browser return was
+            // lost and no notification arrived), or one that is authorized but was never started, is started here like
+            // a Confirm; otherwise nothing would start it and the start window would end in StartTimeout. The answer
+            // goes out first: the public start page waits only 30 seconds for Resume, and a remote start can wait for
+            // the charger for up to Payments:ChargerResponseTimeoutMs.
+            await CompleteResponseBeforeStartAsync(context, "Payments/Resume");
+            try
+            {
+                var tryStart = await TryStartPaymentReservationAsync(
+                    dbContext,
+                    resume.Reservation?.ReservationId ?? request.ReservationId,
+                    "Resume");
+                _logger.LogInformation("Payments/Resume => Start reservation={ReservationId} status={Status} reason={Reason}",
+                    request.ReservationId,
+                    tryStart.Status,
+                    tryStart.Reason);
+            }
+            catch (Exception exp)
+            {
+                // The start can still happen through a later return, resume or the plug-in (Preparing) path.
+                _logger.LogError(exp, "Payments/Resume => Start failed reservation={ReservationId}", request.ReservationId);
+                ResetConnectionDbContext(dbContext);
+            }
         }
 
         private async Task HandlePaymentCancelAsync(HttpContext context, OCPPCoreContext dbContext)
@@ -2455,12 +2584,15 @@ namespace OCPP.Core.Server
             }
 
             var updatedReservation = dbContext.ChargePaymentReservations.Find(request.ReservationId);
+            bool cancellationApplied = string.Equals(updatedReservation?.Status, PaymentReservationStatus.Cancelled, StringComparison.OrdinalIgnoreCase);
             context.Response.StatusCode = (int)HttpStatusCode.OK;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(JsonConvert.SerializeObject(new
             {
                 status = updatedReservation?.Status ?? "NotFound",
-                cancellationApplied = string.Equals(updatedReservation?.Status, PaymentReservationStatus.Cancelled, StringComparison.OrdinalIgnoreCase)
+                cancellationApplied,
+                // Why the reservation was not cancelled, for example a payment captured at checkout that needs a refund.
+                message = cancellationApplied ? null : updatedReservation?.FailureMessage
             }));
         }
 
@@ -3261,6 +3393,29 @@ namespace OCPP.Core.Server
         {
             if (reservation == null) return ("Error", "NoReservation");
 
+            // One remote start per reservation at a time. A second start sent while the first still waits for the
+            // charger can be rejected; the rejection would end the reservation (StartRejected cancels the hold) while
+            // the accepted start charges a session that can no longer be linked. In memory, per server instance.
+            if (!_remoteStartsInFlight.TryAdd(reservation.ReservationId, 0))
+            {
+                _logger.LogInformation("TryStartCharging => Remote start already in progress reservation={ReservationId} caller={Caller}",
+                    reservation.ReservationId,
+                    caller);
+                return (reservation.Status ?? PaymentReservationStatus.Authorized, "StartInProgress");
+            }
+
+            try
+            {
+                return await TryStartChargingCoreAsync(dbContext, reservation, caller);
+            }
+            finally
+            {
+                _remoteStartsInFlight.TryRemove(reservation.ReservationId, out _);
+            }
+        }
+
+        private async Task<(string Status, string Reason)> TryStartChargingCoreAsync(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string caller)
+        {
             _chargePointStatusDict.TryGetValue(reservation.ChargePointId, out var status);
             var startability = GetConnectorStartability(dbContext, reservation.ChargePointId, reservation.ConnectorId, status, reservation.ReservationId);
             if (!startability.Startable)
@@ -3308,6 +3463,41 @@ namespace OCPP.Core.Server
             if (!string.IsNullOrWhiteSpace(reservation.OcppIdTag))
             {
                 EnsureChargeTagExists(dbContext, reservation.OcppIdTag);
+            }
+
+            // The caller's checks ran on an entity read before this start held the in-flight guard; a start that
+            // finished in the meantime released the guard and already advanced the row. Re-read it right before sending.
+            await dbContext.Entry(reservation).ReloadAsync();
+            if (dbContext.Entry(reservation).State == EntityState.Detached)
+            {
+                return ("Error", "NoReservation");
+            }
+
+            bool authorized = string.Equals(reservation.Status, PaymentReservationStatus.Authorized, StringComparison.OrdinalIgnoreCase);
+            if (!authorized || reservation.TransactionId.HasValue)
+            {
+                bool alreadyStarted =
+                    string.Equals(reservation.Status, PaymentReservationStatus.StartRequested, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(reservation.Status, PaymentReservationStatus.Charging, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(reservation.Status, PaymentReservationStatus.WaitingForDisconnect, StringComparison.OrdinalIgnoreCase);
+                _logger.LogInformation("TryStartCharging => Skipping remote start, reservation changed reservation={ReservationId} caller={Caller} status={Status} tx={TransactionId}",
+                    reservation.ReservationId,
+                    caller,
+                    reservation.Status ?? "(null)",
+                    reservation.TransactionId);
+                // Same reasons as the start rule in TryStartPaymentReservationAsync.
+                string reason = authorized ? "AlreadyAdvanced" : alreadyStarted ? "AlreadyRequested" : "NotAuthorized";
+                return (reservation.Status ?? "InvalidStatus", reason);
+            }
+
+            if (IsWithinRemoteStartWindow(reservation, _utcNow()))
+            {
+                _logger.LogInformation("TryStartCharging => Skipping remote start after recent remote start reservation={ReservationId} remoteStartAt={RemoteStartAt:u} result={RemoteStartResult} caller={Caller}",
+                    reservation.ReservationId,
+                    reservation.RemoteStartSentAtUtc,
+                    reservation.RemoteStartResult ?? "(null)",
+                    caller);
+                return (reservation.Status, "RecentRemoteStart");
             }
 
             string connectorId = reservation.ConnectorId.ToString();
@@ -3365,67 +3555,267 @@ namespace OCPP.Core.Server
             return ("StartRejected", remoteStatus ?? "RemoteStartFailed");
         }
 
-        private async Task HandlePaymentWebhookAsync(HttpContext context, OCPPCoreContext dbContext)
+        private async Task HandlePaymentWebhookAsync(HttpContext context, OCPPCoreContext dbContext, string[] urlParts)
         {
-            if (!HttpMethods.IsPost(context.Request.Method))
+            // Routes: /API/Payments/Webhook (legacy route, Stripe) and /API/Payments/Webhook/{provider}.
+            // The provider segment is passed through unchanged; the coordinator normalizes and validates it.
+            bool routed = TryGetWebhookProviderSegment(urlParts, out string providerSegment);
+            if (IsDeprecatedStripeWebhookPath(context.Request, routed, providerSegment))
+            {
+                // Before provider routing, every path below /API/Payments/Webhook was the Stripe webhook.
+                // Keep signed Stripe deliveries to such endpoints working, through the legacy route.
+                LogDeprecatedStripeWebhookPath(context.Request.Path.Value);
+                routed = true;
+                providerSegment = null;
+            }
+
+            if (!routed)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                return;
+            }
+
+            if (!IsAllowedWebhookMethod(providerSegment, context.Request.Method))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
                 return;
             }
 
-            string payload = await ReadRequestBodyAsync(context);
-            string signature = context.Request.Headers["Stripe-Signature"].FirstOrDefault();
+            string payload = HttpMethods.IsGet(context.Request.Method)
+                ? string.Empty
+                : await ReadRequestBodyAsync(context) ?? string.Empty;
 
-            _logger.LogInformation("Payments/Webhook => Incoming webhook ip={RemoteIp} payloadLength={PayloadLength} hasSignature={HasSignature}",
+            var webhookRequest = new PaymentWebhookRequest
+            {
+                Provider = providerSegment,
+                Method = context.Request.Method,
+                Query = CopyFirstValues(context.Request.Query),
+                Headers = CopyFirstValues(context.Request.Headers),
+                Body = payload
+            };
+
+            _logger.LogInformation("Payments/Webhook => Incoming webhook provider={Provider} method={Method} ip={RemoteIp} payloadLength={PayloadLength} queryParameters={QueryParameterCount}",
+                providerSegment ?? "(legacy)",
+                context.Request.Method,
                 context.Connection.RemoteIpAddress?.ToString() ?? "(unknown)",
-                payload?.Length ?? 0,
-                string.IsNullOrWhiteSpace(signature) ? "no" : "yes");
+                payload.Length,
+                webhookRequest.Query.Count);
 
-            _paymentCoordinator?.HandleWebhookEvent(dbContext, payload, signature);
+            if (_paymentCoordinator == null)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                return;
+            }
 
-            // Best-effort: if this is a checkout completion, kick TryStartCharging to avoid relying on browser redirect.
+            PaymentWebhookResult result;
             try
             {
-                var jobj = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(payload);
-                string type = jobj?["type"]?.ToString();
-                if (string.Equals(type, "checkout.session.completed", StringComparison.OrdinalIgnoreCase))
-                {
-                    var dataObject = jobj?["data"]?["object"];
-                    var metadataToken = dataObject?["metadata"];
-                    string paymentStatus = dataObject?["payment_status"]?.ToString();
-                    string resIdString = null;
-                    if (metadataToken is Newtonsoft.Json.Linq.JObject metaObj && metaObj.TryGetValue("reservation_id", out var resToken))
-                    {
-                        resIdString = resToken?.ToString();
-                    }
+                result = await _paymentCoordinator.HandleWebhookAsync(dbContext, webhookRequest, context.RequestAborted);
+            }
+            catch (Exception exp)
+            {
+                // A non-2xx answer makes the payment provider retry the notification later.
+                _logger.LogError(exp, "Payments/Webhook => Unhandled error provider={Provider}", providerSegment ?? "(legacy)");
+                context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                return;
+            }
 
-                    if (Guid.TryParse(resIdString, out var resId))
-                    {
-                        var reservation = dbContext.ChargePaymentReservations.Find(resId);
-                        if (reservation != null)
-                        {
-                            if (reservation.Status == PaymentReservationStatus.Authorized ||
-                                string.Equals(paymentStatus, "paid", StringComparison.OrdinalIgnoreCase))
-                            {
-                                await TryStartChargingOrAwaitPlugAsync(dbContext, reservation, "StripeWebhook");
-                            }
-                            else
-                            {
-                                _logger.LogInformation("Payments/Webhook => Skipping auto-start reservation={ReservationId} status={Status} paymentStatus={PaymentStatus}",
-                                    reservation.ReservationId,
-                                    reservation.Status,
-                                    paymentStatus ?? "(none)");
-                            }
-                        }
-                    }
+            int statusCode = result?.StatusCode ?? (int)HttpStatusCode.OK;
+            if (statusCode < 100 || statusCode > 599)
+            {
+                _logger.LogWarning("Payments/Webhook => Coordinator returned invalid HTTP status {StatusCode}; answering 500", statusCode);
+                statusCode = (int)HttpStatusCode.InternalServerError;
+            }
+
+            _logger.LogInformation("Payments/Webhook => Handled provider={Provider} status={StatusCode} authorizedReservations={AuthorizedCount}",
+                result?.Provider ?? providerSegment ?? "(legacy)",
+                statusCode,
+                result?.AuthorizedReservationIds?.Count ?? 0);
+
+            context.Response.StatusCode = statusCode;
+
+            if (result?.AuthorizedReservationIds == null || result.AuthorizedReservationIds.Count == 0)
+            {
+                return;
+            }
+
+            // Acknowledge the PSP before the start: a remote start can wait for the charger for up to
+            // Payments:ChargerResponseTimeoutMs, far beyond the PSP's own timeout (Saferpay: 10 s), and
+            // a late answer only makes the PSP deliver the notification again. The start below still
+            // runs in this request scope and on this DbContext.
+            await CompleteResponseBeforeStartAsync(context, "Payments/Webhook");
+
+            // Start charging without waiting for the browser redirect, but only for reservations the
+            // provider verified. The raw notification is never trusted for this decision.
+            await StartWebhookAuthorizedReservationsAsync(dbContext, result);
+        }
+
+        private async Task CompleteResponseBeforeStartAsync(HttpContext context, string source)
+        {
+            try
+            {
+                await context.Response.CompleteAsync();
+            }
+            catch (Exception exp)
+            {
+                // The caller may already have closed the connection. The start must still happen.
+                _logger.LogDebug(exp, "{Source} => Could not complete the response before the charging start", source);
+            }
+        }
+
+        private static bool IsDeprecatedStripeWebhookPath(HttpRequest request, bool routed, string providerSegment)
+        {
+            // Only a signed Stripe delivery (POST with Stripe-Signature) to a path that is not a known
+            // provider route: a deeper path, or an unknown provider segment such as /Webhook/prod.
+            if (request == null ||
+                !HttpMethods.IsPost(request.Method) ||
+                string.IsNullOrWhiteSpace(request.Headers["Stripe-Signature"].FirstOrDefault()))
+            {
+                return false;
+            }
+
+            return !routed ||
+                   (providerSegment != null && PaymentProviderNames.Normalize(providerSegment) == null);
+        }
+
+        private void LogDeprecatedStripeWebhookPath(string path)
+        {
+            const int maxLoggedPathLength = 200;
+            string loggedPath = string.IsNullOrEmpty(path) || path.Length <= maxLoggedPathLength
+                ? path
+                : path.Substring(0, maxLoggedPathLength);
+
+            // Warn once per process so a busy endpoint does not flood the log; later calls log at debug level.
+            if (Interlocked.Exchange(ref _deprecatedStripeWebhookPathWarned, 1) == 0)
+            {
+                _logger.LogWarning("Payments/Webhook => Deprecated Stripe webhook path {Path} is handled as the legacy /API/Payments/Webhook route. This compatibility route is deprecated; point the Stripe endpoint at /API/Payments/Webhook/Stripe.",
+                    loggedPath);
+            }
+            else
+            {
+                _logger.LogDebug("Payments/Webhook => Deprecated Stripe webhook path {Path} handled as the legacy route", loggedPath);
+            }
+        }
+
+        private async Task StartWebhookAuthorizedReservationsAsync(OCPPCoreContext dbContext, PaymentWebhookResult result)
+        {
+            var reservationIds = result?.AuthorizedReservationIds;
+            if (reservationIds == null || reservationIds.Count == 0)
+            {
+                return;
+            }
+
+            string trigger = BuildWebhookStartTrigger(result.Provider);
+            foreach (Guid reservationId in reservationIds.Where(id => id != Guid.Empty).Distinct())
+            {
+                try
+                {
+                    // Re-reads the reservation and starts it only while it is still Authorized and not already
+                    // starting (for example through the browser return).
+                    var tryStart = await TryStartPaymentReservationAsync(dbContext, reservationId, trigger);
+                    _logger.LogInformation("Payments/Webhook => Auto-start reservation={ReservationId} trigger={Trigger} status={Status} reason={Reason}",
+                        reservationId,
+                        trigger,
+                        tryStart.Status,
+                        tryStart.Reason);
+                }
+                catch (Exception exp)
+                {
+                    // The payment provider must still get its acknowledgement; the start can still happen
+                    // through the browser return (Confirm) or when the cable is plugged in (Preparing).
+                    _logger.LogError(exp, "Payments/Webhook => Auto-start failed reservation={ReservationId} trigger={Trigger}", reservationId, trigger);
+                    ResetConnectionDbContext(dbContext);
                 }
             }
-            catch (Exception ex)
+        }
+
+        /// <summary>
+        /// True within <c>Payments:ChargerResponseTimeoutMs</c> of the last remote start result. A charger that did not
+        /// answer in time (Timeout keeps the reservation Authorized) may still start; a second start right after it can
+        /// be rejected and end the reservation.
+        /// </summary>
+        private bool IsWithinRemoteStartWindow(ChargePaymentReservation reservation, DateTime nowUtc)
+        {
+            return reservation.RemoteStartSentAtUtc.HasValue &&
+                   reservation.RemoteStartSentAtUtc.Value > nowUtc.AddMilliseconds(-TimoutWaitForCharger);
+        }
+
+        private static async Task<ChargePaymentReservation> LoadFreshReservationAsync(OCPPCoreContext dbContext, Guid reservationId)
+        {
+            // The coordinator may have left a tracked copy in this context; re-read it so the
+            // status check sees the committed database state, not a stale entity.
+            var tracked = dbContext.ChargePaymentReservations.Local.FirstOrDefault(r => r.ReservationId == reservationId);
+            if (tracked != null)
             {
-                _logger.LogDebug(ex, "Payments/Webhook => Unable to parse payload for auto-start");
+                var entry = dbContext.Entry(tracked);
+                await entry.ReloadAsync();
+                return entry.State == EntityState.Detached ? null : tracked;
             }
 
-            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            return await dbContext.ChargePaymentReservations.SingleOrDefaultAsync(r => r.ReservationId == reservationId);
+        }
+
+        private static bool TryGetWebhookProviderSegment(string[] urlParts, out string providerSegment)
+        {
+            // urlParts: ["", "API", "Payments", "Webhook", "{provider}", ...]
+            providerSegment = null;
+            if (urlParts == null || urlParts.Length <= 4)
+            {
+                return true;
+            }
+
+            for (int i = 5; i < urlParts.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(urlParts[i]))
+                {
+                    // Deeper paths are not webhook routes (a trailing slash is tolerated).
+                    return false;
+                }
+            }
+
+            providerSegment = string.IsNullOrWhiteSpace(urlParts[4]) ? null : urlParts[4];
+            return true;
+        }
+
+        private static bool IsAllowedWebhookMethod(string providerSegment, string method)
+        {
+            // Legacy route and Stripe: signed events are always POSTed.
+            if (string.Equals(PaymentProviderNames.Normalize(providerSegment), PaymentProviderNames.Stripe, StringComparison.Ordinal))
+            {
+                return HttpMethods.IsPost(method);
+            }
+
+            // Saferpay calls its notify URLs server-to-server with GET; POST is accepted as well.
+            // Unknown providers are passed on so the coordinator can answer 404.
+            return HttpMethods.IsGet(method) || HttpMethods.IsPost(method);
+        }
+
+        private static string BuildWebhookStartTrigger(string provider)
+        {
+            // Null/empty resolves to Stripe, which keeps the historical "StripeWebhook" trigger label.
+            string name = PaymentProviderNames.Normalize(provider) ?? provider.Trim();
+            return name + "Webhook";
+        }
+
+        private static Dictionary<string, string> CopyFirstValues(IEnumerable<KeyValuePair<string, StringValues>> source)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (source == null)
+            {
+                return values;
+            }
+
+            foreach (var pair in source)
+            {
+                if (string.IsNullOrEmpty(pair.Key) || values.ContainsKey(pair.Key))
+                {
+                    continue;
+                }
+
+                values[pair.Key] = pair.Value.Count > 0 ? pair.Value[0] ?? string.Empty : string.Empty;
+            }
+
+            return values;
         }
 
         private async Task<string> ExecuteRemoteStartAsync(ChargePointStatus chargePointStatus, OCPPCoreContext dbContext, string connectorId, string idTag)

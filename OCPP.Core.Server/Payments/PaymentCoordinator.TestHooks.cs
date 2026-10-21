@@ -4,7 +4,7 @@ using OCPP.Core.Database;
 
 namespace OCPP.Core.Server.Payments
 {
-    public partial class StripePaymentCoordinator
+    public partial class PaymentCoordinator
     {
         internal static long TestCalculateAmountInCents(double energyKwh, decimal pricePerKwh) =>
             CalculateAmountInCents(energyKwh, pricePerKwh);

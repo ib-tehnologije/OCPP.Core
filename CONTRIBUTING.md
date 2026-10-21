@@ -73,7 +73,7 @@ No dedicated formatter or lint command was found. Match the existing C# and Razo
 
 - Keep changes scoped to the behavior or documentation being changed.
 - Include tests for behavior changes where practical.
-- For public charging or payment changes, validate the server API behavior and the management/public portal surface together.
+- For public charging or payment changes, validate the server API behavior and the management/public portal surface together. Put provider-specific code in an `IPaymentGateway` implementation under `OCPP.Core.Server/Payments/Providers/`, not in `PaymentCoordinator`. Run the E2E stack with both `OCPP_E2E_PAYMENT_PROVIDER=Stripe` (the default) and `OCPP_E2E_PAYMENT_PROVIDER=Saferpay`.
 - For database schema changes, update `OCPP.Core.Database`, add EF Core migrations, inspect the model snapshot, and run the migration metadata guard.
 - For configuration, setup, integration, background job, deployment, or architecture changes, update the relevant documentation in the same PR.
 - State which checks were run and which were intentionally skipped.

@@ -17,7 +17,7 @@ using Xunit;
 
 namespace OCPP.Core.Server.Tests
 {
-    public class PaymentAuthorizationReleaseTests
+    public partial class PaymentAuthorizationReleaseTests
     {
         private static readonly DateTime Now = new(2026, 7, 18, 12, 0, 0, DateTimeKind.Utc);
 
@@ -740,6 +740,212 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(1, intents.CancelCalls);
             Assert.Single(context.PaymentAuthorizationReleaseAttempts);
             Assert.Single(context.StripeWebhookEvents);
+        }
+
+        [Fact]
+        public void CheckoutCompletedWebhook_ReleasesLateAuthorizationOfCancelledReservation()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.Cancelled);
+            reservation.StripeCheckoutSessionId = "sess_cancelled_paid";
+            reservation.StripePaymentIntentId = null;
+            reservation.OcppIdTag = null;
+            reservation.AuthorizedAtUtc = null;
+            reservation.StartDeadlineAtUtc = null;
+            reservation.LastError = "checkout_cancelled";
+            context.SaveChanges();
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            intents.GetResponse.Id = "pi_cancelled_paid";
+            var stripeEvent = new Event
+            {
+                Id = "evt_cancelled_paid",
+                Type = EventTypes.CheckoutSessionCompleted,
+                Data = new EventData
+                {
+                    Object = new Session
+                    {
+                        Id = "sess_cancelled_paid",
+                        PaymentIntentId = "pi_cancelled_paid",
+                        PaymentStatus = "paid"
+                    }
+                }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+
+            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
+            Assert.Equal("pi_cancelled_paid", reservation.StripePaymentIntentId);
+            Assert.Equal(1, intents.CancelCalls);
+            Assert.Equal($"cancel:{reservation.ReservationId}", intents.LastCancelRequestOptions!.IdempotencyKey);
+            Assert.Equal("late_authorization_released", reservation.LastError);
+            Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
+            Assert.Empty(context.PaymentAuthorizationReleaseAttempts);
+        }
+
+        [Fact]
+        public void AmountCapturableWebhook_ReleasesLateAuthorizationOfStartRejectedReservation()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.StartRejected);
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            var stripeEvent = new Event
+            {
+                Id = "evt_capturable_rejected",
+                Type = "payment_intent.amount_capturable_updated",
+                Data = new EventData { Object = intents.GetResponse }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            coordinator.HandleWebhookEvent(context, "payload", "signature");
+
+            Assert.Equal(1, intents.CancelCalls);
+            Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
+            Assert.Equal("late_authorization_released", reservation.LastError);
+        }
+
+        [Fact]
+        public void CheckoutCompletedWebhook_TransientLateReleaseFailureArmsReleaseAndPropagates()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.Cancelled);
+            reservation.StripeCheckoutSessionId = "sess_cancelled_retry";
+            reservation.StripePaymentIntentId = null;
+            context.SaveChanges();
+            var intents = OwnedIntentService(reservation, "requires_capture", amountCapturable: 500);
+            intents.GetResponse.Id = "pi_cancelled_retry";
+            intents.CancelException = new StripeException(
+                HttpStatusCode.ServiceUnavailable,
+                new StripeError { Type = "api_error", Code = "temporary_provider_failure", Message = "try again" },
+                "try again");
+            var stripeEvent = new Event
+            {
+                Id = "evt_cancelled_retry",
+                Type = EventTypes.CheckoutSessionCompleted,
+                Data = new EventData
+                {
+                    Object = new Session { Id = "sess_cancelled_retry", PaymentIntentId = "pi_cancelled_retry", PaymentStatus = "paid" }
+                }
+            };
+            var coordinator = CreateCoordinator(intents, stripeEvent: stripeEvent);
+
+            var result = coordinator
+                .HandleWebhookAsync(context, new OCPP.Core.Server.Payments.Providers.PaymentWebhookRequest { Body = "payload" }, System.Threading.CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+
+            Assert.Equal(503, result.StatusCode);
+            Assert.Equal(PaymentAuthorizationReleaseState.Pending, reservation.AuthorizationReleaseState);
+            Assert.Empty(context.StripeWebhookEvents);
+        }
+
+        [Fact]
+        public void Reconcile_SweptNeverAuthorizedStripeReservationIsCheckedWithStripe()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context);
+            reservation.StripeCheckoutSessionId = "sess_swept_open";
+            reservation.StripePaymentIntentId = null;
+            reservation.OcppIdTag = null;
+            reservation.AuthorizedAtUtc = null;
+            reservation.StartDeadlineAtUtc = null;
+            context.SaveChanges();
+            var intents = new ReleasePaymentIntentService();
+            var sessions = new ReleaseSessionService
+            {
+                GetResponse = new Session
+                {
+                    Id = "sess_swept_open",
+                    Status = "open",
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["reservation_id"] = reservation.ReservationId.ToString()
+                    }
+                }
+            };
+            var coordinator = CreateCoordinator(intents, sessions: sessions);
+
+            var result = coordinator.ReconcileTerminalPaymentAuthorization(
+                context,
+                reservation,
+                PaymentAuthorizationReleaseTrigger.CleanupSweep);
+
+            // The payer never paid, so nothing is held; Stripe signals a later completion by webhook, which then
+            // releases the late authorization. No linkage retries are spent on an abandoned open session.
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.AlreadyReleased, result.Outcome);
+            Assert.Equal(PaymentAuthorizationReleaseState.Released, reservation.AuthorizationReleaseState);
+            Assert.Equal(1, sessions.GetCalls);
+            Assert.Equal(0, intents.CancelCalls);
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.AlreadyReleased, context.PaymentAuthorizationReleaseAttempts.Single().Outcome);
+            Assert.Null(reservation.AuthorizationReleaseNextAttemptAtUtc);
+        }
+
+        [Fact]
+        public void CancelReservation_PendingStripeReservationIsNotLookedUpOrArmed()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.Pending);
+            reservation.StripeCheckoutSessionId = "sess_pending_cancel";
+            reservation.StripePaymentIntentId = null;
+            context.SaveChanges();
+            var intents = new ReleasePaymentIntentService();
+            var sessions = new ReleaseSessionService();
+            var coordinator = CreateCoordinator(intents, sessions: sessions);
+
+            coordinator.CancelReservation(context, reservation.ReservationId, "checkout_cancelled");
+
+            Assert.Equal(PaymentReservationStatus.Cancelled, reservation.Status);
+            Assert.Null(reservation.AuthorizationReleaseState);
+            Assert.Equal(0, sessions.GetCalls);
+            Assert.Equal(0, intents.GetCalls);
+        }
+
+        [Fact]
+        public void Confirm_PermanentStripeErrorOnAuthorizedReservationKeepsItActive()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.Authorized);
+            reservation.StripeCheckoutSessionId = "sess_authorized";
+            context.SaveChanges();
+            var sessions = new ReleaseSessionService
+            {
+                GetException = new StripeException(
+                    HttpStatusCode.Forbidden,
+                    new StripeError { Type = "invalid_request_error", Code = "permission_denied", Message = "denied" },
+                    "denied")
+            };
+            var coordinator = CreateCoordinator(new ReleasePaymentIntentService(), sessions: sessions);
+
+            var result = coordinator.ConfirmReservation(context, reservation.ReservationId, "sess_authorized");
+
+            Assert.False(result.Success);
+            Assert.Equal("StripeError", result.Status);
+            Assert.Equal(1, sessions.GetCalls);
+            Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
+            Assert.Null(reservation.AuthorizationReleaseState);
+        }
+
+        [Fact]
+        public void Confirm_PermanentStripeErrorOnPendingReservationStillFailsAndArmsRelease()
+        {
+            using var context = CreateContext();
+            var reservation = AddReservation(context, armed: false, status: PaymentReservationStatus.Pending);
+            reservation.StripeCheckoutSessionId = "sess_pending";
+            context.SaveChanges();
+            var sessions = new ReleaseSessionService
+            {
+                GetException = new StripeException(
+                    HttpStatusCode.Forbidden,
+                    new StripeError { Type = "invalid_request_error", Code = "permission_denied", Message = "denied" },
+                    "denied")
+            };
+            var coordinator = CreateCoordinator(new ReleasePaymentIntentService(), sessions: sessions);
+
+            var result = coordinator.ConfirmReservation(context, reservation.ReservationId, "sess_pending");
+
+            Assert.False(result.Success);
+            Assert.Equal(PaymentReservationStatus.Failed, reservation.Status);
+            Assert.Equal(PaymentAuthorizationReleaseState.Pending, reservation.AuthorizationReleaseState);
         }
 
         private static OCPPCoreContext CreateContext()

@@ -7,13 +7,22 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using OCPP.Core.Database;
+using OCPP.Core.Server.Payments.Providers;
 using OCPP.Core.Server.Payments.Recovery;
 
 namespace OCPP.Core.Server.Payments
 {
     public interface IPaymentCoordinator
     {
+        /// <summary>True when new checkouts can be created (the active provider is configured).</summary>
         bool IsEnabled { get; }
+
+        /// <summary>
+        /// True when existing reservations can still be processed (any registered provider is configured), e.g. a
+        /// previous provider's reservations draining after Payments:Provider changed. Gate existing-reservation
+        /// operations on this, and only new checkouts on <see cref="IsEnabled"/>.
+        /// </summary>
+        bool IsOperational => IsEnabled;
         PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request);
         Task<PaymentSessionResult> CreateCheckoutSessionAsync(
             OCPPCoreContext dbContext,
@@ -53,6 +62,33 @@ namespace OCPP.Core.Server.Payments
             CompleteReservation(dbContext, transaction);
         void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc);
         void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader);
+
+        /// <summary>
+        /// Handles an inbound PSP notification routed by provider. Returns the HTTP status to answer and
+        /// the reservations that the PSP verifiably authorized, so the caller can start charging them.
+        /// </summary>
+        Task<PaymentWebhookResult> HandleWebhookAsync(
+            OCPPCoreContext dbContext,
+            PaymentWebhookRequest request,
+            CancellationToken cancellationToken)
+        {
+            string signature = null;
+            request?.Headers?.TryGetValue("Stripe-Signature", out signature);
+            HandleWebhookEvent(dbContext, request?.Body, signature);
+            return Task.FromResult(new PaymentWebhookResult());
+        }
+    }
+
+    public class PaymentWebhookResult
+    {
+        /// <summary>HTTP status for the PSP. 2xx acknowledges; non-2xx asks the PSP to retry.</summary>
+        public int StatusCode { get; set; } = 200;
+
+        /// <summary>Provider that handled the notification.</summary>
+        public string Provider { get; set; }
+
+        /// <summary>Reservations that are Authorized after verified processing and may be started now.</summary>
+        public IReadOnlyList<Guid> AuthorizedReservationIds { get; set; } = Array.Empty<Guid>();
     }
 
     public class PaymentSessionRequest

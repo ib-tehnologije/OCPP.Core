@@ -15,8 +15,10 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Newtonsoft.Json.Linq;
 using OCPP.Core.Database;
 using OCPP.Core.Management.Controllers;
+using OCPP.Core.Management.Helpers;
 using OCPP.Core.Management.Models;
 using OCPP.Core.Server.Payments;
 using Xunit;
@@ -1447,7 +1449,189 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
-        private static PublicController CreateController(OCPPCoreContext dbContext, IDictionary<string, string?>? configValues = null)
+        [Theory]
+        [InlineData("StripeError")]
+        [InlineData("SaferpayError")]
+        [InlineData("ProviderError")]
+        [InlineData("ProviderUnavailable")]
+        [InlineData("ResumeUnavailable")]
+        [InlineData("MissingCheckoutSession")]
+        public async Task Start_RecoveryResumeProviderError_ShowsCancelOnlyRecovery(string resumeStatus)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-recovery-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+            try
+            {
+                SeedRecoveryChargePoint(databasePath, "CP-RECOVERY");
+
+                int resumeCalls = 0;
+                using var server = TestHttpServer.Start(request =>
+                {
+                    if (request.Path == "/API/Payments/Resume")
+                    {
+                        Interlocked.Increment(ref resumeCalls);
+                        return TestHttpResponse.Json(
+                            $"{{\"status\":\"{resumeStatus}\",\"reservationId\":\"{reservationId}\",\"reservationStatus\":\"PendingPayment\",\"checkoutUrl\":null,\"error\":\"The payment provider could not be reached.\"}}");
+                    }
+
+                    return TestHttpResponse.Json("[]");
+                });
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(
+                    actionContext,
+                    new Dictionary<string, string?>
+                    {
+                        ["ServerApiUrl"] = $"{server.BaseUri}API"
+                    },
+                    new PublicPaymentRecoveryPayload
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-RECOVERY",
+                        ConnectorId = 1,
+                        CreatedAtUtc = DateTime.UtcNow
+                    });
+
+                var result = await controller.Start("CP-RECOVERY", null);
+
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+                Assert.Equal(1, Volatile.Read(ref resumeCalls));
+                Assert.True(model.HasRecoveryOptions);
+                Assert.Equal(reservationId, model.RecoveryReservationId);
+                Assert.Equal(PaymentReservationStatus.Pending, model.RecoveryReservationStatus);
+                Assert.Null(model.RecoveryCheckoutUrl);
+                Assert.False(model.CanResumeRecovery);
+                Assert.Equal(
+                    "The payment provider could not be reached. Cancel the previous attempt to unlock this connector.",
+                    model.RecoveryMessage);
+                Assert.Null(model.ErrorMessage);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        // A throttled resume of a reservation that is still waiting for its payment answers "Status".
+        [InlineData("Status", null)]
+        // A server that still reports the throttled resume as ResumeUnavailable.
+        [InlineData("ResumeUnavailable", "Payment is still being processed.")]
+        public async Task Start_RecoveryResumeWhilePaymentIsStillProcessing_SendsThePayerToTheStatusPage(string resumeStatus, string? error)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-recovery-processing-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+
+            try
+            {
+                SeedRecoveryChargePoint(databasePath, "CP-RECOVERY-PROCESSING");
+
+                var resumePayload = new JObject
+                {
+                    ["status"] = resumeStatus,
+                    ["reservationId"] = reservationId.ToString(),
+                    ["reservationStatus"] = PaymentReservationStatus.Pending,
+                    ["checkoutUrl"] = null,
+                    ["error"] = error,
+                    ["locksConnector"] = true
+                };
+                using var server = TestHttpServer.Start(request =>
+                    request.Path == "/API/Payments/Resume"
+                        ? TestHttpResponse.Json(resumePayload.ToString())
+                        : TestHttpResponse.Json("[]"));
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(
+                    actionContext,
+                    new Dictionary<string, string?>
+                    {
+                        ["ServerApiUrl"] = $"{server.BaseUri}API"
+                    },
+                    new PublicPaymentRecoveryPayload
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-RECOVERY-PROCESSING",
+                        ConnectorId = 1,
+                        CreatedAtUtc = DateTime.UtcNow
+                    });
+
+                var result = await controller.Start("CP-RECOVERY-PROCESSING", null);
+
+                // The status page polls until the payment outcome is known; no cancel prompt for a payment in progress.
+                var redirect = Assert.IsType<RedirectToActionResult>(result);
+                Assert.Equal("Status", redirect.ActionName);
+                Assert.Equal("Payments", redirect.ControllerName);
+                Assert.Equal(reservationId, redirect.RouteValues?["reservationId"]);
+                Assert.Equal("public", redirect.RouteValues?["origin"]);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_RecoveryResumeUnknownStatus_LeavesStartPageUnchanged()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-recovery-unknown-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+
+            try
+            {
+                SeedRecoveryChargePoint(databasePath, "CP-RECOVERY-UNKNOWN");
+
+                using var server = TestHttpServer.Start(request =>
+                    request.Path == "/API/Payments/Resume"
+                        ? TestHttpResponse.Json("{\"status\":\"Disabled\",\"error\":\"Payments are disabled.\"}")
+                        : TestHttpResponse.Json("[]"));
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(
+                    actionContext,
+                    new Dictionary<string, string?>
+                    {
+                        ["ServerApiUrl"] = $"{server.BaseUri}API"
+                    },
+                    new PublicPaymentRecoveryPayload
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-RECOVERY-UNKNOWN",
+                        ConnectorId = 1,
+                        CreatedAtUtc = DateTime.UtcNow
+                    });
+
+                var result = await controller.Start("CP-RECOVERY-UNKNOWN", null);
+
+                var model = Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(result).Model);
+                Assert.False(model.HasRecoveryOptions);
+                Assert.Null(model.RecoveryMessage);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        private static void SeedRecoveryChargePoint(string databasePath, string chargePointId)
+        {
+            using var setupContext = CreateContext(databasePath);
+            SeedChargePoint(setupContext, chargePointId, "Recovery test");
+            setupContext.ConnectorStatuses.Add(new ConnectorStatus
+            {
+                ChargePointId = chargePointId,
+                ConnectorId = 1,
+                LastStatus = "Available",
+                LastStatusTime = DateTime.UtcNow
+            });
+            setupContext.SaveChanges();
+        }
+
+        private static PublicController CreateController(
+            OCPPCoreContext dbContext,
+            IDictionary<string, string?>? configValues = null,
+            PublicPaymentRecoveryPayload? recoveryCookie = null)
         {
             IConfiguration config = new ConfigurationBuilder()
                 .AddInMemoryCollection(configValues ?? new Dictionary<string, string?>())
@@ -1456,11 +1640,19 @@ namespace OCPP.Core.Server.Tests
             IDataProtectionProvider dataProtectionProvider = DataProtectionProvider.Create(
                 new DirectoryInfo(Path.Combine(Path.GetTempPath(), "ocpp-public-controller-tests")));
 
+            var httpContext = new DefaultHttpContext();
+            if (recoveryCookie != null)
+            {
+                var protector = dataProtectionProvider.CreateProtector("OCPP.Core.Management.PublicPaymentRecovery.v1");
+                httpContext.Request.Headers.Cookie =
+                    $"{PublicPaymentRecoveryCookie.CookieName}={PublicPaymentRecoveryCookie.Protect(protector, recoveryCookie)}";
+            }
+
             var controller = new PublicController(null, NullLoggerFactory.Instance, config, dataProtectionProvider, dbContext)
             {
                 ControllerContext = new ControllerContext
                 {
-                    HttpContext = new DefaultHttpContext()
+                    HttpContext = httpContext
                 }
             };
 

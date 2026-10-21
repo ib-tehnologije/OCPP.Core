@@ -5,7 +5,7 @@ OCPP.Core is a .NET 8 implementation of an Open Charge Point Protocol (OCPP) cen
 - an OCPP server for charge point WebSocket sessions and server-side control APIs
 - a management web application for operators
 - an EF Core database model with SQL Server migrations and local SQLite support
-- payment, public charging, invoice, reporting, simulator, and regression-test support
+- payment (Stripe by default, or Worldline Saferpay), public charging, invoice, reporting, simulator, and regression-test support
 
 This repository is public. Committed documentation must stay public-safe. Private/internal project context is maintained outside this public repository.
 
@@ -121,6 +121,12 @@ Regression matrix after building the solution:
 python3 Simulators/run_local_regression.py
 ```
 
+The E2E harnesses use mock Stripe by default. Set `OCPP_E2E_PAYMENT_PROVIDER=Saferpay` to run them against the in-process Saferpay mock instead.
+
+## Payment Providers
+
+Public charging pre-authorizes a maximum amount through a payment provider, then captures the final amount or releases the hold. Stripe is the default. Set `Payments:Provider=Saferpay` on the server, plus the `Saferpay:*` settings, to use Worldline Saferpay for new checkouts. Existing reservations keep the provider that created them. Supply provider credentials through user secrets or environment variables, never through committed `appsettings.json`. See [Operations](docs/operations.md#payment-providers) for configuration, webhook endpoints, and test-account setup, and [Maintenance](docs/maintenance.md#switching-payment-providers) for switching providers safely.
+
 ## Database Notes
 
 `OCPP.Core.Database.DbContextExtensions` selects SQL Server when `ConnectionStrings:SqlServer` is set, otherwise SQLite when `ConnectionStrings:SQLite` is set.
@@ -163,3 +169,4 @@ Private/internal project context, if any, is maintained outside this public repo
 - [Operations](docs/operations.md)
 - [Maintenance](docs/maintenance.md)
 - [Current architecture ADR](docs/decisions/0001-current-architecture.md)
+- [Pluggable payment providers ADR](docs/decisions/0005-pluggable-payment-providers.md)

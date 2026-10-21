@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import signal
 import subprocess
@@ -25,6 +27,52 @@ SERVER_API_KEY = os.environ.get("SERVER_API_KEY", "36029A5F-B736-4DA9-AE46-D6684
 CP16_ID = os.environ.get("CP16_ID", "Test1234")
 CP20_ID = os.environ.get("CP20_ID", "TestAAA")
 CP21_ID = os.environ.get("CP21_ID", "TestBBB")
+
+# Payment-provider switch; keep in sync with Simulators/lib/payment_provider_env.mjs.
+PAYMENT_PROVIDER_ENV_VAR = "OCPP_E2E_PAYMENT_PROVIDER"
+KNOWN_PAYMENT_PROVIDERS = {"stripe": "Stripe", "saferpay": "Saferpay"}
+
+
+def resolve_payment_provider() -> str:
+    raw = os.environ.get(PAYMENT_PROVIDER_ENV_VAR, "").strip()
+    if not raw:
+        return "Stripe"
+
+    provider = KNOWN_PAYMENT_PROVIDERS.get(raw.lower())
+    if provider is None:
+        supported = ", ".join(KNOWN_PAYMENT_PROVIDERS.values())
+        raise RuntimeError(f"Unsupported {PAYMENT_PROVIDER_ENV_VAR}='{raw}'. Supported values: {supported}.")
+
+    return provider
+
+
+def payment_provider_server_env(provider: str) -> dict[str, str]:
+    """Extra server env for the selected provider.
+
+    Both modes pin Payments:Provider and Payments:ReturnBaseUrl, so Payments:* or Saferpay:* values from
+    the developer's environment cannot switch the run to another provider or return host.
+    """
+    if provider != "Saferpay":
+        return {
+            "Payments__Provider": "Stripe",
+            "Payments__ReturnBaseUrl": MGMT_HTTP_BASE.rstrip("/"),
+            "Saferpay__Enabled": "false",
+        }
+
+    # The Stripe mock settings stay configured so the Stripe gateway remains registered.
+    return {
+        "Payments__Provider": "Saferpay",
+        "Payments__ReturnBaseUrl": MGMT_HTTP_BASE.rstrip("/"),
+        "Saferpay__Enabled": "true",
+        "Saferpay__UseMockServices": "true",
+        "Saferpay__MockPayerEmail": "driver@example.test",
+        "Saferpay__NotifyBaseUrl": SERVER_API_BASE.rstrip("/"),
+    }
+
+
+def payment_provider_management_env(provider: str) -> dict[str, str]:
+    """Management reads Payments:Provider only for the Stripe webhook-secret banner; pinned in both modes."""
+    return {"Payments__Provider": "Saferpay" if provider == "Saferpay" else "Stripe"}
 
 
 def wait_for_http(url: str, label: str, timeout_seconds: int = 90) -> None:
@@ -104,6 +152,9 @@ def seed_test_stack() -> None:
 
 
 def main() -> int:
+    payment_provider = resolve_payment_provider()
+    print(f"Payment provider for new checkouts: {payment_provider}", flush=True)
+
     if not SERVER_DLL.exists() or not MANAGEMENT_DLL.exists():
         raise RuntimeError("Build the solution first so the server and management DLLs exist in bin/Debug/net8.0.")
 
@@ -126,6 +177,7 @@ def main() -> int:
             "Invoices__Enabled": "false",
             "Payments__IdleFeeExcludedTimeZoneId": "UTC",
             "Hangfire__EnableDashboard": "false",
+            **payment_provider_server_env(payment_provider),
         },
     )
 
@@ -137,6 +189,7 @@ def main() -> int:
             "ServerApiUrl": SERVER_API_BASE,
             "ApiKey": SERVER_API_KEY,
             "Hangfire__EnableDashboard": "false",
+            **payment_provider_management_env(payment_provider),
         },
     )
 

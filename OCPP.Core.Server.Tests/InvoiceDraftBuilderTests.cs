@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments.Invoices;
+using OCPP.Core.Server.Payments.Providers;
 using Stripe.Checkout;
 using Xunit;
 
@@ -55,7 +56,7 @@ namespace OCPP.Core.Server.Tests
             };
 
             var builder = new InvoiceDraftBuilder();
-            var draft = builder.Build(reservation, transaction, session);
+            var draft = builder.Build(reservation, transaction, StripePaymentGateway.ToCheckoutDetails(session));
 
             Assert.Equal("R1", draft.InvoiceKind);
             Assert.Equal("EUR", draft.Currency);
@@ -103,7 +104,7 @@ namespace OCPP.Core.Server.Tests
             };
 
             var builder = new InvoiceDraftBuilder();
-            var draft = builder.Build(reservation, transaction, checkoutSession: null);
+            var draft = builder.Build(reservation, transaction, checkoutDetails: null);
 
             Assert.Equal("Retail", draft.InvoiceKind);
             Assert.Single(draft.Lines);
@@ -139,7 +140,7 @@ namespace OCPP.Core.Server.Tests
                 Metadata = new System.Collections.Generic.Dictionary<string, string> { ["invoice_type"] = "R1" }
             };
 
-            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, session);
+            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, StripePaymentGateway.ToCheckoutDetails(session));
 
             Assert.Equal("Retail", draft.InvoiceKind);
             Assert.True(draft.R1BuyerDetailsMissing);
@@ -174,7 +175,7 @@ namespace OCPP.Core.Server.Tests
                 EnergyCost = 2.00m
             };
 
-            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, checkoutSession: null);
+            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, checkoutDetails: null);
 
             Assert.Equal("R1", draft.InvoiceKind);
             Assert.False(draft.R1BuyerDetailsMissing);
@@ -210,7 +211,7 @@ namespace OCPP.Core.Server.Tests
             };
 
             var builder = new InvoiceDraftBuilder();
-            var draft = builder.Build(reservation, transaction, checkoutSession: null);
+            var draft = builder.Build(reservation, transaction, checkoutDetails: null);
 
             var usageLine = draft.Lines.Single(l => l.Type == "UsageFee");
             Assert.Equal("Occupancy fee", usageLine.Description);
@@ -260,7 +261,7 @@ namespace OCPP.Core.Server.Tests
                 }
             };
 
-            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, session);
+            var draft = new InvoiceDraftBuilder().Build(reservation, transaction, StripePaymentGateway.ToCheckoutDetails(session));
 
             Assert.Equal("CZ", draft.BuyerCountry);
             Assert.Equal("Confirmed s.r.o.", draft.BuyerCompanyName);

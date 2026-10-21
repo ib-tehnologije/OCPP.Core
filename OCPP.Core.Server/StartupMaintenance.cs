@@ -119,6 +119,7 @@ namespace OCPP.Core.Server
                     r.Status == PaymentReservationStatus.Pending)
                 .ToList();
 
+            var abandoned = 0;
             foreach (var reservation in stale)
             {
                 logger?.LogInformation(
@@ -129,19 +130,37 @@ namespace OCPP.Core.Server
                     reservation.Status,
                     reservation.UpdatedAtUtc);
 
+                var previousStatus = reservation.Status;
+                var previousUpdatedAt = reservation.UpdatedAtUtc;
                 reservation.Status = PaymentReservationStatus.Abandoned;
                 reservation.LastError = "Auto-cancelled: stale pending reservation at startup";
-                reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Pending;
-                reservation.AuthorizationReleaseNextAttemptAtUtc = null;
+                PaymentCoordinator.ArmAuthorizationReleaseState(reservation);
                 reservation.UpdatedAtUtc = now;
+
+                // Another server instance may be confirming the reservation; only the unchanged stale row is abandoned.
+                if (!PaymentCoordinator.TryCommitReservationTransition(
+                        dbContext,
+                        reservation,
+                        previousStatus,
+                        row => row.UpdatedAtUtc == previousUpdatedAt,
+                        saveWhenNotRelational: false))
+                {
+                    logger?.LogInformation(
+                        "StartupMaintenance => Stale reservation changed before it was cancelled reservation={ReservationId} status={Status}",
+                        reservation.ReservationId,
+                        reservation.Status);
+                    continue;
+                }
+
+                abandoned++;
             }
 
-            if (stale.Count > 0)
+            if (abandoned > 0)
             {
                 dbContext.SaveChanges();
             }
 
-            return stale.Count;
+            return abandoned;
         }
 
         private static int ReleaseStaleConnectorStatuses(OCPPCoreContext dbContext, DateTime now, int releaseMinutes, ILogger logger = null)

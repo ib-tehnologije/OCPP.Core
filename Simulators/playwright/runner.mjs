@@ -17,6 +17,7 @@ import {
   buildOfferedPowerSample2x,
   createPlausibleMeterTimeline,
 } from "../lib/meter_evidence_fixture.mjs";
+import { assertCheckoutUrlMatchesProvider } from "../lib/payment_provider_env.mjs";
 
 const protocolPresets = {
   "1.6": {
@@ -249,6 +250,7 @@ async function createAndConfirmReservation(runtime, preset, tag) {
   assert(createResponse.json?.status === "Redirect", `Expected Redirect from Payments/Create, got ${createResponse.json?.status ?? "null"}`);
   assert(typeof createResponse.json?.reservationId === "string", "Payments/Create missing reservationId");
   assert(typeof createResponse.json?.checkoutUrl === "string", "Payments/Create missing checkoutUrl");
+  assertCheckoutUrlMatchesProvider(createResponse.json.checkoutUrl, undefined, `${preset.chargePointId}/${tag}`);
 
   const confirmation = await confirmMockCheckout(createResponse.json.checkoutUrl);
   return {

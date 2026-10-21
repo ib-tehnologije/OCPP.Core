@@ -4,6 +4,8 @@ import {
   findMockStripeArtifactsByReservationId,
   readLatestInvoiceSubmissionLog,
   runtimeInfo,
+  stripeMockSnapshotSkipReason,
+  usesStripeMockSnapshot,
 } from "./helpers.mjs";
 import { runSqlite, sqlQuote } from "../../lib/sqlite_helpers.mjs";
 import {
@@ -219,6 +221,7 @@ test("public start page renders offline connectors without raw unknown status", 
 
 test("@invoice public start R1 details flow into Stripe metadata and invoice submission", async ({ page }) => {
   test.skip(!invoicesEnabled, "Invoice validation requires OCPP_PLAYWRIGHT_ENABLE_INVOICES=1");
+  test.skip(!usesStripeMockSnapshot, stripeMockSnapshotSkipReason);
 
   const buyerCompanyName = "Acme d.o.o.";
   const buyerOib = "12345678903";
@@ -270,6 +273,7 @@ test("@invoice public start blocks incomplete Croatian buyer and invalidates sta
 
 test("@invoice public status edits the confirmed buyer until invoice submission and then locks it", async ({ page }) => {
   test.skip(!invoicesEnabled, "Invoice validation requires OCPP_PLAYWRIGHT_ENABLE_INVOICES=1");
+  test.skip(!usesStripeMockSnapshot, stripeMockSnapshotSkipReason);
 
   const buyerCompanyName = "Confirmed Buyer d.o.o.";
   const buyerOib = "12345678903";

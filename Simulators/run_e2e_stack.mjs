@@ -6,6 +6,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { httpText, waitFor } from "./lib/test_support.mjs";
 import { seedTestStack } from "./lib/sqlite_helpers.mjs";
+import {
+  buildPaymentProviderManagementEnv,
+  buildPaymentProviderServerEnv,
+  resolvePaymentProvider,
+} from "./lib/payment_provider_env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -17,6 +22,8 @@ const SERVER_WS_BASE = process.env.SERVER_WS_BASE ?? "ws://127.0.0.1:8081/OCPP";
 const SERVER_API_KEY = process.env.SERVER_API_KEY ?? "36029A5F-B736-4DA9-AE46-D66847C9062C";
 const RUN_SIMULATORS = process.env.RUN_SIMULATORS !== "0";
 const RUN_PLAYWRIGHT = process.env.RUN_PLAYWRIGHT !== "0";
+// OCPP_E2E_PAYMENT_PROVIDER: Stripe (default) or Saferpay; see lib/payment_provider_env.mjs.
+const PAYMENT_PROVIDER = resolvePaymentProvider();
 
 async function createRuntimePaths() {
   const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ocpp-e2e-"));
@@ -81,6 +88,7 @@ async function runCommand(command, args, env, cwd = repoRoot) {
 }
 
 async function main() {
+  console.log(`Payment provider for new checkouts: ${PAYMENT_PROVIDER}`);
   const runtime = await createRuntimePaths();
   await fsPromises.mkdir(runtime.logsDir, { recursive: true });
   await fsPromises.mkdir(runtime.emailSinkDir, { recursive: true });
@@ -105,12 +113,18 @@ async function main() {
     Invoices__Enabled: "false",
     Payments__IdleFeeExcludedTimeZoneId: "UTC",
     Kestrel__Endpoints__Http__Url: SERVER_HTTP_BASE,
+    ...buildPaymentProviderServerEnv({
+      provider: PAYMENT_PROVIDER,
+      managementBaseUrl: MGMT_HTTP_BASE,
+      serverApiBaseUrl: SERVER_API_BASE,
+    }),
   };
 
   const managementEnv = {
     ...commonEnv,
     ServerApiUrl: SERVER_API_BASE,
     Kestrel__Endpoints__Http__Url: MGMT_HTTP_BASE,
+    ...buildPaymentProviderManagementEnv({ provider: PAYMENT_PROVIDER }),
   };
 
   const serverProcess = spawnLoggedProcess("dotnet", ["run", "--project", "OCPP.Core.Server"], {
@@ -176,6 +190,7 @@ async function main() {
     }
 
     console.log(JSON.stringify({
+      paymentProvider: PAYMENT_PROVIDER,
       runtimeRoot: runtime.root,
       sqlitePath: runtime.sqlitePath,
       emailSinkDir: runtime.emailSinkDir,

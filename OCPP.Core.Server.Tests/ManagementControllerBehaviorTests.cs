@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -587,6 +588,500 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(StatusCodes.Status200OK, controller.Response.StatusCode);
         }
 
+        [Fact]
+        public async Task PaymentsSuccess_WithoutSessionId_PostsConfirmWithNullCheckoutSessionId_AndRedirectsPublicOriginToStatus()
+        {
+            Guid reservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+            TestHttpRequest? captured = null;
+            using var server = TestHttpServer.Start(request =>
+            {
+                captured = request;
+                return TestHttpResponse.Json("{\"status\":\"Accepted\",\"reservationId\":\"55555555-5555-5555-5555-555555555555\"}");
+            });
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-success-no-session-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString(),
+                ["ApiKey"] = "test-payments-key"
+            });
+
+            var result = await controller.Success(reservationId, null, "public");
+
+            var redirect = Assert.IsType<RedirectToActionResult>(result);
+            Assert.Equal(nameof(PaymentsController.Status), redirect.ActionName);
+            Assert.NotNull(redirect.RouteValues);
+            Assert.Equal(reservationId, redirect.RouteValues!["reservationId"]);
+            Assert.Equal("public", redirect.RouteValues["origin"]);
+
+            Assert.True(captured.HasValue);
+            Assert.Equal("POST", captured!.Value.Method);
+            Assert.Equal("/Payments/Confirm", captured.Value.Path);
+            Assert.Equal("test-payments-key", captured.Value.Headers["x-api-key"]);
+            var body = Newtonsoft.Json.Linq.JObject.Parse(captured.Value.Body);
+            Assert.Equal(reservationId, Guid.Parse(body.Value<string>("ReservationId")!));
+            Assert.True(body.TryGetValue("CheckoutSessionId", out var checkoutSessionToken));
+            Assert.Equal(Newtonsoft.Json.Linq.JTokenType.Null, checkoutSessionToken!.Type);
+            Assert.Contains(controller.Response.Headers.SetCookie.ToArray(), value =>
+                value != null && value.StartsWith("OCPP.PublicPaymentRecovery=", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task PaymentsSuccess_WithoutSessionId_ShowsConfirmFailureStatus()
+        {
+            Guid reservationId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+            using var server = TestHttpServer.Start(_ =>
+                TestHttpResponse.Json(
+                    "{\"status\":\"Failed\",\"error\":\"The payment was not authorized.\"}",
+                    StatusCodes.Status400BadRequest));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-success-no-session-failed-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Success(reservationId, "", "public");
+
+            // Single-return-URL providers send declines here too, so public payers get the public page.
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("PublicResult", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Failed", model.Status);
+            Assert.Equal("The payment was not authorized.", model.Message);
+            Assert.Equal(reservationId, model.ReservationId);
+            Assert.Equal("public", model.Origin);
+            Assert.False(model.Success);
+        }
+
+        [Fact]
+        public async Task PaymentsSuccess_ConfirmFailureWithoutPublicOrigin_ShowsOperatorResult()
+        {
+            Guid reservationId = Guid.Parse("68686868-6868-6868-6868-686868686868");
+            using var server = TestHttpServer.Start(_ =>
+                TestHttpResponse.Json(
+                    "{\"status\":\"Cancelled\",\"error\":\"Checkout was cancelled.\"}",
+                    StatusCodes.Status400BadRequest));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-success-operator-failed-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Success(reservationId, null, null);
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("Result", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Cancelled", model.Status);
+            Assert.Equal(reservationId, model.ReservationId);
+            Assert.False(model.Success);
+        }
+
+        [Fact]
+        public async Task PaymentsSuccess_WithSessionId_PostsConfirmWithCheckoutSessionId()
+        {
+            Guid reservationId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+            TestHttpRequest? captured = null;
+            using var server = TestHttpServer.Start(request =>
+            {
+                captured = request;
+                return TestHttpResponse.Json("{\"status\":\"Accepted\"}");
+            });
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-success-session-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Success(reservationId, "cs_test_123", null);
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("Result", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Accepted", model.Status);
+            Assert.True(model.Success);
+            Assert.Equal(reservationId, model.ReservationId);
+            Assert.Equal("/Home/Index", model.ReturnUrl);
+
+            Assert.True(captured.HasValue);
+            Assert.Equal("/Payments/Confirm", captured!.Value.Path);
+            var body = Newtonsoft.Json.Linq.JObject.Parse(captured.Value.Body);
+            Assert.Equal(reservationId, Guid.Parse(body.Value<string>("ReservationId")!));
+            Assert.Equal("cs_test_123", body.Value<string>("CheckoutSessionId"));
+        }
+
+        [Fact]
+        public async Task PaymentsSuccess_WithoutReservationId_ShowsMissingDataError()
+        {
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-success-missing-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>());
+
+            var result = await controller.Success(Guid.Empty, "cs_test_123", "public");
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("Result", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Error", model.Status);
+            Assert.False(model.Success);
+        }
+
+        [Fact]
+        public async Task PaymentsSuccess_ThrottledConfirm_RedirectsPublicPayerToStatusAndKeepsRecoveryCookie()
+        {
+            Guid reservationId = Guid.Parse("56565656-5656-5656-5656-565656565656");
+            using var server = TestHttpServer.Start(_ =>
+                TestHttpResponse.Json(
+                    "{\"status\":\"Pending\",\"error\":\"Payment is still being processed.\"}",
+                    StatusCodes.Status400BadRequest));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-success-pending-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Success(reservationId, null, "public");
+
+            // The status page polls; the first return is still confirming the payment.
+            var redirect = Assert.IsType<RedirectToActionResult>(result);
+            Assert.Equal(nameof(PaymentsController.Status), redirect.ActionName);
+            Assert.Equal(reservationId, redirect.RouteValues!["reservationId"]);
+            Assert.Equal("public", redirect.RouteValues["origin"]);
+            Assert.DoesNotContain(controller.Response.Headers.SetCookie.ToArray(), value =>
+                value != null && value.StartsWith("OCPP.PublicPaymentRecovery=", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task PaymentsSuccess_ThrottledConfirm_ShowsOperatorResultWithServerMessage()
+        {
+            Guid reservationId = Guid.Parse("57575757-5757-5757-5757-575757575757");
+            using var server = TestHttpServer.Start(_ =>
+                TestHttpResponse.Json(
+                    "{\"status\":\"Pending\",\"error\":\"Payment is still being processed.\"}",
+                    StatusCodes.Status400BadRequest));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-success-pending-operator-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Success(reservationId, null, null);
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("Result", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Pending", model.Status);
+            Assert.Equal("Payment is still being processed.", model.Message);
+            Assert.Equal(reservationId, model.ReservationId);
+            Assert.False(model.Success);
+        }
+
+        [Theory]
+        [InlineData(ChargePaymentReservationState.Pending, false)]
+        [InlineData(ChargePaymentReservationState.Authorized, true)]
+        [InlineData(ChargePaymentReservationState.Cancelled, true)]
+        public async Task PaymentsStatus_KeepsRecoveryCookieOnlyWhileThePaymentIsPending(string reservationStatus, bool expectCookieCleared)
+        {
+            Guid reservationId = Guid.Parse("58585858-5858-5858-5858-585858585858");
+            TestHttpRequest? captured = null;
+            using var server = TestHttpServer.Start(request =>
+            {
+                captured = request;
+                return TestHttpResponse.Json($"{{\"status\":\"{reservationStatus}\",\"reservationId\":\"{reservationId}\"}}");
+            });
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-status-cookie-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Status(reservationId, "public");
+
+            Assert.True(captured.HasValue);
+            Assert.Equal($"/Payments/Status?reservationId={reservationId}", captured!.Value.Path);
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("PublicStatus", view.ViewName);
+            var model = Assert.IsType<PaymentStatusViewModel>(view.Model);
+            Assert.True(model.ApiSuccess);
+            bool cleared = controller.Response.Headers.SetCookie.ToArray().Any(value =>
+                value != null && value.StartsWith("OCPP.PublicPaymentRecovery=", StringComparison.Ordinal));
+            Assert.Equal(expectCookieCleared, cleared);
+        }
+
+        [Theory]
+        [InlineData("{\"status\":\"Cancelled\",\"cancellationApplied\":true,\"message\":null}", "public")]
+        [InlineData("{\"status\":\"Cancelled\",\"cancellationApplied\":true,\"message\":null}", null)]
+        public async Task PaymentsCancel_ReportsCancelledOnlyWhenTheServerAppliedIt(string answer, string? origin)
+        {
+            Guid reservationId = Guid.Parse("59595959-5959-5959-5959-595959595959");
+            TestHttpRequest? captured = null;
+            using var server = TestHttpServer.Start(request =>
+            {
+                captured = request;
+                return TestHttpResponse.Json(answer);
+            });
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-cancel-applied-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Cancel(reservationId, origin!);
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal(origin == "public" ? "PublicResult" : "Result", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Cancelled", model.Status);
+            Assert.Equal("PaymentCancelled", model.Message);
+            Assert.False(model.Success);
+
+            Assert.True(captured.HasValue);
+            Assert.Equal("/Payments/Cancel", captured!.Value.Path);
+            var body = Newtonsoft.Json.Linq.JObject.Parse(captured.Value.Body);
+            Assert.Equal(reservationId, Guid.Parse(body.Value<string>("ReservationId")!));
+            Assert.Equal("checkout_cancelled", body.Value<string>("Reason"));
+            Assert.Contains(controller.Response.Headers.SetCookie.ToArray(), value =>
+                value != null && value.StartsWith("OCPP.PublicPaymentRecovery=", StringComparison.Ordinal));
+        }
+
+        [Theory]
+        [InlineData("{\"status\":\"Failed\",\"cancellationApplied\":false,\"message\":\"Payment was captured immediately by the payment method; refund required.\"}", "public", "PublicResult", "Failed", "Payment was captured immediately by the payment method; refund required.")]
+        [InlineData("{\"status\":\"Failed\",\"cancellationApplied\":false,\"message\":\"Payment was captured immediately by the payment method; refund required.\"}", null, "Result", "Failed", "Payment was captured immediately by the payment method; refund required.")]
+        [InlineData("{\"status\":\"Completed\",\"cancellationApplied\":false,\"message\":null}", "public", "PublicResult", "Completed", "PaymentCancelNotPossible")]
+        [InlineData("{\"status\":\"Charging\",\"cancellationApplied\":false,\"message\":null}", null, "Result", "Charging", "PaymentCancelSessionStarted")]
+        [InlineData("{\"status\":\"Authorized\",\"cancellationApplied\":false,\"message\":null}", null, "Result", "Authorized", "PaymentAuthorizedMessage")]
+        public async Task PaymentsCancel_ShowsTheServerStatusWhenTheCancelWasNotApplied(
+            string answer,
+            string? origin,
+            string expectedView,
+            string expectedStatus,
+            string expectedMessage)
+        {
+            Guid reservationId = Guid.Parse("5a5a5a5a-5a5a-5a5a-5a5a-5a5a5a5a5a5a");
+            using var server = TestHttpServer.Start(_ => TestHttpResponse.Json(answer));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-cancel-not-applied-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Cancel(reservationId, origin!);
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal(expectedView, view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal(expectedStatus, model.Status);
+            Assert.Equal(expectedMessage, model.Message);
+            Assert.NotEqual("PaymentCancelled", model.Message);
+            Assert.Equal(reservationId, model.ReservationId);
+        }
+
+        [Theory]
+        [InlineData(ChargePaymentReservationState.Charging)]
+        [InlineData(ChargePaymentReservationState.StartRequested)]
+        public async Task PaymentsCancel_ActiveSessionSendsPublicPayerToTheStatusPage(string reservationStatus)
+        {
+            Guid reservationId = Guid.Parse("5b5b5b5b-5b5b-5b5b-5b5b-5b5b5b5b5b5b");
+            using var server = TestHttpServer.Start(_ =>
+                TestHttpResponse.Json($"{{\"status\":\"{reservationStatus}\",\"cancellationApplied\":false,\"message\":null}}"));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-cancel-active-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Cancel(reservationId, "public");
+
+            var redirect = Assert.IsType<RedirectToActionResult>(result);
+            Assert.Equal(nameof(PaymentsController.Status), redirect.ActionName);
+            Assert.Equal(reservationId, redirect.RouteValues!["reservationId"]);
+            Assert.Equal("public", redirect.RouteValues["origin"]);
+        }
+
+        [Fact]
+        public async Task PaymentsCancel_WithoutServerAnswerKeepsRecoveryCookieAndReportsAnError()
+        {
+            Guid reservationId = Guid.Parse("5c5c5c5c-5c5c-5c5c-5c5c-5c5c5c5c5c5c");
+            using var server = TestHttpServer.Start(_ =>
+                TestHttpResponse.Html("<html><body>bad gateway</body></html>", StatusCodes.Status502BadGateway));
+
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-cancel-no-answer-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>
+            {
+                ["ServerApiUrl"] = server.BaseUri.ToString()
+            });
+
+            var result = await controller.Cancel(reservationId, "public");
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("PublicResult", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Error", model.Status);
+            Assert.Equal("PaymentCancelUnknown", model.Message);
+            Assert.False(model.Success);
+            Assert.DoesNotContain(controller.Response.Headers.SetCookie.ToArray(), value =>
+                value != null && value.StartsWith("OCPP.PublicPaymentRecovery=", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public void PaymentsCancel_NewPublicMessagesAreTranslatedInEveryPortalLanguage()
+        {
+            string script = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "OCPP.Core.Management", "wwwroot", "js", "public-portal.js"));
+
+            foreach (string key in new[] { "message.cancelNotPossible", "message.capturedAtCheckout" })
+            {
+                var lines = script.Split('\n').Where(line => line.TrimStart().StartsWith($"\"{key}\":", StringComparison.Ordinal)).ToList();
+                Assert.Equal(6, lines.Count);
+                Assert.All(lines, line => Assert.DoesNotContain(line, ch => ch >= 0x0400 && ch <= 0x04FF));
+            }
+
+            Assert.Contains("\"This session can no longer be cancelled.\": \"message.cancelNotPossible\"", script, StringComparison.Ordinal);
+            Assert.Contains("\"Payment was captured immediately by the payment method; refund required.\": \"message.capturedAtCheckout\"", script, StringComparison.Ordinal);
+        }
+
+        private static string FindRepositoryRoot()
+        {
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directory != null && !File.Exists(Path.Combine(directory.FullName, "OCPP.Core.sln")))
+            {
+                directory = directory.Parent;
+            }
+
+            Assert.NotNull(directory);
+            return directory!.FullName;
+        }
+
+        [Fact]
+        public void PaymentsMockCheckout_WithoutSessionId_RendersProviderTitle()
+        {
+            Guid reservationId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-mock-provider-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>());
+            string successUrl = $"http://localhost:8082/Payments/Success?reservationId={reservationId}&origin=public";
+            string cancelUrl = $"http://localhost:8082/Payments/Cancel?reservationId={reservationId}&origin=public";
+
+            var result = controller.MockCheckout(reservationId, null, successUrl, cancelUrl, "Saferpay");
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Null(view.ViewName);
+            var model = Assert.IsType<MockCheckoutViewModel>(view.Model);
+            Assert.Equal(reservationId, model.ReservationId);
+            Assert.Null(model.SessionId);
+            Assert.False(model.HasSessionId);
+            Assert.Equal("Saferpay", model.ProviderName);
+            Assert.Equal("Mock Saferpay checkout", model.Title);
+            Assert.Equal(successUrl, model.SuccessUrl);
+            Assert.Equal(cancelUrl, model.CancelUrl);
+        }
+
+        [Fact]
+        public void PaymentsMockCheckout_WithSessionIdAndNoProvider_UsesNeutralTitle()
+        {
+            Guid reservationId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-mock-session-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>());
+
+            var result = controller.MockCheckout(reservationId, "cs_mock_1", "http://localhost:8082/Payments/Success", null);
+
+            var view = Assert.IsType<ViewResult>(result);
+            var model = Assert.IsType<MockCheckoutViewModel>(view.Model);
+            Assert.Equal("cs_mock_1", model.SessionId);
+            Assert.True(model.HasSessionId);
+            Assert.Null(model.ProviderName);
+            Assert.Equal("Mock payment checkout", model.Title);
+        }
+
+        [Fact]
+        public void PaymentsMockCheckout_IgnoresUnsafeProviderName()
+        {
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-mock-unsafe-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>());
+
+            var result = controller.MockCheckout(Guid.NewGuid(), null, "http://localhost:8082/Payments/Success", null, "<script>alert(1)</script>");
+
+            var model = Assert.IsType<MockCheckoutViewModel>(Assert.IsType<ViewResult>(result).Model);
+            Assert.Null(model.ProviderName);
+            Assert.Equal("Mock payment checkout", model.Title);
+        }
+
+        [Theory]
+        [InlineData(false, true)]
+        [InlineData(true, false)]
+        public void PaymentsMockCheckout_StillRequiresReservationAndSuccessUrl(bool emptyReservation, bool emptySuccessUrl)
+        {
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-mock-invalid-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>());
+
+            var result = controller.MockCheckout(
+                emptyReservation ? Guid.Empty : Guid.NewGuid(),
+                "cs_mock_1",
+                emptySuccessUrl ? "" : "http://localhost:8082/Payments/Success",
+                null,
+                "Saferpay");
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("Result", view.ViewName);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Error", model.Status);
+        }
+
+        [Theory]
+        [InlineData("javascript:alert(document.cookie)", null)]
+        [InlineData("JavaScript:alert(1)", null)]
+        [InlineData(" javascript:alert(1)", null)]
+        [InlineData("java\tscript:alert(1)", null)]
+        [InlineData("javascript://%0Aalert(1)", null)]
+        [InlineData("data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==", null)]
+        [InlineData("vbscript:msgbox(1)", null)]
+        [InlineData("file:///etc/passwd", null)]
+        [InlineData("//attacker.example/Payments/Success", null)]
+        [InlineData("/\\attacker.example/Payments/Success", null)]
+        [InlineData("https:attacker.example", null)]
+        [InlineData("http://localhost:8082/Payments/Success", "javascript:alert(1)")]
+        [InlineData("http://localhost:8082/Payments/Success", "data:text/html,<script>alert(1)</script>")]
+        public void PaymentsMockCheckout_RejectsUnsafeReturnUrls(string successUrl, string? cancelUrl)
+        {
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-mock-unsafe-url-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>());
+
+            var result = controller.MockCheckout(Guid.NewGuid(), "cs_mock_1", successUrl, cancelUrl!, "Saferpay");
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Equal("Result", view.ViewName);
+            Assert.Equal(400, view.StatusCode);
+            var model = Assert.IsType<PaymentResultViewModel>(view.Model);
+            Assert.Equal("Error", model.Status);
+            Assert.False(model.Success);
+        }
+
+        [Theory]
+        [InlineData("http://localhost:8082/Payments/Success?reservationId=r1&origin=public", "https://portal.example.com/Payments/Cancel?reservationId=r1")]
+        [InlineData("HTTPS://portal.example.com/Payments/Success", null)]
+        [InlineData("/Payments/Success?reservationId=r1&next=http://x", "/Payments/Cancel?reservationId=r1")]
+        [InlineData("Success?reservationId=r1", "?cancel=1")]
+        public void PaymentsMockCheckout_AcceptsRelativeAndHttpReturnUrls(string successUrl, string? cancelUrl)
+        {
+            using var context = CreateContext(Path.Combine(Path.GetTempPath(), $"payments-mock-safe-url-{Guid.NewGuid():N}.sqlite"));
+            var controller = CreatePaymentsController(context, new Dictionary<string, string?>());
+
+            var result = controller.MockCheckout(Guid.NewGuid(), null, successUrl, cancelUrl!, "Saferpay");
+
+            var view = Assert.IsType<ViewResult>(result);
+            Assert.Null(view.ViewName);
+            Assert.Null(view.StatusCode);
+            var model = Assert.IsType<MockCheckoutViewModel>(view.Model);
+            Assert.Equal(successUrl, model.SuccessUrl);
+            Assert.Equal(cancelUrl, model.CancelUrl);
+        }
+
         private static HomeController CreateHomeController(OCPPCoreContext dbContext, IDictionary<string, string?> configValues)
         {
             IConfiguration configuration = new ConfigurationBuilder()
@@ -650,6 +1145,11 @@ namespace OCPP.Core.Server.Tests
                 .AddInMemoryCollection(configValues)
                 .Build();
 
+            var controllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            };
+
             return new PaymentsController(
                 null!,
                 new DictionaryStringLocalizer<PaymentsController>(),
@@ -657,10 +1157,8 @@ namespace OCPP.Core.Server.Tests
                 configuration,
                 dbContext)
             {
-                ControllerContext = new ControllerContext
-                {
-                    HttpContext = new DefaultHttpContext()
-                }
+                ControllerContext = controllerContext,
+                Url = new TestUrlHelper(controllerContext)
             };
         }
 
@@ -744,6 +1242,28 @@ namespace OCPP.Core.Server.Tests
             {
                 _values = values?.ToDictionary(x => x.Key, x => x.Value) ?? new Dictionary<string, object>();
             }
+        }
+
+        private sealed class TestUrlHelper : IUrlHelper
+        {
+            public TestUrlHelper(ActionContext actionContext)
+            {
+                ActionContext = actionContext;
+            }
+
+            public ActionContext ActionContext { get; }
+
+            public string? Action(UrlActionContext actionContext) =>
+                $"/{actionContext.Controller}/{actionContext.Action}";
+
+            public string? Content(string? contentPath) => contentPath;
+
+            public bool IsLocalUrl(string? url) =>
+                !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//", StringComparison.Ordinal);
+
+            public string? Link(string? routeName, object? values) => null;
+
+            public string? RouteUrl(UrlRouteContext routeContext) => null;
         }
 
         private sealed class TestHttpServer : IDisposable

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
@@ -10,8 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
-using Stripe;
-using Stripe.Checkout;
+using OCPP.Core.Server.Payments.Providers;
 
 namespace OCPP.Core.Server.Payments
 {
@@ -24,11 +23,10 @@ namespace OCPP.Core.Server.Payments
         private readonly IConfiguration _configuration;
         private readonly ILogger<IdleFeeWarningEmailService> _logger;
         private readonly NotificationOptions _notificationOptions;
-        private readonly StripeOptions _stripeOptions;
+        private readonly PaymentCheckoutSettings _checkoutSettings;
         private readonly PaymentFlowOptions _flowOptions;
         private readonly TimeSpan _interval;
         private readonly int _warningLeadMinutes;
-        private readonly IStripeSessionService _sessionService;
         private readonly Func<DateTime> _utcNow;
         private readonly ConcurrentDictionary<int, DateTime> _sentWarnings = new();
 
@@ -37,8 +35,8 @@ namespace OCPP.Core.Server.Payments
             ILogger<IdleFeeWarningEmailService> logger,
             IConfiguration configuration,
             IOptions<NotificationOptions> notificationOptions,
-            IOptions<StripeOptions> stripeOptions)
-            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, null, null)
+            PaymentCheckoutSettings checkoutSettings)
+            : this(scopeFactory, logger, configuration, notificationOptions, checkoutSettings, null, null)
         {
         }
 
@@ -47,9 +45,9 @@ namespace OCPP.Core.Server.Payments
             ILogger<IdleFeeWarningEmailService> logger,
             IConfiguration configuration,
             IOptions<NotificationOptions> notificationOptions,
-            IOptions<StripeOptions> stripeOptions,
+            PaymentCheckoutSettings checkoutSettings,
             IOptions<PaymentFlowOptions> flowOptions)
-            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, flowOptions, null)
+            : this(scopeFactory, logger, configuration, notificationOptions, checkoutSettings, flowOptions, null)
         {
         }
 
@@ -58,9 +56,9 @@ namespace OCPP.Core.Server.Payments
             ILogger<IdleFeeWarningEmailService> logger,
             IConfiguration configuration,
             IOptions<NotificationOptions> notificationOptions,
-            IOptions<StripeOptions> stripeOptions,
+            PaymentCheckoutSettings checkoutSettings,
             Func<DateTime> utcNow)
-            : this(scopeFactory, logger, configuration, notificationOptions, stripeOptions, null, utcNow)
+            : this(scopeFactory, logger, configuration, notificationOptions, checkoutSettings, null, utcNow)
         {
         }
 
@@ -69,7 +67,7 @@ namespace OCPP.Core.Server.Payments
             ILogger<IdleFeeWarningEmailService> logger,
             IConfiguration configuration,
             IOptions<NotificationOptions> notificationOptions,
-            IOptions<StripeOptions> stripeOptions,
+            PaymentCheckoutSettings checkoutSettings,
             IOptions<PaymentFlowOptions> flowOptions,
             Func<DateTime> utcNow)
         {
@@ -77,19 +75,13 @@ namespace OCPP.Core.Server.Payments
             _configuration = configuration;
             _logger = logger;
             _notificationOptions = notificationOptions?.Value ?? new NotificationOptions();
-            _stripeOptions = stripeOptions?.Value ?? new StripeOptions();
+            _checkoutSettings = checkoutSettings ?? new PaymentCheckoutSettings();
             _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
-            _sessionService = new StripeSessionServiceWrapper();
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
 
             _warningLeadMinutes = Math.Max(1, _notificationOptions.IdleWarningLeadMinutes);
             int intervalSeconds = configuration.GetValue<int?>("Maintenance:IdleWarningSweepSeconds") ?? 60;
             _interval = TimeSpan.FromSeconds(Math.Max(20, intervalSeconds));
-
-            if (!string.IsNullOrWhiteSpace(_stripeOptions.ApiKey))
-            {
-                StripeConfiguration.ApiKey = _stripeOptions.ApiKey;
-            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -122,12 +114,17 @@ namespace OCPP.Core.Server.Payments
 
         protected virtual async Task SweepAsync(CancellationToken token)
         {
-            if (!_notificationOptions.EnableCustomerEmails || string.IsNullOrWhiteSpace(_stripeOptions.ApiKey))
+            if (!_notificationOptions.EnableCustomerEmails)
             {
                 return;
             }
 
             using var scope = _scopeFactory.CreateScope();
+            if (!ArePaymentsEnabled(scope.ServiceProvider))
+            {
+                return;
+            }
+
             var db = scope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
             var emailService = scope.ServiceProvider.GetService<IEmailNotificationService>();
             if (emailService == null)
@@ -220,8 +217,8 @@ namespace OCPP.Core.Server.Payments
                     continue;
                 }
 
-                var checkoutSession = GetCheckoutSession(reservation.StripeCheckoutSessionId, reservation.ReservationId);
-                var recipientEmail = checkoutSession?.CustomerDetails?.Email;
+                var checkoutDetails = GetCheckoutDetails(scope.ServiceProvider, reservation);
+                var recipientEmail = checkoutDetails?.CustomerEmail;
                 if (string.IsNullOrWhiteSpace(recipientEmail))
                 {
                     _sentWarnings.TryAdd(transaction.TransactionId, now);
@@ -251,36 +248,63 @@ namespace OCPP.Core.Server.Payments
             PruneSentWarnings(now);
         }
 
-        protected virtual Session GetCheckoutSession(string checkoutSessionId, Guid reservationId)
+        /// <summary>
+        /// Warnings follow the gate that settles existing reservations (<see cref="IPaymentCoordinator.IsOperational"/>:
+        /// any provider configured), not the gate for new checkouts. A previous provider's sessions still have their
+        /// idle fees captured after <c>Payments:Provider</c> changes, so they must still get the warning.
+        /// </summary>
+        protected virtual bool ArePaymentsEnabled(IServiceProvider scopedServices)
         {
-            if (string.IsNullOrWhiteSpace(checkoutSessionId))
+            var coordinator = scopedServices?.GetService<IPaymentCoordinator>();
+            return coordinator != null && coordinator.IsOperational;
+        }
+
+        /// <summary>
+        /// Recipient details through the coordinator's gateway path: a deferred PSP lookup for providers
+        /// that support it (Stripe), otherwise the payer details persisted on the reservation.
+        /// </summary>
+        protected virtual PaymentCheckoutDetails GetCheckoutDetails(IServiceProvider scopedServices, ChargePaymentReservation reservation)
+        {
+            if (reservation == null)
             {
                 return null;
             }
 
             try
             {
-                return _sessionService.Get(checkoutSessionId);
+                if (scopedServices?.GetService<IPaymentCoordinator>() is PaymentCoordinator coordinator)
+                {
+                    return coordinator.GetCheckoutDetails(reservation);
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
                     ex,
-                    "IdleFeeWarningEmailService => Unable to load checkout session reservation={ReservationId} session={SessionId}",
-                    reservationId,
-                    checkoutSessionId);
-                return null;
+                    "IdleFeeWarningEmailService => Unable to load checkout details reservation={ReservationId}",
+                    reservation.ReservationId);
             }
+
+            return new PaymentCheckoutDetails
+            {
+                Provider = reservation.PaymentProvider,
+                SessionReference = reservation.StripeCheckoutSessionId,
+                AuthorizationReference = reservation.StripePaymentIntentId,
+                CustomerEmail = string.IsNullOrWhiteSpace(reservation.PayerEmail)
+                    ? reservation.InvoiceBuyerEmail?.Trim()
+                    : reservation.PayerEmail,
+                CustomerName = reservation.PayerName
+            };
         }
 
         private string BuildStatusUrl(Guid reservationId)
         {
-            if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(_stripeOptions.ReturnBaseUrl))
+            if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(_checkoutSettings.ReturnBaseUrl))
             {
                 return null;
             }
 
-            return $"{_stripeOptions.ReturnBaseUrl.TrimEnd('/')}/Payments/Status?reservationId={reservationId}&origin=public";
+            return $"{_checkoutSettings.ReturnBaseUrl.TrimEnd('/')}/Payments/Status?reservationId={reservationId}&origin=public";
         }
 
         private void PruneSentWarnings(DateTime nowUtc)

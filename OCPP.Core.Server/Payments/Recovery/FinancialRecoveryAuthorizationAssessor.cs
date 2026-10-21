@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using OCPP.Core.Database;
@@ -7,6 +7,9 @@ namespace OCPP.Core.Server.Payments.Recovery
 {
     public static class FinancialRecoveryAuthorizationAssessor
     {
+        /// <summary>Start of <see cref="FinancialRecoveryTransactionEvidenceDecision.Reason"/> when the linkage cannot be evaluated.</summary>
+        public const string IndeterminateTransactionEvidencePrefix = "Authoritative transaction linkage cannot be evaluated";
+
         public static FinancialRecoveryTransactionEvidenceDecision EvaluateTransactionEvidence(
             OCPPCoreContext dbContext,
             ChargePaymentReservation reservation)
@@ -80,8 +83,12 @@ namespace OCPP.Core.Server.Payments.Recovery
                 return Blocked("Reservation evidence is missing.");
             }
 
+            // Same statuses the automatic release reconciliation accepts: ended without a charging session.
             if (!string.Equals(reservation.Status, PaymentReservationStatus.Abandoned, StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(reservation.Status, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(reservation.Status, PaymentReservationStatus.Failed, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(reservation.Status, PaymentReservationStatus.Cancelled, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(reservation.Status, PaymentReservationStatus.StartRejected, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(reservation.Status, PaymentReservationStatus.StartTimeout, StringComparison.OrdinalIgnoreCase))
             {
                 return Blocked("Reservation is not in an eligible terminal status.");
             }
@@ -137,7 +144,7 @@ namespace OCPP.Core.Server.Payments.Recovery
         {
             CanEvaluate = false,
             HasTransaction = false,
-            Reason = $"Authoritative transaction linkage cannot be evaluated: {reason}"
+            Reason = $"{IndeterminateTransactionEvidencePrefix}: {reason}"
         };
     }
 

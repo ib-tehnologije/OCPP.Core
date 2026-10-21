@@ -34,31 +34,58 @@ namespace OCPP.Core.Management.Controllers
             Logger = loggerFactory.CreateLogger<PaymentsController>();
         }
 
+        /// <summary>
+        /// Payer return target for every payment provider. Stripe substitutes its checkout session id into
+        /// <paramref name="session_id"/>; providers that append nothing to the return URL (for example Saferpay)
+        /// omit it, and the server re-checks the payment with the provider that created the reservation.
+        /// </summary>
         public async Task<IActionResult> Success(Guid reservationId, string session_id, string origin)
         {
-            ClearRecoveryCookie();
-
-            if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(session_id))
+            if (reservationId == Guid.Empty)
             {
+                ClearRecoveryCookie();
                 return View("Result", BuildResult("Error", L("PaymentMissingData", "Missing payment session information.")));
             }
 
             var apiResult = await PostAsync("Payments/Confirm", new ConfirmPayload
             {
                 ReservationId = reservationId,
-                CheckoutSessionId = session_id
+                CheckoutSessionId = string.IsNullOrWhiteSpace(session_id) ? null : session_id.Trim()
             });
 
             string status = ExtractStatus(apiResult.Payload);
 
+            if (!apiResult.Success && IsPaymentStillPending(status))
+            {
+                // The server is already checking this payment (a reloaded or repeated return within its throttle
+                // interval). The outcome is not known yet, so the recovery cookie is kept: if the payment never
+                // completes, the start page can still resume or cancel it.
+                if (IsPublicOrigin(origin))
+                {
+                    return RedirectToAction(nameof(Status), new { reservationId, origin });
+                }
+
+                var pendingModel = BuildResult(status, MapStatusToMessage(status, apiResult.Payload));
+                pendingModel.ReservationId = reservationId;
+                pendingModel.Origin = origin;
+                pendingModel.ReturnUrl = GetReturnUrl(origin);
+                return View(GetViewName(origin), pendingModel);
+            }
+
+            ClearRecoveryCookie();
+
             if (!apiResult.Success)
             {
+                // Providers with a single return URL (Saferpay) also send aborted and declined payments
+                // here, so public payers must get the public result page, as Cancel does.
                 if (!string.IsNullOrWhiteSpace(status))
                 {
                     string statusMessage = MapStatusToMessage(status, apiResult.Payload);
                     var statusModel = BuildResult(status, statusMessage);
                     statusModel.ReservationId = reservationId;
-                    return View("Result", statusModel);
+                    statusModel.Origin = origin;
+                    statusModel.ReturnUrl = GetReturnUrl(origin);
+                    return View(GetViewName(origin), statusModel);
                 }
 
                 string payloadMessage = ExtractMessage(apiResult.Payload);
@@ -68,7 +95,10 @@ namespace OCPP.Core.Management.Controllers
                         ? apiResult.ErrorMessage
                         : L("StartTransactionError", "Unable to start the transaction."));
 
-                return View("Result", BuildResult("Error", errorMessage));
+                var errorModel = BuildResult("Error", errorMessage);
+                errorModel.Origin = origin;
+                errorModel.ReturnUrl = GetReturnUrl(origin);
+                return View(GetViewName(origin), errorModel);
             }
 
             string message = MapStatusToMessage(status, apiResult.Payload);
@@ -89,22 +119,95 @@ namespace OCPP.Core.Management.Controllers
 
         public async Task<IActionResult> Cancel(Guid reservationId, string origin)
         {
-            ClearRecoveryCookie();
-
-            if (reservationId != Guid.Empty)
+            if (reservationId == Guid.Empty)
             {
-                await PostAsync("Payments/Cancel", new CancelPayload
-                {
-                    ReservationId = reservationId,
-                    Reason = "checkout_cancelled"
-                });
+                ClearRecoveryCookie();
+                return View(GetViewName(origin), BuildCancelledResult(origin));
             }
 
-            var model = BuildResult("Cancelled", L("PaymentCancelled", "Payment cancelled."));
+            var apiResult = await PostAsync("Payments/Cancel", new CancelPayload
+            {
+                ReservationId = reservationId,
+                Reason = "checkout_cancelled"
+            });
+
+            // The server answers with the reservation status after the cancel. Only a cancel it applied is reported
+            // as cancelled: the payment may have completed meanwhile, or been captured at checkout and need a refund.
+            string status = ExtractStatus(apiResult.Payload);
+            if (ExtractBool(apiResult.Payload, "cancellationApplied") ||
+                string.Equals(status, ChargePaymentReservationState.Cancelled, StringComparison.OrdinalIgnoreCase))
+            {
+                ClearRecoveryCookie();
+                var cancelled = BuildCancelledResult(origin);
+                cancelled.ReservationId = reservationId;
+                return View(GetViewName(origin), cancelled);
+            }
+
+            if (string.IsNullOrWhiteSpace(status) || IsPaymentStillPending(status))
+            {
+                // No usable answer, or the reservation is still pending: keep the recovery cookie, so the start page
+                // can still resume or cancel it.
+                Logger.LogWarning("Payments/Cancel => Cancel not confirmed by the server reservation={ReservationId} status={Status} error={Error}",
+                    reservationId,
+                    status ?? "(none)",
+                    apiResult.ErrorMessage ?? "(none)");
+                var unknown = BuildResult("Error", L("PaymentCancelUnknown", "Something went wrong."));
+                unknown.ReservationId = reservationId;
+                unknown.Origin = origin;
+                unknown.ReturnUrl = GetReturnUrl(origin);
+                return View(GetViewName(origin), unknown);
+            }
+
+            ClearRecoveryCookie();
+
+            if (IsPublicOrigin(origin) && IsActiveSessionStatus(status))
+            {
+                // The payment went through before the cancel: the live status page shows the session and offers stop.
+                return RedirectToAction(nameof(Status), new { reservationId, origin });
+            }
+
+            var model = BuildResult(status, MapCancelStatusToMessage(status, apiResult.Payload));
+            model.ReservationId = reservationId;
             model.Origin = origin;
             model.ReturnUrl = GetReturnUrl(origin);
             return View(GetViewName(origin), model);
         }
+
+        private PaymentResultViewModel BuildCancelledResult(string origin)
+        {
+            var model = BuildResult(ChargePaymentReservationState.Cancelled, L("PaymentCancelled", "Payment cancelled."));
+            model.Origin = origin;
+            model.ReturnUrl = GetReturnUrl(origin);
+            return model;
+        }
+
+        private string MapCancelStatusToMessage(string status, string payload)
+        {
+            if (string.Equals(status, ChargePaymentReservationState.Charging, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ChargePaymentReservationState.WaitingForDisconnect, StringComparison.OrdinalIgnoreCase))
+            {
+                return L("PaymentCancelSessionStarted", "The charging session has already started and was not cancelled.");
+            }
+
+            return MapStatusToMessage(status, payload, L("PaymentCancelNotPossible", "This session can no longer be cancelled."));
+        }
+
+        private static bool IsPublicOrigin(string origin) =>
+            !string.IsNullOrWhiteSpace(origin) && string.Equals(origin, "public", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The throttled confirm answer (<c>Pending</c>) or a reservation that is still waiting for its payment
+        /// (<c>PendingPayment</c>): the payment outcome is not known yet.
+        /// </summary>
+        private static bool IsPaymentStillPending(string status) =>
+            string.Equals(status, "Pending", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, ChargePaymentReservationState.Pending, StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsActiveSessionStatus(string status) =>
+            string.Equals(status, ChargePaymentReservationState.Authorized, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, ChargePaymentReservationState.StartRequested, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, ChargePaymentReservationState.Charging, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, ChargePaymentReservationState.WaitingForDisconnect, StringComparison.OrdinalIgnoreCase);
 
         private PaymentResultViewModel BuildResult(string status, string message)
         {
@@ -118,34 +221,111 @@ namespace OCPP.Core.Management.Controllers
             };
         }
 
+        /// <summary>
+        /// Local mock checkout shared by the mock payment providers. The Stripe mock passes its checkout
+        /// session id as <paramref name="session_id"/>; mocks of providers without a session id omit it and
+        /// may name themselves through <paramref name="provider"/>.
+        /// </summary>
         [HttpGet]
-        public IActionResult MockCheckout(Guid reservationId, string session_id, string successUrl, string cancelUrl)
+        public IActionResult MockCheckout(Guid reservationId, string session_id, string successUrl, string cancelUrl, string provider = null)
         {
-            if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(session_id) || string.IsNullOrWhiteSpace(successUrl))
+            if (reservationId == Guid.Empty || string.IsNullOrWhiteSpace(successUrl))
             {
                 return View("Result", BuildResult("Error", "Missing mock checkout parameters."));
+            }
+
+            // The page is anonymous and renders both URLs as link targets, so a javascript:, data: or other
+            // scheme would run in this origin when clicked. Accept relative and absolute http(s) URLs only.
+            if (!IsSafeMockReturnUrl(successUrl) ||
+                (!string.IsNullOrWhiteSpace(cancelUrl) && !IsSafeMockReturnUrl(cancelUrl)))
+            {
+                Logger.LogWarning("Payments/MockCheckout => Rejected unsafe return URL reservation={ReservationId}", reservationId);
+                var invalid = View("Result", BuildResult("Error", "Invalid mock checkout return URL."));
+                invalid.StatusCode = StatusCodes.Status400BadRequest;
+                return invalid;
             }
 
             return View(new MockCheckoutViewModel
             {
                 ReservationId = reservationId,
-                SessionId = session_id,
+                SessionId = string.IsNullOrWhiteSpace(session_id) ? null : session_id,
+                ProviderName = NormalizeMockProviderName(provider),
                 SuccessUrl = successUrl,
                 CancelUrl = cancelUrl
             });
         }
 
+        /// <summary>
+        /// True for a relative URL (path, query or fragment, no scheme) or an absolute <c>http</c>/<c>https</c> URL.
+        /// Rejects every other scheme (<c>javascript:</c>, <c>data:</c>, ...), protocol-relative <c>//host</c>
+        /// references, backslashes and control or whitespace characters, which browsers may reinterpret.
+        /// </summary>
+        private static bool IsSafeMockReturnUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return false;
+            }
+
+            foreach (char c in url)
+            {
+                if (char.IsControl(c) || char.IsWhiteSpace(c) || c == '\\')
+                {
+                    return false;
+                }
+            }
+
+            if (url.StartsWith("//", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // A relative reference has no scheme: no ':' before the first '/', '?' or '#' (RFC 3986, 4.2).
+            int colon = url.IndexOf(':');
+            int delimiter = url.IndexOfAny(new[] { '/', '?', '#' });
+            if (colon < 0 || (delimiter >= 0 && delimiter < colon))
+            {
+                return true;
+            }
+
+            return Uri.TryCreate(url, UriKind.Absolute, out var absolute) &&
+                   (string.Equals(absolute.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(absolute.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) &&
+                   url.StartsWith(absolute.Scheme + "://", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeMockProviderName(string provider)
+        {
+            if (string.IsNullOrWhiteSpace(provider))
+            {
+                return null;
+            }
+
+            string trimmed = provider.Trim();
+            if (trimmed.Length > 32 || !trimmed.All(c => char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.'))
+            {
+                return null;
+            }
+
+            return trimmed;
+        }
+
         [HttpGet]
         public async Task<IActionResult> Status(Guid reservationId, string origin)
         {
-            ClearRecoveryCookie();
-
             if (reservationId == Guid.Empty)
             {
+                ClearRecoveryCookie();
                 return View(GetViewName(origin), BuildResult("Error", "Missing reservation id."));
             }
 
             var statusResult = await GetAsync($"Payments/Status?reservationId={reservationId}");
+            if (!IsPaymentStillPending(ExtractStatus(statusResult.Payload)))
+            {
+                // While the payment is still pending (for example after a throttled return), the start page needs the
+                // recovery cookie to resume or cancel the checkout.
+                ClearRecoveryCookie();
+            }
             var model = new PaymentStatusViewModel
             {
                 ReservationId = reservationId,
@@ -453,11 +633,13 @@ namespace OCPP.Core.Management.Controllers
             return null;
         }
 
-        private string MapStatusToMessage(string status, string payload)
+        private string MapStatusToMessage(string status, string payload, string fallbackMessage = null)
         {
             switch (status)
             {
                 case "Accepted":
+                case ChargePaymentReservationState.Authorized:
+                case ChargePaymentReservationState.StartRequested:
                     return L("PaymentAuthorizedMessage", "Payment authorized. Charging session will start shortly.");
                 case "Rejected":
                     return L("StartTransactionRejected", "Start request rejected by the charger.");
@@ -473,8 +655,23 @@ namespace OCPP.Core.Management.Controllers
                     {
                         return errorMessage;
                     }
-                    return L("StartTransactionError", "An error occurred while starting the transaction.");
+                    return fallbackMessage ?? L("StartTransactionError", "An error occurred while starting the transaction.");
             }
+        }
+
+        private static bool ExtractBool(string payload, string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(payload)) return false;
+            try
+            {
+                var token = JObject.Parse(payload)[propertyName];
+                return token != null && token.Type == JTokenType.Boolean && token.Value<bool>();
+            }
+            catch
+            {
+                // ignore parse errors
+            }
+            return false;
         }
 
         private string ExtractMessage(string payload)
@@ -551,6 +748,13 @@ namespace OCPP.Core.Management.Controllers
         private class ConfirmPayload
         {
             public Guid ReservationId { get; set; }
+
+            /// <summary>
+            /// Provider checkout reference from the return URL (Stripe session id). Null when the provider
+            /// appends nothing to the return URL; it is then sent as an explicit JSON null, which the server's
+            /// Newtonsoft.Json deserializer binds to a null string.
+            /// </summary>
+            [JsonProperty(NullValueHandling = NullValueHandling.Include)]
             public string CheckoutSessionId { get; set; }
         }
 
