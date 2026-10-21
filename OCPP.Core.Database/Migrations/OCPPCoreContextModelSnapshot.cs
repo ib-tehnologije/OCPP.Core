@@ -33,7 +33,7 @@ namespace OCPP.Core.Database.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)")
-                        .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed','StartRejected','StartTimeout','Abandoned') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
+                        .HasComputedColumnSql("CASE WHEN [Status] NOT IN ('Completed','Cancelled','Failed','ReviewRequired','StartRejected','StartTimeout','Abandoned') THEN 'ACTIVE' ELSE CONVERT(nvarchar(36), [ReservationId]) END");
 
                     b.Property<double?>("ActualEnergyKwh")
                         .HasColumnType("float");

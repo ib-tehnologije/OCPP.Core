@@ -131,7 +131,7 @@ Known behavior:
 
 - Stripe can be enabled/disabled by configuration.
 - Mock Stripe services are available for local/test flows.
-- Payment reservations lock connectors during pending/authorized/start windows.
+- Payment reservations lock connectors while pending, authorized, starting, charging, or waiting for disconnect. Terminal reservations and reservations in `ReviewRequired` (settlement held for review after the session stopped) do not lock the connector.
 - Hosted cleanup abandons stale pending reservations, marks start timeouts, and retries a stuck `Charging` reservation only when its exact linked transaction is already stopped and the same connector has remained `Available` since at least the stop time for the configured grace period.
 - Public payment status exposes reservation and transaction state.
 - Idle fee calculation and idle warning emails are supported.
