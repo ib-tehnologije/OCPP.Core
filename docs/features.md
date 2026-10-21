@@ -138,7 +138,7 @@ Known behavior:
 - The payment provider for new checkouts is selected with `Payments:Provider`: Stripe (default) or Worldline Saferpay. Each provider is enabled separately (`Stripe:Enabled`, `Saferpay:Enabled`). Each reservation keeps the provider that created it.
 - Only new checkouts (`Payments/Create`) need the selected provider to be configured (`IPaymentCoordinator.IsEnabled`). The payment API actions on existing reservations (`Confirm`, `Resume`, `Cancel`, `Stop`, `RequestR1`, `Status`), the idle-fee warning sweep and explicit financial recovery need only one configured provider (`IsOperational`). The coordinator then fails closed for a reservation whose own provider is not configured.
 - Mock Stripe services and an in-process Saferpay JSON API mock are available for local/test flows.
-- Payment reservations lock connectors during pending/authorized/start windows.
+- Payment reservations lock connectors while pending, authorized, starting, charging, or waiting for disconnect. Terminal reservations and reservations in `ReviewRequired` (settlement held for review after the session stopped) do not lock the connector.
 - Hosted cleanup abandons stale pending reservations, marks start timeouts, retries settlements that failed transiently (see below), and retries a stuck `Charging` reservation only when its exact linked transaction is already stopped and the same connector has remained `Available` since at least the stop time for the configured grace period.
 - Public payment status exposes reservation and transaction state.
 - Idle fee calculation and idle warning emails are supported.

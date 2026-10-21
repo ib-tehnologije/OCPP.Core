@@ -1,9 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -15,6 +20,42 @@ namespace OCPP.Core.Server.Tests
 {
     public class ChargePaymentReservationActiveKeyTests
     {
+        [Fact]
+        public void Compute_MatchesSqlServerComputedColumnStatusList()
+        {
+            using var context = CreateSqlServerModelContext();
+            var computedSql = GetActiveConnectorKeyComputedSql(context.GetService<IDesignTimeModel>().Model);
+            var sqlInactiveStatuses = ParseComputedColumnInactiveStatuses(computedSql);
+
+            Assert.Equal(
+                ChargePaymentReservationState.InactiveStatuses.OrderBy(s => s, StringComparer.Ordinal),
+                sqlInactiveStatuses.OrderBy(s => s, StringComparer.Ordinal));
+
+            var reservationId = Guid.NewGuid();
+            var computeMismatches = GetKnownReservationStatuses()
+                .Where(status => IsActiveKey(ChargePaymentReservationActiveKey.Compute(reservationId, status)) == sqlInactiveStatuses.Contains(status))
+                .ToList();
+            Assert.Empty(computeMismatches);
+
+            // The unique index must hold exactly the statuses the portal and middleware treat as locking the connector.
+            var lockMismatches = GetKnownReservationStatuses()
+                .Where(status => ChargePaymentReservationState.LocksConnector(status) == sqlInactiveStatuses.Contains(status))
+                .ToList();
+            Assert.Empty(lockMismatches);
+        }
+
+        [Fact]
+        public void MigrationSnapshot_ActiveConnectorKeyComputedSql_MatchesModel()
+        {
+            using var context = CreateSqlServerModelContext();
+            var snapshot = context.GetService<IMigrationsAssembly>().ModelSnapshot;
+
+            Assert.NotNull(snapshot);
+            Assert.Equal(
+                GetActiveConnectorKeyComputedSql(context.GetService<IDesignTimeModel>().Model),
+                GetActiveConnectorKeyComputedSql(snapshot!.Model));
+        }
+
         [Fact]
         public void SaveChanges_SynchronizesActiveConnectorKey_ForSqlite()
         {
@@ -116,6 +157,7 @@ namespace OCPP.Core.Server.Tests
         [InlineData(PaymentReservationStatus.Abandoned)]
         [InlineData(PaymentReservationStatus.StartRejected)]
         [InlineData(PaymentReservationStatus.StartTimeout)]
+        [InlineData(PaymentReservationStatus.ReviewRequired)]
         public void IsConnectorBusy_IgnoresNonLockingReservation_WithStaleActiveConnectorKey(string terminalStatus)
         {
             using var connection = CreateConnection();
@@ -144,6 +186,53 @@ namespace OCPP.Core.Server.Tests
 
             Assert.False(isBusy);
             Assert.NotEqual("ActiveReservation", reason);
+        }
+
+        private static OCPPCoreContext CreateSqlServerModelContext()
+        {
+            // Builds the SQL Server model only; no connection is opened.
+            var options = new DbContextOptionsBuilder<OCPPCoreContext>()
+                .UseSqlServer("Server=model-only;Database=model-only")
+                .Options;
+
+            return new OCPPCoreContext(options);
+        }
+
+        private static string GetActiveConnectorKeyComputedSql(IReadOnlyModel model)
+        {
+            var computedSql = model
+                .FindEntityType(typeof(ChargePaymentReservation).FullName!)?
+                .FindProperty("ActiveConnectorKey")?
+                .GetComputedColumnSql();
+
+            Assert.False(string.IsNullOrWhiteSpace(computedSql), "ActiveConnectorKey has no SQL Server computed column SQL.");
+            return computedSql!;
+        }
+
+        private static HashSet<string> ParseComputedColumnInactiveStatuses(string computedSql)
+        {
+            var match = Regex.Match(
+                computedSql,
+                @"^CASE WHEN \[Status\] NOT IN \(([^)]*)\) THEN '" + ChargePaymentReservationActiveKey.ActiveValue + "' ELSE ");
+            Assert.True(match.Success, $"Unexpected ActiveConnectorKey computed column SQL: {computedSql}");
+
+            return match.Groups[1].Value
+                .Split(',')
+                .Select(status => status.Trim().Trim('\''))
+                .ToHashSet(StringComparer.Ordinal);
+        }
+
+        private static IEnumerable<string> GetKnownReservationStatuses()
+        {
+            return typeof(ChargePaymentReservationState)
+                .GetFields(BindingFlags.Public | BindingFlags.Static)
+                .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+                .Select(field => (string)field.GetRawConstantValue()!);
+        }
+
+        private static bool IsActiveKey(string activeConnectorKey)
+        {
+            return string.Equals(activeConnectorKey, ChargePaymentReservationActiveKey.ActiveValue, StringComparison.Ordinal);
         }
 
         private static SqliteConnection CreateConnection()
