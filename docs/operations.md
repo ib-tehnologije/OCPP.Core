@@ -119,6 +119,8 @@ Migration `AddMeterEvidencePowerCandidateProvenance` adds nullable candidate off
 
 `MeterEvidence:FallbackMaximumPowerKw` (server, default `400`) is the physical capacity ceiling for chargers that do not report `Power.Offered`. Many chargers only sample energy, active power, and current by default, so without this fallback every positive-energy session from them would require review. Lower it only when every connected charger is known to stay below the value; set it to `0` to require offered-power evidence (strict mode). Check a charger's sampled measurands with the server API `GET /API/GetConfiguration/{chargePointId}/MeterValuesSampledData` (OCPP 1.6). No migration is involved.
 
+Migration `ActiveConnectorKeyReviewRequiredInactive` adds `ReviewRequired` to the inactive statuses of the computed column `ChargePaymentReservation.ActiveConnectorKey`, and drops and recreates the unique index `UX_PaymentReservations_ActiveConnector` around the change. Before it, a reservation that stopped in `ReviewRequired` kept its connector locked on SQL Server, so new paid sessions on that connector failed, while the portal and server showed the connector as free. After deployment those connectors accept new paid sessions; the `ReviewRequired` reservations still need operator review. Rolling the migration back fails on the index if any connector then has more than one `ReviewRequired` or active reservation; the migration transaction is rolled back and the schema is left unchanged.
+
 SQLite:
 
 - Used for local/test runs.
