@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Reflection;
@@ -9,13 +10,16 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Newtonsoft.Json.Linq;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
+using OCPP.Core.Server.Payments.Providers;
 using Xunit;
 
 namespace OCPP.Core.Server.Tests
@@ -2156,6 +2160,97 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Theory]
+        [InlineData(10, false)]
+        [InlineData(600, true)]
+        public async Task NotifyConnectorPreparing_LeavesAReservationInsideTheRemoteStartWindowAwaitingThePlug(int secondsSinceRemoteStart, bool expectStart)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-preparing-window-{Guid.NewGuid():N}.sqlite");
+            int sendCount = 0;
+            var reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+                    {
+                        ReservationId = reservationId,
+                        ChargePointId = "CP-WINDOW",
+                        ConnectorId = 1,
+                        ChargeTagId = "WEB-WINDOW",
+                        OcppIdTag = "WINDOW01",
+                        Currency = "eur",
+                        Status = PaymentReservationStatus.Authorized,
+                        AwaitingPlug = true,
+                        // An earlier remote start ended with Timeout; the charger may still accept it late.
+                        RemoteStartSentAtUtc = DateTime.UtcNow.AddSeconds(-secondsSinceRemoteStart),
+                        RemoteStartResult = "Timeout",
+                        CreatedAtUtc = DateTime.UtcNow.AddMinutes(-15),
+                        UpdatedAtUtc = DateTime.UtcNow,
+                        StartDeadlineAtUtc = DateTime.UtcNow.AddMinutes(10)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(serviceProvider: CreateServiceProvider(databasePath));
+                var fakeSocket = new FakeOpenWebSocket(async () =>
+                {
+                    Interlocked.Increment(ref sendCount);
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    queuedMessage?.TaskCompletionSource?.SetResult("{\"status\":\"Accepted\"}");
+                    await Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-WINDOW"] = new ChargePointStatus
+                    {
+                        Id = "CP-WINDOW",
+                        Protocol = "ocpp1.6",
+                        WebSocket = fakeSocket,
+                        OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>
+                        {
+                            [1] = new OnlineConnectorStatus
+                            {
+                                Status = ConnectorStatusEnum.Preparing,
+                                OcppStatus = "Preparing"
+                            }
+                        }
+                    }
+                });
+
+                try
+                {
+                    middleware.NotifyConnectorPreparing("CP-WINDOW", 1);
+                    await Task.Delay(500);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var reservation = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    if (expectStart)
+                    {
+                        Assert.Equal(1, Volatile.Read(ref sendCount));
+                        Assert.False(reservation.AwaitingPlug ?? false);
+                    }
+                    else
+                    {
+                        // Inside the window nothing is sent and the flag survives for a later Preparing notification.
+                        Assert.Equal(0, Volatile.Read(ref sendCount));
+                        Assert.True(reservation.AwaitingPlug);
+                        Assert.Equal(PaymentReservationStatus.Authorized, reservation.Status);
+                    }
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
         [InlineData("Preparing", true, "Startable")]
         [InlineData("SuspendedEV", false, "Status:SuspendedEV")]
         [InlineData("SuspendedEVSE", false, "Status:SuspendedEVSE")]
@@ -2946,6 +3041,1501 @@ namespace OCPP.Core.Server.Tests
             Assert.Empty(statusDict);
         }
 
+        [Fact]
+        public async Task Invoke_PaymentWebhook_LegacyRoutePassesRawStripeRequestWithoutApiKey()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-legacy-{Guid.NewGuid():N}.sqlite");
+            const string rawBody = "{\"id\":\"evt_test_legacy\",\"type\":\"checkout.session.completed\"}";
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator, new Dictionary<string, string?>
+                {
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var httpContext = CreateApiHttpContext("POST", "/API/Payments/Webhook", body: rawBody);
+                httpContext.Request.Headers["Stripe-Signature"] = "t=1700000000,v1=test-signature";
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(200, httpContext.Response.StatusCode);
+                Assert.Equal(string.Empty, await ReadResponseBodyAsync(httpContext));
+
+                var request = Assert.Single(coordinator.WebhookRequests);
+                Assert.Null(request.Provider);
+                Assert.Equal("POST", request.Method);
+                Assert.Equal(rawBody, request.Body);
+                Assert.True(request.Headers.TryGetValue("stripe-signature", out var signature));
+                Assert.Equal("t=1700000000,v1=test-signature", signature);
+                Assert.False(request.Headers.ContainsKey("X-API-Key"));
+
+                // The API key is enforced for the other endpoints of the same API.
+                var statusContext = CreateApiHttpContext("GET", "/API/Status");
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(statusContext, actionContext);
+                }
+
+                Assert.Equal(401, statusContext.Response.StatusCode);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("GET")]
+        [InlineData("POST")]
+        public async Task Invoke_PaymentWebhook_SaferpayRoutePassesProviderMethodAndQuery(string method)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-saferpay-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator, new Dictionary<string, string?>
+                {
+                    ["ApiKey"] = "test-api-key"
+                });
+
+                var httpContext = CreateApiHttpContext(
+                    method,
+                    "/API/Payments/Webhook/saferpay",
+                    query: $"?reservationId={reservationId}&Outcome=success&sig=abc123&sig=ignored");
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(200, httpContext.Response.StatusCode);
+
+                var request = Assert.Single(coordinator.WebhookRequests);
+                Assert.Equal("saferpay", request.Provider);
+                Assert.Equal(method, request.Method);
+                Assert.Equal(string.Empty, request.Body);
+                Assert.Equal(3, request.Query.Count);
+                Assert.Equal(reservationId.ToString(), request.Query["RESERVATIONID"]);
+                Assert.Equal("success", request.Query["outcome"]);
+                Assert.Equal("abc123", request.Query["sig"]);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("/API/Payments/Webhook/", "POST", null)]
+        [InlineData("/API/Payments/Webhook/stripe", "POST", "stripe")]
+        [InlineData("/API/Payments/Webhook/Saferpay", "GET", "Saferpay")]
+        [InlineData("/API/Payments/Webhook/saferpay/", "GET", "saferpay")]
+        [InlineData("/API/Payments/Webhook/unknown-psp", "POST", "unknown-psp")]
+        public async Task Invoke_PaymentWebhook_PassesProviderSegmentAsIs(string path, string method, string? expectedProvider)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-segment-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext(method, path, body: "{}");
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(200, httpContext.Response.StatusCode);
+                var request = Assert.Single(coordinator.WebhookRequests);
+                Assert.Equal(expectedProvider, request.Provider);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("/API/Payments/Webhook", "GET", 405)]
+        [InlineData("/API/Payments/Webhook", "PUT", 405)]
+        [InlineData("/API/Payments/Webhook/stripe", "GET", 405)]
+        [InlineData("/API/Payments/Webhook/saferpay", "PUT", 405)]
+        [InlineData("/API/Payments/Webhook/saferpay", "DELETE", 405)]
+        [InlineData("/API/Payments/Webhook/saferpay/extra", "GET", 404)]
+        public async Task Invoke_PaymentWebhook_RejectsUnsupportedMethodsAndPaths(string path, string method, int expectedStatusCode)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-method-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext(method, path, body: "{}");
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(expectedStatusCode, httpContext.Response.StatusCode);
+                Assert.Empty(coordinator.WebhookRequests);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData(400)]
+        [InlineData(404)]
+        [InlineData(503)]
+        public async Task Invoke_PaymentWebhook_AnswersWithCoordinatorStatusCode(int statusCode)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-status-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator((_, _) => new PaymentWebhookResult
+                {
+                    StatusCode = statusCode
+                });
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext("GET", "/API/Payments/Webhook/saferpay");
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(statusCode, httpContext.Response.StatusCode);
+                Assert.Equal(string.Empty, await ReadResponseBodyAsync(httpContext));
+                Assert.Single(coordinator.WebhookRequests);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentWebhook_AnswersServerErrorWhenCoordinatorThrows()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-throw-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator((_, _) =>
+                    throw new InvalidOperationException("Simulated payment provider outage."));
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext("POST", "/API/Payments/Webhook", body: "{}");
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(500, httpContext.Response.StatusCode);
+                Assert.Equal(string.Empty, await ReadResponseBodyAsync(httpContext));
+                Assert.Single(coordinator.WebhookRequests);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentWebhook_AutoStartsOnlyVerifiedAuthorizedReservations()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-autostart-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-WEBHOOK-START";
+            Guid authorizedId = Guid.NewGuid();
+            Guid pendingId = Guid.NewGuid();
+            Guid cancelledId = Guid.NewGuid();
+            Guid missingId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, authorizedId, chargePointId, 1, PaymentReservationStatus.Authorized, "PAYWHAUTH");
+                    AddWebhookReservation(setupContext, pendingId, chargePointId, 2, PaymentReservationStatus.Pending, "PAYWHPEND");
+                    AddWebhookReservation(setupContext, cancelledId, chargePointId, 3, PaymentReservationStatus.Cancelled, "PAYWHCANC");
+                    setupContext.SaveChanges();
+                }
+
+                var coordinator = new WebhookRecordingPaymentCoordinator((_, _) => new PaymentWebhookResult
+                {
+                    Provider = "Saferpay",
+                    AuthorizedReservationIds = new[] { authorizedId, pendingId, cancelledId, missingId, authorizedId }
+                });
+                var middleware = CreateMiddleware(coordinator);
+                int sendCount = 0;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1, 2, 3)
+                });
+
+                try
+                {
+                    var httpContext = CreateApiHttpContext("GET", "/API/Payments/Webhook/saferpay", query: $"?reservationId={authorizedId}");
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(200, httpContext.Response.StatusCode);
+                    Assert.Equal(1, sendCount);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var authorized = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == authorizedId);
+                    Assert.Equal(PaymentReservationStatus.StartRequested, authorized.Status);
+                    Assert.Equal("Accepted", authorized.RemoteStartResult);
+                    Assert.NotNull(authorized.RemoteStartSentAtUtc);
+
+                    var pending = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == pendingId);
+                    Assert.Equal(PaymentReservationStatus.Pending, pending.Status);
+                    Assert.Null(pending.RemoteStartSentAtUtc);
+                    Assert.Null(pending.AwaitingPlug);
+
+                    var cancelled = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == cancelledId);
+                    Assert.Equal(PaymentReservationStatus.Cancelled, cancelled.Status);
+                    Assert.Null(cancelled.RemoteStartSentAtUtc);
+                    Assert.Null(cancelled.AwaitingPlug);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentWebhook_ReloadsReservationStatusBeforeAutoStart()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-reload-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-WEBHOOK-RELOAD";
+            Guid cancelledMeanwhileId = Guid.NewGuid();
+            Guid authorizedMeanwhileId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, cancelledMeanwhileId, chargePointId, 1, PaymentReservationStatus.Authorized, "PAYWHRLD1");
+                    AddWebhookReservation(setupContext, authorizedMeanwhileId, chargePointId, 2, PaymentReservationStatus.Pending, "PAYWHRLD2");
+                    setupContext.SaveChanges();
+                }
+
+                var coordinator = new WebhookRecordingPaymentCoordinator((dbContext, _) =>
+                {
+                    // Leave stale tracked copies in the request context, then change both rows elsewhere.
+                    Assert.Equal(PaymentReservationStatus.Authorized, dbContext.ChargePaymentReservations.Single(r => r.ReservationId == cancelledMeanwhileId).Status);
+                    Assert.Equal(PaymentReservationStatus.Pending, dbContext.ChargePaymentReservations.Single(r => r.ReservationId == authorizedMeanwhileId).Status);
+
+                    using (var otherContext = CreateContext(databasePath))
+                    {
+                        var cancelled = otherContext.ChargePaymentReservations.Single(r => r.ReservationId == cancelledMeanwhileId);
+                        cancelled.Status = PaymentReservationStatus.Cancelled;
+                        cancelled.UpdatedAtUtc = DateTime.UtcNow;
+
+                        var authorized = otherContext.ChargePaymentReservations.Single(r => r.ReservationId == authorizedMeanwhileId);
+                        authorized.Status = PaymentReservationStatus.Authorized;
+                        authorized.AuthorizedAtUtc = DateTime.UtcNow;
+                        authorized.UpdatedAtUtc = DateTime.UtcNow;
+                        otherContext.SaveChanges();
+                    }
+
+                    return new PaymentWebhookResult
+                    {
+                        AuthorizedReservationIds = new[] { cancelledMeanwhileId, authorizedMeanwhileId }
+                    };
+                });
+                var middleware = CreateMiddleware(coordinator);
+                int sendCount = 0;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1, 2)
+                });
+
+                try
+                {
+                    var httpContext = CreateApiHttpContext("POST", "/API/Payments/Webhook", body: "{}");
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(200, httpContext.Response.StatusCode);
+                    Assert.Equal(1, sendCount);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var cancelledReservation = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == cancelledMeanwhileId);
+                    Assert.Equal(PaymentReservationStatus.Cancelled, cancelledReservation.Status);
+                    Assert.Null(cancelledReservation.RemoteStartSentAtUtc);
+
+                    var authorizedReservation = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == authorizedMeanwhileId);
+                    Assert.Equal(PaymentReservationStatus.StartRequested, authorizedReservation.Status);
+                    Assert.NotNull(authorizedReservation.RemoteStartSentAtUtc);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentWebhook_ForgedStripePayloadDoesNotStartPendingReservation()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-forged-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-WEBHOOK-FORGED";
+            Guid pendingId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    // OCPP 1.6 reservations get their idTag only after authorization.
+                    AddWebhookReservation(setupContext, pendingId, chargePointId, 1, PaymentReservationStatus.Pending, null);
+                    setupContext.SaveChanges();
+                }
+
+                // Unsigned payload shaped like a Stripe checkout completion for someone else's pending checkout.
+                string forgedPayload = new JObject
+                {
+                    ["id"] = "evt_forged",
+                    ["type"] = "checkout.session.completed",
+                    ["data"] = new JObject
+                    {
+                        ["object"] = new JObject
+                        {
+                            ["payment_status"] = "paid",
+                            ["metadata"] = new JObject
+                            {
+                                ["reservation_id"] = pendingId.ToString()
+                            }
+                        }
+                    }
+                }.ToString();
+
+                // Does not override HandleWebhookAsync: the default member bridges to HandleWebhookEvent and returns no ids.
+                var coordinator = new LegacyWebhookPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator);
+                int sendCount = 0;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1)
+                });
+
+                try
+                {
+                    var httpContext = CreateApiHttpContext("POST", "/API/Payments/Webhook", body: forgedPayload);
+                    httpContext.Request.Headers["Stripe-Signature"] = "t=1700000000,v1=forged";
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(200, httpContext.Response.StatusCode);
+                    var webhookEvent = Assert.Single(coordinator.WebhookEvents);
+                    Assert.Equal(forgedPayload, webhookEvent.Payload);
+                    Assert.Equal("t=1700000000,v1=forged", webhookEvent.Signature);
+                    Assert.Equal(0, sendCount);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var pending = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == pendingId);
+                    Assert.Equal(PaymentReservationStatus.Pending, pending.Status);
+                    Assert.Null(pending.AwaitingPlug);
+                    Assert.Null(pending.RemoteStartSentAtUtc);
+                    Assert.Null(pending.FailureCode);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("cs_test_confirm")]
+        public async Task Invoke_PaymentConfirm_PassesOptionalCheckoutSessionIdToCoordinator(string? checkoutSessionId)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-confirm-optional-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator);
+                var body = new JObject { ["reservationId"] = reservationId.ToString() };
+                if (checkoutSessionId != null)
+                {
+                    body["checkoutSessionId"] = checkoutSessionId;
+                }
+
+                var httpContext = CreateApiHttpContext("POST", "/API/Payments/Confirm", body: body.ToString());
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                var call = Assert.Single(coordinator.ConfirmCalls);
+                Assert.Equal(reservationId, call.ReservationId);
+                Assert.Equal(checkoutSessionId, call.CheckoutSessionId);
+
+                Assert.Equal(400, httpContext.Response.StatusCode);
+                var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                Assert.Equal("Rejected", payload["status"]?.Value<string>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentConfirm_StillRequiresReservationId()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-confirm-missing-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext("POST", "/API/Payments/Confirm", body: "{\"checkoutSessionId\":\"cs_test_confirm\"}");
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(400, httpContext.Response.StatusCode);
+                Assert.Empty(coordinator.ConfirmCalls);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("Confirm", "POST", "Confirm")]
+        [InlineData("Resume", "POST", "Resume")]
+        [InlineData("Cancel", "POST", "Cancel")]
+        [InlineData("RequestR1", "POST", "RequestR1")]
+        [InlineData("Stop", "POST", null)]
+        [InlineData("Status", "GET", null)]
+        public async Task Invoke_Payments_ExistingReservationActionsGateOnIsOperational(string action, string method, string? expectedCall)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-payments-operational-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                // The active provider is not configured (no new checkouts), but a previous provider still is.
+                var coordinator = new GatedPaymentCoordinator(isEnabled: false, isOperational: true);
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext(
+                    method,
+                    $"/API/Payments/{action}",
+                    query: HttpMethods.IsGet(method) ? $"?reservationId={reservationId}" : null,
+                    body: HttpMethods.IsGet(method) ? null : new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                Assert.NotEqual("Disabled", payload["status"]?.Value<string>());
+                if (expectedCall == null)
+                {
+                    // Stop and Status read the reservation themselves; the unknown id answers NotFound.
+                    Assert.Empty(coordinator.Calls);
+                    Assert.Equal(404, httpContext.Response.StatusCode);
+                    Assert.Equal("NotFound", payload["status"]?.Value<string>());
+                }
+                else
+                {
+                    Assert.Equal(new[] { expectedCall }, coordinator.Calls);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("Create", false, true)]
+        [InlineData("Create", false, false)]
+        [InlineData("Confirm", false, false)]
+        [InlineData("Resume", false, false)]
+        [InlineData("Cancel", false, false)]
+        [InlineData("Stop", false, false)]
+        [InlineData("RequestR1", false, false)]
+        public async Task Invoke_Payments_AnswersDisabledWhenTheGateIsClosed(string action, bool isEnabled, bool isOperational)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-payments-disabled-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new GatedPaymentCoordinator(isEnabled, isOperational);
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext(
+                    "POST",
+                    $"/API/Payments/{action}",
+                    body: new JObject
+                    {
+                        ["reservationId"] = Guid.NewGuid().ToString(),
+                        ["chargePointId"] = "CP-DISABLED",
+                        ["chargeTagId"] = "TAG-DISABLED"
+                    }.ToString());
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(400, httpContext.Response.StatusCode);
+                var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                Assert.Equal("Disabled", payload["status"]?.Value<string>());
+                Assert.Empty(coordinator.Calls);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("/API/Payments/Webhook/prod")]
+        [InlineData("/API/Payments/Webhook/stripe/v1")]
+        [InlineData("/API/Payments/Webhook/prod/extra/")]
+        public async Task Invoke_PaymentWebhook_SignedStripeDeliveryToDeprecatedPathUsesLegacyRoute(string path)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-deprecated-{Guid.NewGuid():N}.sqlite");
+            const string rawBody = "{\"id\":\"evt_test_deprecated\",\"type\":\"checkout.session.completed\"}";
+
+            try
+            {
+                var logs = new RecordingLoggerProvider();
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(
+                    coordinator,
+                    new Dictionary<string, string?> { ["ApiKey"] = "test-api-key" },
+                    loggerFactory: new LoggerFactory(new[] { logs }));
+
+                for (int delivery = 0; delivery < 2; delivery++)
+                {
+                    var httpContext = CreateApiHttpContext("POST", path, body: rawBody);
+                    httpContext.Request.Headers["Stripe-Signature"] = "t=1700000000,v1=test-signature";
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(200, httpContext.Response.StatusCode);
+                }
+
+                Assert.Equal(2, coordinator.WebhookRequests.Count);
+                Assert.All(coordinator.WebhookRequests, request =>
+                {
+                    Assert.Null(request.Provider);
+                    Assert.Equal("POST", request.Method);
+                    Assert.Equal(rawBody, request.Body);
+                    Assert.Equal("t=1700000000,v1=test-signature", request.Headers["Stripe-Signature"]);
+                });
+
+                // One deprecation warning per process, naming the path; later deliveries do not repeat it.
+                var warning = Assert.Single(logs.Entries, entry =>
+                    entry.Level == LogLevel.Warning &&
+                    entry.Message.Contains("Deprecated Stripe webhook path", StringComparison.Ordinal));
+                Assert.Contains(path, warning.Message);
+                Assert.Contains("/API/Payments/Webhook/Stripe", warning.Message);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("/API/Payments/Webhook/prod/extra", "POST", false)]
+        [InlineData("/API/Payments/Webhook/saferpay/extra", "GET", true)]
+        [InlineData("/API/Payments/Webhook/stripe/v1", "PUT", true)]
+        public async Task Invoke_PaymentWebhook_DeeperPathWithoutSignedStripePostStaysNotFound(string path, string method, bool withStripeSignature)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-deeper-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext(method, path, body: "{}");
+                if (withStripeSignature)
+                {
+                    httpContext.Request.Headers["Stripe-Signature"] = "t=1700000000,v1=test-signature";
+                }
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(404, httpContext.Response.StatusCode);
+                Assert.Empty(coordinator.WebhookRequests);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("/API/Payments/Webhook/Saferpay", "Saferpay")]
+        [InlineData("/API/Payments/Webhook/stripe", "stripe")]
+        public async Task Invoke_PaymentWebhook_StripeSignatureDoesNotRerouteKnownProviderSegments(string path, string expectedProvider)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-known-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var coordinator = new WebhookRecordingPaymentCoordinator();
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext("POST", path, body: "{}");
+                httpContext.Request.Headers["Stripe-Signature"] = "t=1700000000,v1=test-signature";
+
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await middleware.Invoke(httpContext, actionContext);
+                }
+
+                Assert.Equal(200, httpContext.Response.StatusCode);
+                var request = Assert.Single(coordinator.WebhookRequests);
+                Assert.Equal(expectedProvider, request.Provider);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentWebhook_AcknowledgesProviderBeforeAutoStart()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-webhook-ack-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-WEBHOOK-ACK";
+            Guid authorizedId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, authorizedId, chargePointId, 1, PaymentReservationStatus.Authorized, "PAYWHACK");
+                    setupContext.SaveChanges();
+                }
+
+                // A non-default status shows that the answer was set before the charger was contacted.
+                var coordinator = new WebhookRecordingPaymentCoordinator((_, _) => new PaymentWebhookResult
+                {
+                    StatusCode = 202,
+                    Provider = "Saferpay",
+                    AuthorizedReservationIds = new[] { authorizedId }
+                });
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext("GET", "/API/Payments/Webhook/saferpay", query: $"?reservationId={authorizedId}");
+                var responseBody = new CompletionRecordingResponseBodyFeature(httpContext.Response.Body);
+                httpContext.Features.Set<IHttpResponseBodyFeature>(responseBody);
+
+                int sendCount = 0;
+                bool? completedAtRemoteStart = null;
+                int? statusAtRemoteStart = null;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        completedAtRemoteStart = responseBody.Completed;
+                        statusAtRemoteStart = httpContext.Response.StatusCode;
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1)
+                });
+
+                try
+                {
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(1, sendCount);
+                    Assert.True(completedAtRemoteStart);
+                    Assert.Equal(202, statusAtRemoteStart);
+                    Assert.Equal(202, httpContext.Response.StatusCode);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var reservation = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == authorizedId);
+                    Assert.Equal(PaymentReservationStatus.StartRequested, reservation.Status);
+                    Assert.Equal("Accepted", reservation.RemoteStartResult);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentResume_StartsReservationThatResumeConfirmed()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-resume-start-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-RESUME-START";
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, reservationId, chargePointId, 1, PaymentReservationStatus.Pending, "PAYRESUME1");
+                    setupContext.SaveChanges();
+                }
+
+                // The browser return was lost and no notification arrived: Resume finds the page paid and confirms it.
+                var coordinator = new StartTestPaymentCoordinator
+                {
+                    Resume = (dbContext, id) =>
+                    {
+                        var reservation = dbContext.ChargePaymentReservations.Single(r => r.ReservationId == id);
+                        reservation.Status = PaymentReservationStatus.Authorized;
+                        reservation.AuthorizedAtUtc = DateTime.UtcNow;
+                        reservation.StartDeadlineAtUtc = DateTime.UtcNow.AddMinutes(5);
+                        reservation.UpdatedAtUtc = DateTime.UtcNow;
+                        dbContext.SaveChanges();
+                        return new PaymentResumeResult { Success = true, Status = "Status", Reservation = reservation };
+                    }
+                };
+                var middleware = CreateMiddleware(coordinator);
+                var httpContext = CreateApiHttpContext("POST", "/API/Payments/Resume", body: new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+                var responseBody = new CompletionRecordingResponseBodyFeature(httpContext.Response.Body);
+                httpContext.Features.Set<IHttpResponseBodyFeature>(responseBody);
+
+                int sendCount = 0;
+                bool? completedAtRemoteStart = null;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        completedAtRemoteStart = responseBody.Completed;
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1)
+                });
+
+                try
+                {
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    // The answer keeps its shape and is sent before the charger is contacted.
+                    Assert.Equal(200, httpContext.Response.StatusCode);
+                    var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                    Assert.Equal("Status", payload["status"]?.Value<string>());
+                    Assert.Equal(PaymentReservationStatus.Authorized, payload["reservationStatus"]?.Value<string>());
+                    Assert.Equal(1, sendCount);
+                    Assert.True(completedAtRemoteStart);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var persisted = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    Assert.Equal(PaymentReservationStatus.StartRequested, persisted.Status);
+                    Assert.Equal("Accepted", persisted.RemoteStartResult);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentResume_StartsAPaidSaferpayCheckoutThroughRealServices()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-resume-saferpay-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-RESUME-SAFERPAY";
+            var settings = new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:SQLite"] = $"Filename={databasePath}",
+                ["Notifications:EnableCustomerEmails"] = "false",
+                ["Invoices:Enabled"] = "false",
+                ["Payments:Provider"] = "Saferpay",
+                ["Payments:ReturnBaseUrl"] = "https://return.example.com",
+                ["Saferpay:Enabled"] = "true",
+                ["Saferpay:UseMockServices"] = "true"
+            };
+            IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+            var services = new ServiceCollection();
+            services.AddSingleton(configuration);
+            new Startup(configuration).ConfigureServices(services);
+            var provider = services.BuildServiceProvider();
+
+            try
+            {
+                var coordinator = provider.GetRequiredService<IPaymentCoordinator>();
+                Guid reservationId;
+                using (var setupScope = provider.CreateScope())
+                {
+                    var db = setupScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                    db.Database.EnsureCreated();
+                    db.ChargePoints.Add(new ChargePoint
+                    {
+                        ChargePointId = chargePointId,
+                        Name = "Resume charger",
+                        MaxSessionKwh = 10,
+                        PricePerKwh = 0.40m,
+                        UserSessionFee = 0.50m
+                    });
+                    db.ChargeTags.Add(new ChargeTag { TagId = "TAG-RESUME-SAFERPAY", TagName = "Resume tag" });
+                    db.SaveChanges();
+
+                    // The payer pays the mock payment page, but neither the browser return nor a notification arrives.
+                    var created = await coordinator.CreateCheckoutSessionAsync(
+                        db,
+                        new PaymentSessionRequest { ChargePointId = chargePointId, ConnectorId = 1, ChargeTagId = "TAG-RESUME-SAFERPAY", Origin = "public" },
+                        CancellationToken.None);
+                    reservationId = created.Reservation.ReservationId;
+                    Assert.Equal(PaymentReservationStatus.Pending, created.Reservation.Status);
+                }
+
+                var middleware = CreateMiddleware(coordinator, serviceProvider: provider);
+                int sendCount = 0;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1)
+                });
+
+                try
+                {
+                    // The payer reopens the start page, which resumes the reservation from its recovery cookie.
+                    var httpContext = CreateApiHttpContext("POST", "/API/Payments/Resume", body: new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+                    using (var requestScope = provider.CreateScope())
+                    {
+                        await middleware.Invoke(httpContext, requestScope.ServiceProvider.GetRequiredService<OCPPCoreContext>());
+                    }
+
+                    var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                    Assert.Equal("Status", payload["status"]?.Value<string>());
+                    Assert.Equal(1, sendCount);
+
+                    using var verificationScope = provider.CreateScope();
+                    var verificationDb = verificationScope.ServiceProvider.GetRequiredService<OCPPCoreContext>();
+                    var persisted = verificationDb.ChargePaymentReservations.AsNoTracking().Single(r => r.ReservationId == reservationId);
+                    Assert.Equal(PaymentReservationStatus.StartRequested, persisted.Status);
+                    Assert.Equal(PaymentProviderNames.Saferpay, persisted.PaymentProvider);
+                    Assert.False(string.IsNullOrWhiteSpace(persisted.OcppIdTag));
+                    Assert.Equal("Accepted", persisted.RemoteStartResult);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                provider.Dispose();
+                Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+                TryDelete(databasePath);
+                TryDelete(databasePath + "-wal");
+                TryDelete(databasePath + "-shm");
+            }
+        }
+
+        [Theory]
+        [InlineData("Redirect", PaymentReservationStatus.Authorized)]
+        [InlineData("ResumeUnavailable", PaymentReservationStatus.Authorized)]
+        [InlineData("Status", PaymentReservationStatus.Pending)]
+        [InlineData("Status", PaymentReservationStatus.Cancelled)]
+        public async Task Invoke_PaymentResume_StartsOnlyAnAuthorizedReservationOnStatusAnswer(string resumeStatus, string storedStatus)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-resume-nostart-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-RESUME-NOSTART";
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, reservationId, chargePointId, 1, storedStatus, "PAYRESUME2");
+                    setupContext.SaveChanges();
+                }
+
+                var coordinator = new StartTestPaymentCoordinator
+                {
+                    Resume = (dbContext, id) => new PaymentResumeResult
+                    {
+                        Success = true,
+                        Status = resumeStatus,
+                        Reservation = dbContext.ChargePaymentReservations.Single(r => r.ReservationId == id)
+                    }
+                };
+                var middleware = CreateMiddleware(coordinator);
+                int sendCount = 0;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1)
+                });
+
+                try
+                {
+                    var httpContext = CreateApiHttpContext("POST", "/API/Payments/Resume", body: new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                    Assert.Equal(resumeStatus, payload["status"]?.Value<string>());
+                    Assert.Equal(0, sendCount);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var persisted = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    Assert.Equal(storedStatus, persisted.Status);
+                    Assert.Null(persisted.RemoteStartSentAtUtc);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData(5, 0)]
+        [InlineData(120, 1)]
+        public async Task Invoke_PaymentConfirm_SkipsStartWithinChargerTimeoutOfLastRemoteStart(int secondsSinceLastStart, int expectedSends)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-confirm-recent-start-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-CONFIRM-RECENT";
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    // The previous remote start got no answer in time (Timeout keeps the reservation Authorized).
+                    AddWebhookReservation(setupContext, reservationId, chargePointId, 1, PaymentReservationStatus.Authorized, "PAYRECENT1");
+                    var reservation = setupContext.ChargePaymentReservations.Local.Single(r => r.ReservationId == reservationId);
+                    reservation.RemoteStartSentAtUtc = DateTime.UtcNow.AddSeconds(-secondsSinceLastStart);
+                    reservation.RemoteStartResult = "Timeout";
+                    reservation.AwaitingPlug = false;
+                    setupContext.SaveChanges();
+                }
+
+                var coordinator = new StartTestPaymentCoordinator { Confirm = ConfirmStoredReservation };
+                // Payments:ChargerResponseTimeoutMs is not set, so the default 60-second charger timeout applies.
+                var middleware = CreateMiddleware(coordinator);
+                int sendCount = 0;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1)
+                });
+
+                try
+                {
+                    var httpContext = CreateApiHttpContext("POST", "/API/Payments/Confirm", body: new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(200, httpContext.Response.StatusCode);
+                    Assert.Equal(expectedSends, sendCount);
+                    var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var persisted = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    if (expectedSends == 0)
+                    {
+                        Assert.Equal(PaymentReservationStatus.Authorized, payload["status"]?.Value<string>());
+                        Assert.Equal("RecentRemoteStart", payload["reason"]?.Value<string>());
+                        Assert.Equal(PaymentReservationStatus.Authorized, persisted.Status);
+                        Assert.Equal("Timeout", persisted.RemoteStartResult);
+                    }
+                    else
+                    {
+                        Assert.Equal(PaymentReservationStatus.StartRequested, payload["status"]?.Value<string>());
+                        Assert.Equal(PaymentReservationStatus.StartRequested, persisted.Status);
+                        Assert.Equal("Accepted", persisted.RemoteStartResult);
+                    }
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Invoke_PaymentConfirm_ParallelConfirmsSendOneRemoteStart()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-confirm-parallel-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-CONFIRM-PARALLEL";
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, reservationId, chargePointId, 1, PaymentReservationStatus.Authorized, "PAYPARALLEL");
+                    setupContext.SaveChanges();
+                }
+
+                var coordinator = new StartTestPaymentCoordinator { Confirm = ConfirmStoredReservation };
+                var middleware = CreateMiddleware(coordinator);
+                string body = new JObject { ["reservationId"] = reservationId.ToString() }.ToString();
+                int sendCount = 0;
+                JObject? secondPayload = null;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, async () =>
+                    {
+                        if (Interlocked.Increment(ref sendCount) == 1)
+                        {
+                            // A second return (another tab, or a replayed Confirm) arrives while the charger has not
+                            // answered the first remote start yet.
+                            var secondContext = CreateApiHttpContext("POST", "/API/Payments/Confirm", body: body);
+                            using (var secondDbContext = CreateContext(databasePath))
+                            {
+                                await middleware.Invoke(secondContext, secondDbContext);
+                            }
+
+                            secondPayload = JObject.Parse(await ReadResponseBodyAsync(secondContext));
+                        }
+
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                    }, 1)
+                });
+
+                try
+                {
+                    var httpContext = CreateApiHttpContext("POST", "/API/Payments/Confirm", body: body);
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(1, sendCount);
+                    Assert.NotNull(secondPayload);
+                    Assert.Equal("StartInProgress", secondPayload!["reason"]?.Value<string>());
+                    var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                    Assert.Equal(PaymentReservationStatus.StartRequested, payload["status"]?.Value<string>());
+                    Assert.Empty(coordinator.CancelReasons);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var persisted = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    Assert.Equal(PaymentReservationStatus.StartRequested, persisted.Status);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData(PaymentReservationStatus.StartRequested, "Accepted", 5, null, "AlreadyRequested")]
+        [InlineData(PaymentReservationStatus.Authorized, "Timeout", 5, null, "RecentRemoteStart")]
+        [InlineData(PaymentReservationStatus.Authorized, null, null, 4711, "AlreadyAdvanced")]
+        public async Task TryStartChargingAsync_RereadsTheReservationBeforeSending_WhenAnotherStartFinishedMeanwhile(
+            string committedStatus,
+            string? committedRemoteStartResult,
+            int? secondsSinceCommittedRemoteStart,
+            int? committedTransactionId,
+            string expectedReason)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-start-reread-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-START-REREAD";
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, reservationId, chargePointId, 1, PaymentReservationStatus.Authorized, "PAYREREAD1");
+                    setupContext.ChargePaymentReservations.Local.Single(r => r.ReservationId == reservationId).AwaitingPlug = false;
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(new StartTestPaymentCoordinator());
+                int sendCount = 0;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = CreatePreparingChargePoint(chargePointId, () =>
+                    {
+                        Interlocked.Increment(ref sendCount);
+                        CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                        return Task.CompletedTask;
+                    }, 1)
+                });
+
+                try
+                {
+                    using var actionContext = CreateContext(databasePath);
+                    // Trigger B read the reservation (Authorized, no remote start yet) and passed its checks...
+                    var staleReservation = actionContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+
+                    // ...while trigger A's remote start finished and released the in-flight guard.
+                    using (var otherTriggerContext = CreateContext(databasePath))
+                    {
+                        var committed = otherTriggerContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                        committed.Status = committedStatus;
+                        committed.RemoteStartResult = committedRemoteStartResult;
+                        committed.RemoteStartSentAtUtc = secondsSinceCommittedRemoteStart.HasValue
+                            ? DateTime.UtcNow.AddSeconds(-secondsSinceCommittedRemoteStart.Value)
+                            : null;
+                        committed.TransactionId = committedTransactionId;
+                        committed.UpdatedAtUtc = DateTime.UtcNow;
+                        otherTriggerContext.SaveChanges();
+                    }
+
+                    var result = await InvokeTryStartChargingAsync(middleware, actionContext, staleReservation, "Test");
+
+                    Assert.Equal(0, sendCount);
+                    Assert.Equal(committedStatus, result.Status);
+                    Assert.Equal(expectedReason, result.Reason);
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var persisted = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    Assert.Equal(committedStatus, persisted.Status);
+                    Assert.Equal(committedRemoteStartResult, persisted.RemoteStartResult);
+                    Assert.Equal(committedTransactionId, persisted.TransactionId);
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData(PaymentReservationStatus.StartRequested, false, ConnectorStatusEnum.Preparing, 0, "AlreadyRequested")]
+        [InlineData(PaymentReservationStatus.Charging, false, ConnectorStatusEnum.Preparing, 0, "AlreadyRequested")]
+        [InlineData(PaymentReservationStatus.Authorized, true, ConnectorStatusEnum.Available, 0, "AwaitingPlug")]
+        [InlineData(PaymentReservationStatus.Authorized, true, ConnectorStatusEnum.Preparing, 1, "Accepted")]
+        public async Task Invoke_PaymentConfirm_StartsOnlyAnAuthorizedReservationWithoutAStartUnderWay(
+            string storedStatus,
+            bool awaitingPlug,
+            ConnectorStatusEnum connectorStatus,
+            int expectedSends,
+            string expectedReason)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-confirm-guard-{Guid.NewGuid():N}.sqlite");
+            const string chargePointId = "CP-CONFIRM-GUARD";
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, reservationId, chargePointId, 1, storedStatus, "PAYGUARD1");
+                    setupContext.ChargePaymentReservations.Local.Single(r => r.ReservationId == reservationId).AwaitingPlug = awaitingPlug;
+                    setupContext.SaveChanges();
+                }
+
+                var coordinator = new StartTestPaymentCoordinator { Confirm = ConfirmStoredReservation };
+                var middleware = CreateMiddleware(coordinator);
+                int sendCount = 0;
+                var chargePoint = CreatePreparingChargePoint(chargePointId, () =>
+                {
+                    Interlocked.Increment(ref sendCount);
+                    CompleteQueuedRequests(middleware, "{\"status\":\"Accepted\"}");
+                    return Task.CompletedTask;
+                }, 1);
+                chargePoint.OnlineConnectors[1].Status = connectorStatus;
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    [chargePointId] = chargePoint
+                });
+
+                try
+                {
+                    var httpContext = CreateApiHttpContext("POST", "/API/Payments/Confirm", body: new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    Assert.Equal(200, httpContext.Response.StatusCode);
+                    Assert.Equal(expectedSends, sendCount);
+                    var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                    Assert.Equal(expectedReason, payload["reason"]?.Value<string>());
+
+                    using var verificationContext = CreateContext(databasePath);
+                    var persisted = verificationContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+                    if (expectedSends == 0)
+                    {
+                        // Nothing is touched: the Preparing trigger still owns an awaiting-plug start.
+                        Assert.Equal(storedStatus, persisted.Status);
+                        Assert.Equal(awaitingPlug, persisted.AwaitingPlug);
+                        Assert.Null(persisted.RemoteStartSentAtUtc);
+                    }
+                    else
+                    {
+                        Assert.Equal(PaymentReservationStatus.StartRequested, persisted.Status);
+                        Assert.False(persisted.AwaitingPlug);
+                    }
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData(PaymentReservationStatus.Failed, "captured_at_checkout", "Payment was captured immediately by the payment method; refund required.")]
+        [InlineData(PaymentReservationStatus.Completed, null, null)]
+        public async Task HandlePaymentCancelAsync_ReturnsTheFailureMessageWhenTheCancelIsNotApplied(string status, string? failureCode, string? failureMessage)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-cancel-message-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, reservationId, "CP-CANCEL-MESSAGE", 1, status, null);
+                    var reservation = setupContext.ChargePaymentReservations.Local.Single(r => r.ReservationId == reservationId);
+                    reservation.FailureCode = failureCode;
+                    reservation.FailureMessage = failureMessage;
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware();
+                var httpContext = CreateApiHttpContext("POST", "/API/Payments/Cancel", body: new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentCancelAsync(middleware, httpContext, actionContext);
+                }
+
+                var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                Assert.Equal(status, payload["status"]?.Value<string>());
+                Assert.False(payload["cancellationApplied"]?.Value<bool>() ?? true);
+                Assert.True(payload.ContainsKey("message"));
+                Assert.Equal(failureMessage, payload["message"]?.Value<string>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task HandlePaymentCancelAsync_AppliedCancelHasNoMessage()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-cancel-applied-{Guid.NewGuid():N}.sqlite");
+            Guid reservationId = Guid.NewGuid();
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    AddWebhookReservation(setupContext, reservationId, "CP-CANCEL-APPLIED", 1, PaymentReservationStatus.Pending, null);
+                    setupContext.ChargePaymentReservations.Local.Single(r => r.ReservationId == reservationId).FailureMessage = "Earlier failure.";
+                    setupContext.SaveChanges();
+                }
+
+                var middleware = CreateMiddleware(new CancellingPaymentCoordinator());
+                var httpContext = CreateApiHttpContext("POST", "/API/Payments/Cancel", body: new JObject { ["reservationId"] = reservationId.ToString() }.ToString());
+                using (var actionContext = CreateContext(databasePath))
+                {
+                    await InvokeHandlePaymentCancelAsync(middleware, httpContext, actionContext);
+                }
+
+                var payload = JObject.Parse(await ReadResponseBodyAsync(httpContext));
+                Assert.Equal(PaymentReservationStatus.Cancelled, payload["status"]?.Value<string>());
+                Assert.True(payload["cancellationApplied"]?.Value<bool>());
+                Assert.Equal(JTokenType.Null, payload["message"]?.Type);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        private static PaymentConfirmationResult ConfirmStoredReservation(OCPPCoreContext dbContext, Guid reservationId)
+        {
+            var reservation = dbContext.ChargePaymentReservations.Single(r => r.ReservationId == reservationId);
+            return new PaymentConfirmationResult { Success = true, Status = reservation.Status, Reservation = reservation };
+        }
+
+        private static DefaultHttpContext CreateApiHttpContext(string method, string path, string? query = null, string? body = null)
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.Method = method;
+            httpContext.Request.Path = path;
+            if (!string.IsNullOrEmpty(query))
+            {
+                httpContext.Request.QueryString = new QueryString(query);
+            }
+
+            httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body ?? string.Empty));
+            httpContext.Response.Body = new MemoryStream();
+            return httpContext;
+        }
+
+        private static async Task<string> ReadResponseBodyAsync(HttpContext httpContext)
+        {
+            httpContext.Response.Body.Position = 0;
+            using var reader = new StreamReader(httpContext.Response.Body, leaveOpen: true);
+            return await reader.ReadToEndAsync();
+        }
+
+        private static void AddWebhookReservation(
+            OCPPCoreContext dbContext,
+            Guid reservationId,
+            string chargePointId,
+            int connectorId,
+            string status,
+            string? ocppIdTag)
+        {
+            dbContext.ChargePaymentReservations.Add(new ChargePaymentReservation
+            {
+                ReservationId = reservationId,
+                ChargePointId = chargePointId,
+                ConnectorId = connectorId,
+                ChargeTagId = $"PAY-{reservationId:N}",
+                OcppIdTag = ocppIdTag,
+                Currency = "eur",
+                MaxAmountCents = 2000,
+                Status = status,
+                AuthorizedAtUtc = status == PaymentReservationStatus.Authorized ? DateTime.UtcNow : null,
+                CreatedAtUtc = DateTime.UtcNow.AddMinutes(-2),
+                UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-1)
+            });
+        }
+
+        private static ChargePointStatus CreatePreparingChargePoint(string chargePointId, Func<Task> onSendAsync, params int[] connectorIds)
+        {
+            var connectors = new Dictionary<int, OnlineConnectorStatus>();
+            foreach (int connectorId in connectorIds)
+            {
+                connectors[connectorId] = new OnlineConnectorStatus
+                {
+                    Status = ConnectorStatusEnum.Preparing,
+                    MeterValueDate = DateTimeOffset.UtcNow
+                };
+            }
+
+            return new ChargePointStatus
+            {
+                Id = chargePointId,
+                Protocol = "ocpp1.6",
+                WebSocket = new FakeOpenWebSocket(onSendAsync),
+                OnlineConnectors = connectors
+            };
+        }
+
+        private static void CompleteQueuedRequests(OCPPMiddleware middleware, string result)
+        {
+            var field = typeof(OCPPMiddleware)
+                .GetField("_requestQueue", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(field);
+
+            var queue = Assert.IsAssignableFrom<System.Collections.IDictionary>(field.GetValue(middleware));
+            foreach (var message in queue.Values.Cast<object>().OfType<OCPPMessage>())
+            {
+                message.TaskCompletionSource?.TrySetResult(result);
+            }
+        }
+
         private static OCPPCoreContext CreateContext(string databasePath)
         {
             var options = new DbContextOptionsBuilder<OCPPCoreContext>()
@@ -2960,7 +4550,8 @@ namespace OCPP.Core.Server.Tests
         private static OCPPMiddleware CreateMiddleware(
             IPaymentCoordinator? paymentCoordinator = null,
             IDictionary<string, string?>? configValues = null,
-            IServiceProvider? serviceProvider = null)
+            IServiceProvider? serviceProvider = null,
+            ILoggerFactory? loggerFactory = null)
         {
             var services = serviceProvider ?? new ServiceCollection().BuildServiceProvider();
             var mediator = new StartChargingMediator();
@@ -2970,7 +4561,7 @@ namespace OCPP.Core.Server.Tests
 
             return new OCPPMiddleware(
                 _ => Task.CompletedTask,
-                NullLoggerFactory.Instance,
+                loggerFactory ?? NullLoggerFactory.Instance,
                 configuration,
                 services.GetRequiredService<IServiceScopeFactory>(),
                 paymentCoordinator ?? new NoopPaymentCoordinator(),
@@ -3422,6 +5013,195 @@ namespace OCPP.Core.Server.Tests
             public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
             public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
             public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
+        }
+
+        private sealed class WebhookRecordingPaymentCoordinator : IPaymentCoordinator
+        {
+            private readonly Func<OCPPCoreContext, PaymentWebhookRequest, PaymentWebhookResult> _handleWebhook;
+
+            public WebhookRecordingPaymentCoordinator(Func<OCPPCoreContext, PaymentWebhookRequest, PaymentWebhookResult>? handleWebhook = null)
+            {
+                _handleWebhook = handleWebhook ?? ((_, _) => new PaymentWebhookResult());
+            }
+
+            public bool IsEnabled => true;
+            public List<PaymentWebhookRequest> WebhookRequests { get; } = new();
+            public List<(Guid ReservationId, string? CheckoutSessionId)> ConfirmCalls { get; } = new();
+
+            public Task<PaymentWebhookResult> HandleWebhookAsync(OCPPCoreContext dbContext, PaymentWebhookRequest request, CancellationToken cancellationToken)
+            {
+                WebhookRequests.Add(request);
+                return Task.FromResult(_handleWebhook(dbContext, request));
+            }
+
+            public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId)
+            {
+                ConfirmCalls.Add((reservationId, checkoutSessionId));
+                return new PaymentConfirmationResult
+                {
+                    Success = false,
+                    Status = "Rejected",
+                    Error = "Rejected by test coordinator."
+                };
+            }
+
+            public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) => throw new NotSupportedException();
+            public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
+            public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
+            public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
+            public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
+            public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
+            public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) =>
+                throw new InvalidOperationException("The middleware must use HandleWebhookAsync.");
+        }
+
+        /// <summary>Coordinator with independent gates, recording which existing-reservation operations reached it.</summary>
+        private sealed class GatedPaymentCoordinator : IPaymentCoordinator
+        {
+            public GatedPaymentCoordinator(bool isEnabled, bool isOperational)
+            {
+                IsEnabled = isEnabled;
+                IsOperational = isOperational;
+            }
+
+            public bool IsEnabled { get; }
+            public bool IsOperational { get; }
+            public List<string> Calls { get; } = new();
+
+            public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request)
+            {
+                Calls.Add("Create");
+                throw new NotSupportedException();
+            }
+
+            public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId)
+            {
+                Calls.Add("Confirm");
+                return new PaymentConfirmationResult { Success = false, Status = "Rejected", Error = "Rejected by test coordinator." };
+            }
+
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId)
+            {
+                Calls.Add("Resume");
+                return new PaymentResumeResult { Success = true, Status = "Status" };
+            }
+
+            public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request)
+            {
+                Calls.Add("RequestR1");
+                return new PaymentR1InvoiceResult { Success = false, Status = "NotFound", Error = "Reservation not found." };
+            }
+
+            public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) => Calls.Add("Cancel");
+            public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) => Calls.Add("CancelPaymentIntent");
+            public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
+            public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
+            public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
+        }
+
+        /// <summary>Coordinator whose confirm and resume answers come from the test; records cancelled payment intents.</summary>
+        private sealed class StartTestPaymentCoordinator : IPaymentCoordinator
+        {
+            public bool IsEnabled => true;
+            public Func<OCPPCoreContext, Guid, PaymentConfirmationResult>? Confirm { get; init; }
+            public Func<OCPPCoreContext, Guid, PaymentResumeResult>? Resume { get; init; }
+            public ConcurrentQueue<string> CancelReasons { get; } = new();
+
+            public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) =>
+                (Confirm ?? throw new NotSupportedException())(dbContext, reservationId);
+
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) =>
+                (Resume ?? throw new NotSupportedException())(dbContext, reservationId);
+
+            public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) =>
+                CancelReasons.Enqueue(reason);
+
+            public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
+            public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
+            public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
+            public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
+            public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
+            public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader) { }
+        }
+
+        /// <summary>Response body feature that records whether the response was completed (flushed to the client).</summary>
+        private sealed class CompletionRecordingResponseBodyFeature : IHttpResponseBodyFeature
+        {
+            private readonly StreamResponseBodyFeature _inner;
+
+            public CompletionRecordingResponseBodyFeature(Stream stream)
+            {
+                _inner = new StreamResponseBodyFeature(stream);
+            }
+
+            public bool Completed { get; private set; }
+            public Stream Stream => _inner.Stream;
+            public PipeWriter Writer => _inner.Writer;
+
+            public void DisableBuffering() => _inner.DisableBuffering();
+            public Task StartAsync(CancellationToken cancellationToken = default) => _inner.StartAsync(cancellationToken);
+
+            public Task SendFileAsync(string path, long offset, long? count, CancellationToken cancellationToken = default) =>
+                _inner.SendFileAsync(path, offset, count, cancellationToken);
+
+            public Task CompleteAsync()
+            {
+                Completed = true;
+                return _inner.CompleteAsync();
+            }
+        }
+
+        private sealed class RecordingLoggerProvider : ILoggerProvider
+        {
+            public ConcurrentQueue<(LogLevel Level, string Message)> Entries { get; } = new();
+
+            public ILogger CreateLogger(string categoryName) => new RecordingLogger(Entries);
+
+            public void Dispose()
+            {
+            }
+
+            private sealed class RecordingLogger : ILogger
+            {
+                private readonly ConcurrentQueue<(LogLevel Level, string Message)> _entries;
+
+                public RecordingLogger(ConcurrentQueue<(LogLevel Level, string Message)> entries)
+                {
+                    _entries = entries;
+                }
+
+                public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+                public bool IsEnabled(LogLevel logLevel) => true;
+
+                public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                    _entries.Enqueue((logLevel, formatter(state, exception)));
+            }
+        }
+
+        private sealed class LegacyWebhookPaymentCoordinator : IPaymentCoordinator
+        {
+            public bool IsEnabled => true;
+            public List<(string? Payload, string? Signature)> WebhookEvents { get; } = new();
+
+            public PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request) => throw new NotSupportedException();
+            public PaymentConfirmationResult ConfirmReservation(OCPPCoreContext dbContext, Guid reservationId, string checkoutSessionId) => throw new NotSupportedException();
+            public PaymentResumeResult ResumeReservation(OCPPCoreContext dbContext, Guid reservationId) => throw new NotSupportedException();
+            public PaymentR1InvoiceResult RequestR1Invoice(OCPPCoreContext dbContext, PaymentR1InvoiceRequest request) => throw new NotSupportedException();
+            public void CancelReservation(OCPPCoreContext dbContext, Guid reservationId, string reason) { }
+            public void CancelPaymentIntentIfCancelable(OCPPCoreContext dbContext, ChargePaymentReservation reservation, string reason) { }
+            public void MarkTransactionStarted(OCPPCoreContext dbContext, string chargePointId, int connectorId, string chargeTagId, int transactionId) { }
+            public void CompleteReservation(OCPPCoreContext dbContext, Transaction transaction) { }
+            public void HandleConnectorAvailable(OCPPCoreContext dbContext, string chargePointId, int connectorId, DateTime disconnectedAtUtc) { }
+
+            public void HandleWebhookEvent(OCPPCoreContext dbContext, string payload, string signatureHeader)
+            {
+                WebhookEvents.Add((payload, signatureHeader));
+            }
         }
     }
 }

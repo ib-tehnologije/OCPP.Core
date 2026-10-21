@@ -3,6 +3,21 @@ import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { expect } from "@playwright/test";
 import { createTempFilePath, readRuntimeInfo, sleep } from "../common.mjs";
+import {
+  PAYMENT_PROVIDER_ENV_VAR,
+  isStripeProvider,
+  resolvePaymentProvider,
+} from "../../lib/payment_provider_env.mjs";
+
+/** PSP used for new checkouts in this run (OCPP_E2E_PAYMENT_PROVIDER, default Stripe). */
+export const activePaymentProvider = resolvePaymentProvider();
+
+/** True when the server writes the mock Stripe snapshot (mock-stripe-store.json) for new checkouts. */
+export const usesStripeMockSnapshot = isStripeProvider(activePaymentProvider);
+
+export const stripeMockSnapshotSkipReason =
+  `${PAYMENT_PROVIDER_ENV_VAR}=${activePaymentProvider}: this test inspects the mock Stripe snapshot ` +
+  "(Stripe checkout and PaymentIntent metadata), which only Stripe checkouts produce.";
 
 export const protocolPresets = {
   "1.6": { chargePointId: process.env.CP16_ID ?? "Test1234", connectorId: 1 },

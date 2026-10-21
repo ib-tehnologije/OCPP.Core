@@ -10,10 +10,18 @@ import {
   repoRoot,
 } from "./common.mjs";
 import { seedTestStack } from "../lib/sqlite_helpers.mjs";
+import {
+  buildPaymentProviderManagementEnv,
+  buildPaymentProviderServerEnv,
+  resolvePaymentProvider,
+} from "../lib/payment_provider_env.mjs";
 
 const runtime = createRuntimeMetadata();
 const invoicesEnabled = process.env.OCPP_PLAYWRIGHT_ENABLE_INVOICES === "1";
 runtime.invoicesEnabled = invoicesEnabled;
+// OCPP_E2E_PAYMENT_PROVIDER: Stripe (default) or Saferpay; see lib/payment_provider_env.mjs.
+const paymentProvider = resolvePaymentProvider();
+runtime.paymentProvider = paymentProvider;
 writeRuntimeInfo(runtime);
 
 const childProcesses = [];
@@ -109,11 +117,17 @@ for (const signal of ["uncaughtException", "unhandledRejection"]) {
 
 const server = spawnDotnet("OCPP.Core.Server/OCPP.Core.Server.csproj", {
   Kestrel__Endpoints__Http__Url: runtime.serverBaseUrl,
+  ...buildPaymentProviderServerEnv({
+    provider: paymentProvider,
+    managementBaseUrl: runtime.managementBaseUrl,
+    serverApiBaseUrl: runtime.serverApiBaseUrl,
+  }),
 });
 
 const management = spawnDotnet("OCPP.Core.Management/OCPP.Core.Management.csproj", {
   Kestrel__Endpoints__Http__Url: runtime.managementBaseUrl,
   ServerApiUrl: runtime.serverApiBaseUrl,
+  ...buildPaymentProviderManagementEnv({ provider: paymentProvider }),
 });
 
 for (const child of [server, management]) {

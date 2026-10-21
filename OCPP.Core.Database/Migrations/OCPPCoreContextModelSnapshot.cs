@@ -209,6 +209,21 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<decimal>("OwnerSessionFee")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<string>("PayerEmail")
+                        .HasMaxLength(254)
+                        .HasColumnType("nvarchar(254)");
+
+                    b.Property<string>("PayerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("PaymentProvider")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("Stripe");
+
                     b.Property<decimal>("PricePerKwh")
                         .HasColumnType("decimal(18,4)");
 

@@ -14,6 +14,7 @@ import {
   buildOfferedPowerSample2x,
   createPlausibleMeterTimeline,
 } from "./meter_evidence_fixture.mjs";
+import { assertCheckoutUrlMatchesProvider, resolvePaymentProvider } from "./payment_provider_env.mjs";
 
 const PROTOCOL_CONFIG = {
   "1.6": {
@@ -496,6 +497,7 @@ export async function runApiScenario({
   serverWsBase,
   mgmtHttpBase,
   apiKey,
+  paymentProvider = resolvePaymentProvider(),
 }) {
   const driver = createProtocolScenarioDriver({
     protocol,
@@ -531,6 +533,7 @@ export async function runApiScenario({
     const checkoutUrl = createResponse.json?.checkoutUrl;
     assert(typeof reservationId === "string", `Missing reservationId for ${protocol}/${scenario}`);
     assert(typeof checkoutUrl === "string" && checkoutUrl.startsWith("http"), `Missing checkoutUrl for ${protocol}/${scenario}`);
+    assertCheckoutUrlMatchesProvider(checkoutUrl, paymentProvider, `${protocol}/${scenario}`);
 
     const mockCheckoutResponse = await httpText(checkoutUrl);
     assert(mockCheckoutResponse.ok, `Mock checkout page failed for ${protocol}/${scenario}`);

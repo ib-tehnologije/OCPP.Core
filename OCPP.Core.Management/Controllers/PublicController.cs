@@ -24,6 +24,9 @@ namespace OCPP.Core.Management.Controllers
     {
         private static readonly TimeSpan PreparingDefaultSelectionWindow = TimeSpan.FromMinutes(10);
 
+        // The server's answer while another check of the same payment (for example the browser return) is running.
+        private const string PaymentStillProcessingMessage = "Payment is still being processed.";
+
         private readonly IDataProtector _recoveryProtector;
 
         public PublicController(
@@ -859,7 +862,15 @@ namespace OCPP.Core.Management.Controllers
             string checkoutUrl = ExtractCheckoutUrl(resumeResult.Payload);
             string error = ExtractMessage(resumeResult.Payload) ?? resumeResult.ErrorMessage;
 
+            // "Status" (also for a reservation that is still PendingPayment) sends the payer to the status page, which
+            // polls until the payment outcome is known. A throttled resume from a server that still reports it as
+            // ResumeUnavailable "Payment is still being processed." goes there too: the payment may be confirmed right
+            // now, so the start page must not offer to cancel it.
+            bool paymentStillProcessing = IsResumeUnavailableStatus(status) &&
+                string.Equals(error?.Trim(), PaymentStillProcessingMessage, StringComparison.Ordinal);
+
             if (string.Equals(status, "Status", StringComparison.OrdinalIgnoreCase) ||
+                paymentStillProcessing ||
                 string.Equals(status, ChargePaymentReservationState.Completed, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(reservationStatus, ChargePaymentReservationState.Authorized, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(reservationStatus, ChargePaymentReservationState.StartRequested, StringComparison.OrdinalIgnoreCase) ||
@@ -880,9 +891,7 @@ namespace OCPP.Core.Management.Controllers
                 return null;
             }
 
-            if (string.Equals(status, "ResumeUnavailable", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "MissingCheckoutSession", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "StripeError", StringComparison.OrdinalIgnoreCase))
+            if (IsResumeUnavailableStatus(status))
             {
                 model.RecoveryReservationId = recovery.ReservationId;
                 model.RecoveryReservationStatus = reservationStatus ?? ChargePaymentReservationState.Pending;
@@ -905,6 +914,25 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Resume outcomes where the previous checkout cannot be continued but the reservation may still lock
+        /// the connector. Provider failures are reported as "{Provider}Error" (for example "StripeError" or
+        /// "SaferpayError"), so any status ending in "Error" is treated the same way.
+        /// </summary>
+        private static bool IsResumeUnavailableStatus(string status)
+        {
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return false;
+            }
+
+            string trimmed = status.Trim();
+            return string.Equals(trimmed, "ResumeUnavailable", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(trimmed, "MissingCheckoutSession", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(trimmed, "ProviderUnavailable", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.EndsWith("Error", StringComparison.OrdinalIgnoreCase);
         }
 
         private PublicPaymentRecoveryPayload ReadRecoveryCookie()

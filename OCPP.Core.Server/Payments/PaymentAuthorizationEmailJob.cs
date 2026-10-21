@@ -3,7 +3,7 @@ using Hangfire;
 using Microsoft.Extensions.Logging;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Extensions.Hangfire;
-using Stripe.Checkout;
+using OCPP.Core.Server.Payments.Providers;
 
 namespace OCPP.Core.Server.Payments
 {
@@ -39,10 +39,18 @@ namespace OCPP.Core.Server.Payments
                 return;
             }
 
-            var session = new Session { Id = checkoutSessionId };
+            // The job signature is persisted by Hangfire; keep it unchanged and rebuild the details here.
+            var checkoutDetails = new PaymentCheckoutDetails
+            {
+                Provider = PaymentProviderNames.Normalize(reservation.PaymentProvider) ?? reservation.PaymentProvider,
+                SessionReference = checkoutSessionId,
+                AuthorizationReference = reservation.StripePaymentIntentId,
+                CustomerEmail = toEmail,
+                CustomerName = reservation.PayerName
+            };
             try
             {
-                _emailService?.SendPaymentAuthorized(toEmail, reservation, session, statusUrl);
+                _emailService?.SendPaymentAuthorized(toEmail, reservation, checkoutDetails, statusUrl);
             }
             catch (Exception ex)
             {

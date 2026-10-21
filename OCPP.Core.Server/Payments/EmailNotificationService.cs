@@ -10,13 +10,13 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OCPP.Core.Database;
-using Stripe.Checkout;
+using OCPP.Core.Server.Payments.Providers;
 
 namespace OCPP.Core.Server.Payments
 {
     public interface IEmailNotificationService
     {
-        void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session, string statusUrl);
+        void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, PaymentCheckoutDetails checkoutDetails, string statusUrl);
         void SendChargingCompleted(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl);
         void SendIdleFeeWarning(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, DateTime idleFeeStartsAtUtc, TimeSpan remainingUntilIdleFee, string statusUrl);
         void SendSessionReceipt(string toEmail, ChargePaymentReservation reservation, Transaction transaction, ChargePoint chargePoint, string statusUrl, string invoiceNumber, string invoiceUrl);
@@ -35,14 +35,14 @@ namespace OCPP.Core.Server.Payments
             _logger = logger;
         }
 
-        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, Session session, string statusUrl)
+        public void SendPaymentAuthorized(string toEmail, ChargePaymentReservation reservation, PaymentCheckoutDetails checkoutDetails, string statusUrl)
         {
             var details = new List<(string Label, string Value)>
             {
                 ("Reservation", reservation?.ReservationId.ToString()),
                 ("Charge point", BuildChargePointLabel(reservation, null)),
                 ("Authorized hold", FormatAmountFromCents(reservation?.MaxAmountCents, reservation?.Currency)),
-                ("Checkout session", session?.Id)
+                ("Checkout session", checkoutDetails?.SessionReference)
             };
 
             SendTemplatedEmail(

@@ -43,6 +43,7 @@ using OCPP.Core.Server.Extensions.Hangfire;
 using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
 using OCPP.Core.Server.Payments.Invoices.ERacuni;
+using OCPP.Core.Server.Payments.Providers;
 
 namespace OCPP.Core.Server
 {
@@ -78,7 +79,6 @@ namespace OCPP.Core.Server
             services.AddHttpClient();
             services.AddHttpClient<Payments.IViesVerificationService, Payments.ViesVerificationService>(
                 client => client.BaseAddress = new Uri(Payments.ViesVerificationService.DefaultBaseAddress));
-            services.Configure<StripeOptions>(Configuration.GetSection("Stripe"));
             services.Configure<Payments.PaymentFlowOptions>(Configuration.GetSection("Payments"));
             services.Configure<Payments.ViesOptions>(Configuration.GetSection("Payments:Vies"));
             services.Configure<Payments.NotificationOptions>(Configuration.GetSection("Notifications"));
@@ -115,31 +115,8 @@ namespace OCPP.Core.Server
             services.AddTransient<IPaymentAuthorizationEmailJob, Payments.PaymentAuthorizationEmailJob>();
             services.AddTransient<Payments.StripeBuyerMetadataReconciliationJob>();
             services.AddTransient<IStripeBuyerMetadataReconciliationJob, Payments.StripeBuyerMetadataReconciliationJob>();
-            bool useMockStripeServices = Configuration.GetValue<bool>("Stripe:UseMockServices");
-            if (useMockStripeServices)
-            {
-                services.AddSingleton<Payments.MockStripeStore>();
-            }
-            services.AddSingleton<IPaymentCoordinator>(sp => new StripePaymentCoordinator(
-                sp.GetRequiredService<IOptions<Payments.StripeOptions>>(),
-                sp.GetRequiredService<IOptions<Payments.PaymentFlowOptions>>(),
-                sp.GetRequiredService<ILogger<StripePaymentCoordinator>>(),
-                useMockStripeServices
-                    ? new Payments.MockStripeSessionService(
-                        sp.GetRequiredService<Payments.MockStripeStore>(),
-                        sp.GetRequiredService<IConfiguration>())
-                    : new Payments.StripeSessionServiceWrapper(),
-                useMockStripeServices
-                    ? new Payments.MockStripePaymentIntentService(sp.GetRequiredService<Payments.MockStripeStore>())
-                    : new Payments.StripePaymentIntentServiceWrapper(),
-                new Payments.StripeEventFactoryWrapper(),
-                () => DateTime.UtcNow,
-                sp.GetService<Payments.IEmailNotificationService>(),
-                sp.GetRequiredService<Payments.StartChargingMediator>(),
-                sp.GetService<IBackgroundJobClient>(),
-                sp.GetService<Payments.Invoices.IInvoiceIntegrationService>(),
-                sp.GetRequiredService<IConfiguration>(),
-                sp.GetRequiredService<Payments.IViesVerificationService>()));
+            // Payment gateways (Payments:Provider, Stripe, ...), gateway registry and payment coordinator.
+            services.AddPaymentProviders(Configuration);
             services.AddHostedService<Payments.PaymentReservationCleanupService>();
             services.AddHostedService<Payments.IdleFeeWarningEmailService>();
         }

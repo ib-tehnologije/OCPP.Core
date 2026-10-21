@@ -68,7 +68,7 @@ namespace OCPP.Core.Management.Controllers
                                     }
                                     Uri uri = new Uri(serverApiUrl);
                                     Uri createUri = new Uri(uri, "Payments/Create");
-                                    httpClient.Timeout = new TimeSpan(0, 0, 30); // allow a bit more time for Stripe setup
+                                    httpClient.Timeout = new TimeSpan(0, 0, 30); // allow a bit more time for payment provider checkout setup
 
                                     // API-Key authentication?
                                     if (!string.IsNullOrWhiteSpace(apiKeyConfig))

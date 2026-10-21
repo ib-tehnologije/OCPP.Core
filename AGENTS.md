@@ -21,7 +21,8 @@ Write committed documentation for maintainers, contributors, future operators, a
 ## Important Folders and Modules
 
 - `OCPP.Core.Server/` - ASP.NET Core OCPP server. `OCPPMiddleware.cs` routes `/OCPP/{chargePointId}` WebSocket sessions and `/API/...` commands. Protocol-specific receive/control logic is split across `OCPPMiddleware.OCPP16.cs`, `OCPPMiddleware.OCPP20.cs`, and `OCPPMiddleware.OCPP21.cs`. `ControllerOCPP*.cs` files process protocol actions.
-- `OCPP.Core.Server/Payments/` - Stripe payment flow, reservation lifecycle, public charging start/stop coordination, hosted cleanup, idle-fee warning email logic, and invoice integration hooks.
+- `OCPP.Core.Server/Payments/` - provider-neutral `PaymentCoordinator` (reservation lifecycle, pricing, settlement, authorization release), public charging start/stop coordination, hosted cleanup, idle-fee warning email logic, and invoice integration hooks.
+- `OCPP.Core.Server/Payments/Providers/` - the `IPaymentGateway` contract, `PaymentGatewayRegistry`, `AddPaymentProviders` registration, and the Stripe and Saferpay gateways with their mocks. Provider-specific code belongs here, never in `PaymentCoordinator`.
 - `OCPP.Core.Management/` - ASP.NET Core MVC operator portal, public charging portal, payment status pages, owner/charge reports, account/login flow, localization resources, and static assets.
 - `OCPP.Core.Database/` - EF Core `OCPPCoreContext`, entity classes, provider selection, migrations, and model snapshot.
 - `OCPP.Core.Server.Extensions/` - public interfaces for runtime-loaded extensions.
@@ -109,6 +110,7 @@ No dedicated formatter or lint command was found. Use the existing C# and Razor 
 - Hangfire starts only when `ConnectionStrings:SqlServer` is configured. Do not assume Hangfire jobs run under SQLite.
 - Runtime extensions are loaded from an output `Extensions` directory and must implement `IRawMessageSink` or `IExternalAuthorization`.
 - Public charging and payment behavior spans both apps and shared database state; validate both server API behavior and management/public portal UI when changing it.
+- Payment reservation status changes that can race (browser return, provider signals, cancels, sweeps, settlement failures, the release lease) must go through `PaymentCoordinator.TryCommitReservationTransition`, a compare-and-set update on the expected status, and handle a lost transition. Race tests need SQLite; the in-memory provider has no conditional updates.
 
 ## Documentation Maintenance Rule
 

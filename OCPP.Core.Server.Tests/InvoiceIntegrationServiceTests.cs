@@ -14,6 +14,7 @@ using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
 using OCPP.Core.Server.Payments.Invoices;
 using OCPP.Core.Server.Payments.Invoices.ERacuni;
+using OCPP.Core.Server.Payments.Providers;
 using Stripe.Checkout;
 using Xunit;
 
@@ -31,7 +32,7 @@ namespace OCPP.Core.Server.Tests
             var service = CreateService("LogOnly", draftBuilder, requestFactory, apiClient);
 
             using var dbContext = CreateContext();
-            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session());
+            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new PaymentCheckoutDetails());
 
             Assert.Equal(1, draftBuilder.BuildCount);
             Assert.Equal(1, requestFactory.BuildCount);
@@ -64,7 +65,7 @@ namespace OCPP.Core.Server.Tests
                     dbContext,
                     new ChargePaymentReservation(),
                     new Transaction(),
-                    new Session()));
+                    new PaymentCheckoutDetails()));
 
             Assert.Contains("submit mode", error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Empty(dbContext.InvoiceSubmissionLogs);
@@ -80,7 +81,7 @@ namespace OCPP.Core.Server.Tests
             var service = CreateService("Submit", draftBuilder, requestFactory, apiClient);
 
             using var dbContext = CreateContext();
-            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session());
+            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new PaymentCheckoutDetails());
 
             Assert.Equal(1, draftBuilder.BuildCount);
             Assert.Equal(1, requestFactory.BuildCount);
@@ -149,7 +150,7 @@ namespace OCPP.Core.Server.Tests
                 invoiceContext,
                 invoiceReservation,
                 new Transaction(),
-                new Session()));
+                new PaymentCheckoutDetails()));
             Assert.True(apiClient.FirstCreateEntered.Wait(TimeSpan.FromSeconds(5)));
 
             var sessionService = new FakeSessionService
@@ -255,7 +256,7 @@ namespace OCPP.Core.Server.Tests
                         invoiceContext,
                         invoiceContext.ChargePaymentReservations.Find(reservationId)!,
                         new Transaction(),
-                        new Session());
+                        new PaymentCheckoutDetails());
                 });
                 Assert.True(apiClient.FirstCreateEntered.Wait(TimeSpan.FromSeconds(5)));
 
@@ -314,7 +315,7 @@ namespace OCPP.Core.Server.Tests
             using var dbContext = CreateContext();
             var reservation = new ChargePaymentReservation();
             var transaction = new Transaction();
-            var session = new Session();
+            var session = new PaymentCheckoutDetails();
 
             service.HandleCompletedReservation(dbContext, reservation, transaction, session);
             service.HandleCompletedReservation(dbContext, reservation, transaction, session);
@@ -349,7 +350,7 @@ namespace OCPP.Core.Server.Tests
             });
             dbContext.SaveChanges();
 
-            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session());
+            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new PaymentCheckoutDetails());
 
             Assert.Equal(0, apiClient.LookupCount);
             Assert.Equal(0, apiClient.CreateCount);
@@ -407,7 +408,7 @@ namespace OCPP.Core.Server.Tests
                         firstContext,
                         firstContext.ChargePaymentReservations.Find(draft.ReservationId)!,
                         new Transaction(),
-                        new Session());
+                        new PaymentCheckoutDetails());
                 });
 
                 Assert.True(apiClient.FirstCreateEntered.Wait(TimeSpan.FromSeconds(10)), "First provider create was not reached.");
@@ -420,7 +421,7 @@ namespace OCPP.Core.Server.Tests
                             secondContext,
                             secondContext.ChargePaymentReservations.Find(draft.ReservationId)!,
                             new Transaction(),
-                            new Session()));
+                            new PaymentCheckoutDetails()));
                 });
 
                 Exception? secondError;
@@ -489,7 +490,7 @@ namespace OCPP.Core.Server.Tests
             });
             dbContext.SaveChanges();
 
-            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session());
+            service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new PaymentCheckoutDetails());
 
             Assert.Equal(1, apiClient.LookupCount);
             Assert.Equal(0, apiClient.CreateCount);
@@ -522,7 +523,7 @@ namespace OCPP.Core.Server.Tests
                     dbContext,
                     new ChargePaymentReservation(),
                     new Transaction(),
-                    new Session()));
+                    new PaymentCheckoutDetails()));
 
             Assert.Contains("unknown", error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(1, apiClient.LookupCount);
@@ -556,7 +557,7 @@ namespace OCPP.Core.Server.Tests
                     dbContext,
                     new ChargePaymentReservation(),
                     new Transaction(),
-                    new Session()));
+                    new PaymentCheckoutDetails()));
 
             Assert.Equal(1, apiClient.LookupCount);
             Assert.Equal(0, apiClient.CreateCount);
@@ -613,7 +614,7 @@ namespace OCPP.Core.Server.Tests
                     dbContext,
                     new ChargePaymentReservation(),
                     new Transaction(),
-                    new Session()));
+                    new PaymentCheckoutDetails()));
 
             Assert.Equal(1, apiClient.LookupCount);
             Assert.Equal(0, apiClient.CreateCount);
@@ -645,7 +646,7 @@ namespace OCPP.Core.Server.Tests
                 dbContext,
                 new ChargePaymentReservation(),
                 new Transaction(),
-                new Session());
+                new PaymentCheckoutDetails());
 
             Assert.Equal(1, apiClient.LookupCount);
             Assert.Equal(1, apiClient.CreateCount);
@@ -685,7 +686,7 @@ namespace OCPP.Core.Server.Tests
                 dbContext,
                 new ChargePaymentReservation(),
                 new Transaction(),
-                new Session()));
+                new PaymentCheckoutDetails()));
 
             Assert.Equal(1, apiClient.LookupCount);
             Assert.Equal(0, apiClient.CreateCount);
@@ -720,7 +721,7 @@ namespace OCPP.Core.Server.Tests
 
             using var dbContext = CreateContext();
             Assert.Throws<HttpRequestException>(() =>
-                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session()));
+                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new PaymentCheckoutDetails()));
 
             var audit = Assert.Single(dbContext.InvoiceSubmissionLogs);
             Assert.Equal("ProviderUnknown", audit.Status);
@@ -746,7 +747,7 @@ namespace OCPP.Core.Server.Tests
             using var dbContext = CreateContext();
 
             var ex = Assert.Throws<InvalidOperationException>(() =>
-                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session()));
+                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new PaymentCheckoutDetails()));
 
             Assert.Contains("HTTP 400", ex.Message);
 
@@ -777,7 +778,7 @@ namespace OCPP.Core.Server.Tests
             using var dbContext = CreateContext();
 
             var ex = Assert.Throws<InvalidOperationException>(() =>
-                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new Session()));
+                service.HandleCompletedReservation(dbContext, new ChargePaymentReservation(), new Transaction(), new PaymentCheckoutDetails()));
 
             Assert.Contains("requires configured product codes", ex.Message);
             Assert.Equal(1, draftBuilder.BuildCount);
@@ -869,7 +870,7 @@ namespace OCPP.Core.Server.Tests
 
             public int BuildCount { get; private set; }
 
-            public InvoiceDraft Build(ChargePaymentReservation reservation, Transaction transaction, Session checkoutSession)
+            public InvoiceDraft Build(ChargePaymentReservation reservation, Transaction transaction, PaymentCheckoutDetails checkoutDetails)
             {
                 BuildCount++;
                 return _draft;

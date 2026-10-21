@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using OCPP.Core.Database;
 using OCPP.Core.Server.Payments;
@@ -219,6 +220,28 @@ namespace OCPP.Core.Server.Tests
                 hasInvoiceEvidence: false);
 
             Assert.True(result.Eligible, result.Reason);
+        }
+
+        [Theory]
+        [InlineData(PaymentReservationStatus.Abandoned, true)]
+        [InlineData(PaymentReservationStatus.Failed, true)]
+        [InlineData(PaymentReservationStatus.Cancelled, true)]
+        [InlineData(PaymentReservationStatus.StartRejected, true)]
+        [InlineData(PaymentReservationStatus.StartTimeout, true)]
+        [InlineData(PaymentReservationStatus.Authorized, false)]
+        [InlineData(PaymentReservationStatus.Charging, false)]
+        [InlineData(PaymentReservationStatus.Completed, false)]
+        public void Assess_AcceptsTheTerminalNoChargeStatusesTheReleaseReconcilerAccepts(string status, bool eligible)
+        {
+            var reservation = CreateReservation();
+            reservation.Status = status;
+
+            var result = FinancialRecoveryAuthorizationAssessor.Assess(
+                reservation,
+                hasTransaction: false,
+                hasInvoiceEvidence: false);
+
+            Assert.Equal(eligible, result.Eligible);
         }
 
         [Theory]
@@ -474,6 +497,69 @@ namespace OCPP.Core.Server.Tests
             dbContext.ChangeTracker.Clear();
             Assert.Null(dbContext.ChargePaymentReservations.Single().AuthorizationReleaseState);
             Assert.Single(coordinator.ReconcileCalls);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void Run_ExecuteRestoresOnlyItsOwnArmingOnARelationalDatabase(bool concurrentRelease)
+        {
+            using var connection = new SqliteConnection("Data Source=:memory:");
+            connection.Open();
+            var options = new DbContextOptionsBuilder<OCPPCoreContext>().UseSqlite(connection).Options;
+            using var dbContext = new OCPPCoreContext(options);
+            dbContext.Database.EnsureCreated();
+            var reservation = CreateAuthorizationReservation(
+                Guid.Parse("57575757-5757-5757-5757-575757575757"));
+            reservation.AuthorizationReleaseState = PaymentAuthorizationReleaseState.PermanentFailure;
+            reservation.AuthorizationReleaseAttemptCount = 4;
+            var originalUpdatedAt = reservation.UpdatedAtUtc;
+            dbContext.ChargePaymentReservations.Add(reservation);
+            dbContext.SaveChanges();
+            var releasedAt = new DateTime(2026, 1, 2, 9, 0, 0, DateTimeKind.Utc);
+            var manifest = FinancialRecoveryManifest.Parse("""
+                {
+                  "schemaVersion": 1,
+                  "entries": [
+                    { "operation": "release-authorization", "reservationId": "57575757-5757-5757-5757-575757575757" }
+                  ]
+                }
+                """);
+            var coordinator = new RecordingPaymentCoordinator();
+            if (concurrentRelease)
+            {
+                // A late-authorization notification releases the hold while recovery's reconciliation runs, so the
+                // reconciliation finds the row no longer eligible.
+                coordinator.OnReconcile = (_, _) =>
+                {
+                    using var other = new OCPPCoreContext(options);
+                    var row = other.ChargePaymentReservations.Single();
+                    row.AuthorizationReleaseState = PaymentAuthorizationReleaseState.Released;
+                    row.AuthorizationReleasedAtUtc = releasedAt;
+                    row.UpdatedAtUtc = releasedAt;
+                    other.SaveChanges();
+                };
+            }
+
+            var service = new FinancialRecoveryService(coordinator, invoiceIntegrationService: null);
+
+            var report = service.Run(dbContext, manifest, execute: true, manifest.Sha256);
+
+            Assert.Equal(PaymentAuthorizationReleaseOutcome.SkippedNotEligible, Assert.Single(report.Items).Outcome);
+            using var verification = new OCPPCoreContext(options);
+            var persisted = verification.ChargePaymentReservations.Single();
+            if (concurrentRelease)
+            {
+                Assert.Equal(PaymentAuthorizationReleaseState.Released, persisted.AuthorizationReleaseState);
+                Assert.Equal(releasedAt, persisted.AuthorizationReleasedAtUtc);
+                Assert.Equal(releasedAt, persisted.UpdatedAtUtc);
+            }
+            else
+            {
+                Assert.Equal(PaymentAuthorizationReleaseState.PermanentFailure, persisted.AuthorizationReleaseState);
+                Assert.Equal(4, persisted.AuthorizationReleaseAttemptCount);
+                Assert.Equal(originalUpdatedAt, persisted.UpdatedAtUtc);
+            }
         }
 
         [Fact]
