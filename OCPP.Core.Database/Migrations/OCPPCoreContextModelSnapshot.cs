@@ -373,6 +373,10 @@ namespace OCPP.Core.Database.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("PaymentProvider")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<decimal>("PricePerKwh")
                         .HasColumnType("decimal(18,4)");
 

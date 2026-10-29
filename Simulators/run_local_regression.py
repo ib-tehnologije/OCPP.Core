@@ -49,19 +49,19 @@ def resolve_payment_provider() -> str:
 def payment_provider_server_env(provider: str) -> dict[str, str]:
     """Extra server env for the selected provider.
 
-    Both modes pin Payments:Provider and Payments:ReturnBaseUrl, so Payments:* or Saferpay:* values from
+    Both modes pin Payments:DefaultProvider and Payments:ReturnBaseUrl, so Payments:* or Saferpay:* values from
     the developer's environment cannot switch the run to another provider or return host.
     """
     if provider != "Saferpay":
         return {
-            "Payments__Provider": "Stripe",
+            "Payments__DefaultProvider": "Stripe",
             "Payments__ReturnBaseUrl": MGMT_HTTP_BASE.rstrip("/"),
             "Saferpay__Enabled": "false",
         }
 
     # The Stripe mock settings stay configured so the Stripe gateway remains registered.
     return {
-        "Payments__Provider": "Saferpay",
+        "Payments__DefaultProvider": "Saferpay",
         "Payments__ReturnBaseUrl": MGMT_HTTP_BASE.rstrip("/"),
         "Saferpay__Enabled": "true",
         "Saferpay__UseMockServices": "true",
@@ -71,8 +71,8 @@ def payment_provider_server_env(provider: str) -> dict[str, str]:
 
 
 def payment_provider_management_env(provider: str) -> dict[str, str]:
-    """Management reads Payments:Provider only for the Stripe webhook-secret banner; pinned in both modes."""
-    return {"Payments__Provider": "Saferpay" if provider == "Saferpay" else "Stripe"}
+    """Management reads Payments:DefaultProvider only for the Stripe webhook-secret banner; pinned in both modes."""
+    return {"Payments__DefaultProvider": "Saferpay" if provider == "Saferpay" else "Stripe"}
 
 
 def wait_for_http(url: str, label: str, timeout_seconds: int = 90) -> None:

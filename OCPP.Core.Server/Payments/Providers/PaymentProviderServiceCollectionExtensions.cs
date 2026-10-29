@@ -18,8 +18,11 @@ namespace OCPP.Core.Server.Payments.Providers
     {
         /// <summary>
         /// Registers the payment gateways, the gateway registry and the provider-neutral payment coordinator.
-        /// <c>Payments:Provider</c> selects the gateway for new checkouts (Stripe when empty); an unknown value
-        /// throws here, while services are being configured, so a typo never falls back to another provider.
+        /// Every gateway is registered and serves its own reservations and webhooks side by side.
+        /// <c>Payments:DefaultProvider</c> (legacy <c>Payments:Provider</c>) selects the gateway for new checkouts on
+        /// charge points without their own <c>PaymentProvider</c> (Stripe when empty); an unknown value throws here,
+        /// while services are being configured, so a typo never falls back to another provider. Charge point
+        /// overrides are validated against the database at startup by <see cref="PaymentProviderStartupValidator"/>.
         /// </summary>
         public static IServiceCollection AddPaymentProviders(this IServiceCollection services, IConfiguration configuration)
         {
@@ -34,8 +37,8 @@ namespace OCPP.Core.Server.Payments.Providers
             var checkoutSettings = PaymentCheckoutSettings.Resolve(providerOptions, stripeOptions);
             services.AddSingleton(checkoutSettings);
 
-            // Stripe stays registered whichever provider is active, so existing Stripe reservations can
-            // still be captured, released and receive webhooks after Payments:Provider changes.
+            // Stripe stays registered whichever provider is the default, so Stripe charge points and existing
+            // Stripe reservations can still be charged, captured, released and receive webhooks.
             bool useMockStripeServices = configuration.GetValue<bool>("Stripe:UseMockServices");
             if (useMockStripeServices)
             {
@@ -60,7 +63,7 @@ namespace OCPP.Core.Server.Payments.Providers
             services.AddSingleton<IPaymentGatewayRegistry>(sp =>
             {
                 var settings = sp.GetRequiredService<PaymentCheckoutSettings>();
-                var registry = new PaymentGatewayRegistry(sp.GetServices<IPaymentGateway>(), settings.ActiveProvider);
+                var registry = new PaymentGatewayRegistry(sp.GetServices<IPaymentGateway>(), settings.DefaultProvider);
                 // The registry is a singleton, so this runs once, when the payment services are first built.
                 LogProviderReadiness(
                     registry,
@@ -86,18 +89,18 @@ namespace OCPP.Core.Server.Payments.Providers
 
         /// <summary>
         /// Logs why payments are only partly available. Logging only: the gates themselves are
-        /// <see cref="IPaymentCoordinator.IsEnabled"/> (new checkouts) and <see cref="IPaymentCoordinator.IsOperational"/>
+        /// <see cref="PaymentProviderResolver"/> (new checkouts, per charge point) and <see cref="IPaymentCoordinator.IsOperational"/>
         /// (existing reservations). Silent when every gateway is unconfigured, the normal state of a deployment
         /// without online payments.
         /// </summary>
         internal static void LogProviderReadiness(IPaymentGatewayRegistry registry, PaymentCheckoutSettings settings, ILogger logger)
         {
-            if (registry?.Active == null || logger == null)
+            if (registry?.Default == null || logger == null)
             {
                 return;
             }
 
-            var active = registry.Active;
+            var defaultGateway = registry.Default;
             var configured = registry.All
                 .Where(gateway => gateway != null && gateway.IsConfigured)
                 .Select(gateway => gateway.ProviderName)
@@ -115,14 +118,14 @@ namespace OCPP.Core.Server.Payments.Providers
                 return;
             }
 
-            if (active.IsConfigured)
+            if (defaultGateway.IsConfigured)
             {
                 return;
             }
 
             logger.LogWarning(
-                "Payments => Payments:Provider selects '{ActiveProvider}', but that payment provider is not configured (check Enabled and the credentials in its configuration section). New checkouts are disabled; existing reservations of the configured provider(s) {ConfiguredProviders} are still processed.",
-                active.ProviderName,
+                "Payments => Payments:DefaultProvider selects '{DefaultProvider}', but that payment provider is not configured (check Enabled and the credentials in its configuration section). New checkouts on charge points without their own provider are disabled; charge points set to and existing reservations of the configured provider(s) {ConfiguredProviders} are still processed.",
+                defaultGateway.ProviderName,
                 string.Join(", ", configured));
         }
     }

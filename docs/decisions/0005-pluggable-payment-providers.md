@@ -1,6 +1,6 @@
 # 0005 - Pluggable payment providers
 
-Status: accepted
+Status: accepted. Provider selection for new checkouts is extended per charge point by [ADR 0006](0006-payment-provider-per-charge-point.md).
 
 ## Context
 

@@ -42,7 +42,7 @@ namespace OCPP.Core.Server.Tests
             var coordinator = stack.Coordinator;
             Assert.IsType<PaymentCoordinator>(coordinator);
             Assert.True(coordinator.IsEnabled);
-            Assert.Equal(PaymentProviderNames.Saferpay, stack.Registry.Active.ProviderName);
+            Assert.Equal(PaymentProviderNames.Saferpay, stack.Registry.Default.ProviderName);
 
             var (reservationId, capturedAuthorization) = await RunLifecycleAsync(
                 stack,
@@ -134,7 +134,7 @@ namespace OCPP.Core.Server.Tests
             });
 
             Assert.True(stack.Coordinator.IsEnabled);
-            Assert.Equal(PaymentProviderNames.Stripe, stack.Registry.Active.ProviderName);
+            Assert.Equal(PaymentProviderNames.Stripe, stack.Registry.Default.ProviderName);
 
             var (_, capturedAuthorization) = await RunLifecycleAsync(
                 stack,

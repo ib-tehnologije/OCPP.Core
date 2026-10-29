@@ -109,8 +109,11 @@ namespace OCPP.Core.Server.Payments.Providers
     /// <summary>Resolves gateways: the active one for new checkouts and the owning one for existing reservations.</summary>
     public interface IPaymentGatewayRegistry
     {
-        /// <summary>Gateway selected by <c>Payments:Provider</c>; used for new checkouts.</summary>
-        IPaymentGateway Active { get; }
+        /// <summary>
+        /// Gateway selected by <c>Payments:DefaultProvider</c>; used for new checkouts on charge points without
+        /// their own provider. Pick the gateway for a new checkout with <see cref="PaymentProviderResolver"/>.
+        /// </summary>
+        IPaymentGateway Default { get; }
 
         /// <summary>
         /// Gateway that owns a reservation created under <paramref name="providerName"/>. Null or empty

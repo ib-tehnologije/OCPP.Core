@@ -24,7 +24,7 @@ Location: `OCPP.Core.Server/`
 
 ### Payment Providers
 
-Location: `OCPP.Core.Server/Payments/Providers/`. The decision is recorded in [ADR 0005](decisions/0005-pluggable-payment-providers.md).
+Location: `OCPP.Core.Server/Payments/Providers/`. The decisions are recorded in [ADR 0005](decisions/0005-pluggable-payment-providers.md) and [ADR 0006](decisions/0006-payment-provider-per-charge-point.md).
 
 - **Gateway contract.** `IPaymentGateway` is the only provider-specific seam. It covers creating a hosted checkout, reading a checkout or an authorization, capture, cancel, metadata mirroring, parsing an inbound webhook or notification, and sanitizing provider text.
   - Gateways map provider objects to neutral snapshots (`PaymentCheckoutStatus`, `PaymentAuthorizationSnapshot`) and throw `PaymentProviderException` with a stable `Code` and an `IsTransient` flag.
@@ -37,10 +37,11 @@ Location: `OCPP.Core.Server/Payments/Providers/`. The decision is recorded in [A
   - `Saferpay/MockSaferpayApiHandler`, an in-process fake of the Saferpay JSON API used when `Saferpay:UseMockServices` is true.
 - **Registry and DI.** `AddPaymentProviders` binds `Payments`, `Stripe` and `Saferpay`, resolves the provider-neutral `PaymentCheckoutSettings`, registers both gateways, and builds `PaymentGatewayRegistry`.
   - The registry resolves provider names case-insensitively.
-  - `Active` is the gateway selected by `Payments:Provider`, used for new checkouts.
+  - `Default` is the gateway selected by `Payments:DefaultProvider` (legacy `Payments:Provider`), used for new checkouts on charge points without their own provider.
   - `Resolve(name)` returns the gateway that owns an existing reservation. Null or empty resolves to Stripe; an unknown name resolves to nothing.
-  - An unknown `Payments:Provider` value fails while services are configured.
+  - An unknown `Payments:DefaultProvider` or `Payments:Provider` value, or the two keys naming different providers, fails while services are configured.
   - `OCPP.Core.Recovery` builds its services from the same `Startup`, so it inherits this behavior.
+- **Per-charge-point selection.** `PaymentProviderResolver` is the single rule for a new checkout: `ChargePoint.PaymentProvider ?? Payments:DefaultProvider`. It throws `PaymentProviderUnavailableException` for an unknown or unconfigured provider and never falls back; `Payments/Create` then answers `{"status":"Disabled","reason":"ProviderUnavailable"}`. At startup, `PaymentProviderStartupValidator` stops the server when any charge point overrides to a provider that is unknown or not configured.
 - **Per-reservation routing.** A new checkout stores `ChargePaymentReservation.PaymentProvider`. The reservation's own gateway handles every later operation: confirm, resume, cancel, capture, authorization release, webhook processing and recovery settlement.
   - A reservation whose provider is unregistered or unconfigured fails closed with the non-transient codes `provider_not_registered` or `provider_not_configured`. It is never routed to another provider.
   - Operations on existing reservations need only the return base URL and the owning gateway to be configured. Stripe rows therefore keep settling after Saferpay becomes active.
@@ -119,7 +120,7 @@ Locations: `OCPP.Core.Server.Tests/`, `OCPP.Core.Test/`, `Simulators/`
 1. A driver opens the public map/start page in the management app.
 2. `PublicController` builds availability and pricing state from the database and server API.
 3. A start request posts to server `Payments/Create`.
-4. The server payment coordinator creates or resumes a reservation. It redirects the payer to the active provider's hosted payment page (Stripe Checkout or the Saferpay Payment Page), or in test mode to the management mock checkout, and records the provider on the reservation.
+4. The server payment coordinator creates or resumes a reservation. It redirects the payer to the charge point's provider's hosted payment page (Stripe Checkout or the Saferpay Payment Page), or in test mode to the management mock checkout, and records the provider on the reservation.
 5. The payer returns to management `/Payments/Success`, which posts server `Payments/Confirm`. A verified webhook or Saferpay notification can authorize the reservation first. Either way the server re-reads the checkout from the reservation's provider, requests a charger start through the live OCPP session (once per reservation, while it is `Authorized`), and updates reservation and transaction state. If a Saferpay return was lost and no notification arrived, reopening the start page resumes the reservation, which confirms the paid checkout and starts it the same way.
 6. Public status pages poll server payment status without caching, can request stop, and can update the reservation-bound R1 buyer snapshot before invoice issuance. The existing buyer confirmation timestamp is the optimistic concurrency version. Submitted/external evidence, an active submission lease, `Submitting`, `ProviderUnknown`, or an unavailable invoice-state lookup makes the form read-only. A serializable reservation-row lock orders buyer saves and durable invoice-lineage acquisition across application instances; non-relational test stores use the bounded in-process reservation gate.
 7. When a newly terminal reservation still owns an uncaptured authorization, the server persists an armed release state before provider work. Webhooks and the cleanup sweep converge on the same strict, idempotent reconciler; retry state survives restarts and historical unarmed rows stay outside the workflow.
@@ -134,7 +135,7 @@ Locations: `OCPP.Core.Server.Tests/`, `OCPP.Core.Test/`, `Simulators/`
 ## Integration Points
 
 - Stripe checkout, payment intents, and webhooks (default payment provider).
-- Worldline Saferpay JSON API (Payment Page, Transaction capture/cancel/inquire) and its payload-free success/fail notifications (alternative payment provider, selected with `Payments:Provider`).
+- Worldline Saferpay JSON API (Payment Page, Transaction capture/cancel/inquire) and its payload-free success/fail notifications (second payment provider, selected per charge point or as `Payments:DefaultProvider`).
 - e-racuni invoice API through `Invoices:ERacuni` options.
 - SMTP or local sink directory for customer and owner-report emails.
 - Hangfire with SQL Server storage for background jobs and dashboards.
@@ -151,7 +152,7 @@ Locations: `OCPP.Core.Server.Tests/`, `OCPP.Core.Test/`, `Simulators/`
 - SQLite is useful for local and automated tests but does not exercise the SQL Server migration path.
 - Hangfire jobs and dashboard require SQL Server configuration.
 - Payment behavior is spread across `OCPP.Core.Server`, `OCPP.Core.Management`, and database state; do not validate only one layer.
-- Payment operations on an existing reservation always use the provider stored on that reservation. Changing `Payments:Provider` affects only new checkouts, and the previous provider must stay configured until its reservations are finished.
+- Payment operations on an existing reservation always use the provider stored on that reservation. Changing `Payments:DefaultProvider` or a charge point's `PaymentProvider` affects only new checkouts, and the previous provider must stay configured until its reservations are finished.
 - Financial recovery is an explicit operator command, not an HTTP endpoint or hosted service. Keep manifests and private evidence outside the repository.
 - A charge point WebSocket session reuses one request-scoped `OCPPCoreContext` for its whole lifetime. `ResetConnectionDbContext` clears its change tracker before every incoming OCPP message so stale entities (for example a reservation whose R1 buyer data the portal confirmed during charging) or changes left by a failed `SaveChanges` cannot break later messages on the same connection. Do not rely on entities tracked across messages.
 

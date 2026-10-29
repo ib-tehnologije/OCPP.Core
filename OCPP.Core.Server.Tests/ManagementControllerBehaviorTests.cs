@@ -25,7 +25,7 @@ using Xunit;
 
 namespace OCPP.Core.Server.Tests
 {
-    public class ManagementControllerBehaviorTests
+    public partial class ManagementControllerBehaviorTests
     {
         [Fact]
         public void ManageChargePoint_BuildsLiveConnectorCardsFromTelemetryTransactionsAndReservations()
