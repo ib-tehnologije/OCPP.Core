@@ -59,6 +59,10 @@ namespace OCPP.Core.Management.Models
 
         public bool FreeChargingEnabled { get; set; }
 
+        /// <summary>Payment provider override for new checkouts; null or empty uses the default provider.</summary>
+        [StringLength(32)]
+        public string PaymentProvider { get; set; }
+
         [Range(0, 100000)]
         public double? MaxSessionKwh { get; set; }
 

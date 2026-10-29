@@ -25,6 +25,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OCPP.Core.Database;
+using OCPP.Core.Management.Helpers;
 using OCPP.Core.Management.Models;
 
 namespace OCPP.Core.Management.Controllers
@@ -137,6 +138,11 @@ namespace OCPP.Core.Management.Controllers
 
                         if (string.IsNullOrEmpty(errorMsg))
                         {
+                            errorMsg = ValidatePaymentProvider(cpvm);
+                        }
+
+                        if (string.IsNullOrEmpty(errorMsg))
+                        {
                             // Save tag in DB
                             ChargePoint newChargePoint = new ChargePoint();
                             newChargePoint.ChargePointId = cpvm.ChargePointId;
@@ -148,6 +154,7 @@ namespace OCPP.Core.Management.Controllers
                             newChargePoint.Password = cpvm.Password;
                             newChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
                             newChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
+                            newChargePoint.PaymentProvider = NormalizePaymentProvider(cpvm.PaymentProvider);
                             newChargePoint.PricePerKwh = cpvm.PricePerKwh ?? 0m;
                             ApplyNightTariff(newChargePoint, cpvm);
                             newChargePoint.UserSessionFee = cpvm.UserSessionFee ?? 0m;
@@ -219,7 +226,7 @@ namespace OCPP.Core.Management.Controllers
                         }
                         else
                         {
-                            errorMsg = ValidatePricing(cpvm);
+                            errorMsg = ValidatePricing(cpvm) ?? ValidatePaymentProvider(cpvm);
                         }
 
                         if (!string.IsNullOrEmpty(errorMsg))
@@ -242,6 +249,8 @@ namespace OCPP.Core.Management.Controllers
                         currentChargePoint.Password = cpvm.Password;
                         currentChargePoint.ClientCertThumb = cpvm.ClientCertThumb;
                         currentChargePoint.FreeChargingEnabled = cpvm.FreeChargingEnabled;
+                        // Only new checkouts follow this setting; reservations in flight keep their stored provider.
+                        currentChargePoint.PaymentProvider = NormalizePaymentProvider(cpvm.PaymentProvider);
                         currentChargePoint.PricePerKwh = cpvm.PricePerKwh ?? 0m;
                         ApplyNightTariff(currentChargePoint, cpvm);
                         currentChargePoint.UserSessionFee = cpvm.UserSessionFee ?? 0m;
@@ -284,6 +293,7 @@ namespace OCPP.Core.Management.Controllers
                         cpvm.Password = currentChargePoint.Password;
                         cpvm.ClientCertThumb = currentChargePoint.ClientCertThumb;
                         cpvm.FreeChargingEnabled = currentChargePoint.FreeChargingEnabled;
+                        cpvm.PaymentProvider = NormalizePaymentProvider(currentChargePoint.PaymentProvider) ?? currentChargePoint.PaymentProvider;
                         cpvm.PricePerKwh = currentChargePoint.PricePerKwh;
                         cpvm.NightTariffEnabled = currentChargePoint.NightTariffEnabled;
                         cpvm.NightPricePerKwh = currentChargePoint.NightPricePerKwh;
@@ -404,6 +414,21 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return null;
+        }
+
+        private static string ValidatePaymentProvider(ChargePointViewModel cpvm)
+        {
+            if (cpvm == null) return "Invalid charge point data.";
+            return PaymentProviderConfiguration.TryNormalizeChargePointProvider(cpvm.PaymentProvider, out _)
+                ? null
+                : $"Unknown payment provider '{cpvm.PaymentProvider}'. Choose Default, Stripe or Worldline Saferpay.";
+        }
+
+        private static string NormalizePaymentProvider(string paymentProvider)
+        {
+            return PaymentProviderConfiguration.TryNormalizeChargePointProvider(paymentProvider, out var normalized)
+                ? normalized
+                : null;
         }
 
         private static string NormalizePublicDisplayCode(string publicDisplayCode)

@@ -95,7 +95,7 @@ namespace OCPP.Core.Server.Tests
 
             Assert.False(PaymentProviderConfiguration.IsStripeProvider(config));
             Assert.False(PaymentProviderConfiguration.ShouldWarnMissingStripeWebhookSecret(config));
-            Assert.Equal(provider, PaymentProviderConfiguration.GetConfiguredProvider(config));
+            Assert.Equal("Saferpay", PaymentProviderConfiguration.GetConfiguredProvider(config));
         }
 
         [Fact]
@@ -112,8 +112,45 @@ namespace OCPP.Core.Server.Tests
                 .AddJsonFile(FindProjectFile("OCPP.Core.Management", "appsettings.json"), optional: false, reloadOnChange: false)
                 .Build();
 
-            Assert.Equal(string.Empty, config["Payments:Provider"]);
+            Assert.Equal("Stripe", config["Payments:DefaultProvider"]);
+            Assert.Null(config["Payments:Provider"]);
             Assert.True(PaymentProviderConfiguration.IsStripeProvider(config));
+        }
+
+        [Fact]
+        public void GetConfiguredProvider_PrefersDefaultProviderOverLegacyKey()
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Payments:DefaultProvider"] = "saferpay",
+                    ["Payments:Provider"] = "Stripe"
+                })
+                .Build();
+
+            Assert.Equal("Saferpay", PaymentProviderConfiguration.GetConfiguredProvider(config));
+            Assert.False(PaymentProviderConfiguration.ShouldWarnMissingStripeWebhookSecret(config));
+        }
+
+        [Theory]
+        [InlineData(null, null)]
+        [InlineData("", null)]
+        [InlineData("  ", null)]
+        [InlineData("stripe", "Stripe")]
+        [InlineData(" Saferpay ", "Saferpay")]
+        public void TryNormalizeChargePointProvider_MapsDefaultAndKnownProviders(string? value, string? expected)
+        {
+            Assert.True(PaymentProviderConfiguration.TryNormalizeChargePointProvider(value, out var normalized));
+            Assert.Equal(expected, normalized);
+        }
+
+        [Theory]
+        [InlineData("Worldline")]
+        [InlineData("PayPal")]
+        public void TryNormalizeChargePointProvider_RejectsUnknownProviders(string value)
+        {
+            Assert.False(PaymentProviderConfiguration.TryNormalizeChargePointProvider(value, out var normalized));
+            Assert.Null(normalized);
         }
 
         private static IConfiguration BuildConfig(string? provider, string? webhookSecret)

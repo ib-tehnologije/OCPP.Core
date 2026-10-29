@@ -9,7 +9,8 @@ using System.Linq;
 namespace OCPP.Core.Server.Payments.Providers
 {
     /// <summary>
-    /// Default <see cref="IPaymentGatewayRegistry"/>: the active gateway serves new checkouts, and each
+    /// Default <see cref="IPaymentGatewayRegistry"/>: the default gateway serves new checkouts on charge points
+    /// without a provider override (see <see cref="PaymentProviderResolver"/>), and each
     /// existing reservation is routed to the gateway named by its persisted provider. An unknown or
     /// unregistered provider resolves to null so callers fail closed instead of calling another PSP.
     /// </summary>
@@ -19,7 +20,7 @@ namespace OCPP.Core.Server.Payments.Providers
             new(StringComparer.OrdinalIgnoreCase);
         private readonly List<IPaymentGateway> _gateways = new();
 
-        public PaymentGatewayRegistry(IEnumerable<IPaymentGateway> gateways, string activeProvider)
+        public PaymentGatewayRegistry(IEnumerable<IPaymentGateway> gateways, string defaultProvider)
         {
             foreach (var gateway in gateways ?? Enumerable.Empty<IPaymentGateway>())
             {
@@ -45,22 +46,22 @@ namespace OCPP.Core.Server.Payments.Providers
                 _gateways.Add(gateway);
             }
 
-            var activeName = string.IsNullOrWhiteSpace(activeProvider)
+            var defaultName = string.IsNullOrWhiteSpace(defaultProvider)
                 ? PaymentProviderNames.Stripe
-                : activeProvider.Trim();
-            if (!_gatewaysByName.TryGetValue(activeName, out var active))
+                : defaultProvider.Trim();
+            if (!_gatewaysByName.TryGetValue(defaultName, out var defaultGateway))
             {
                 var registered = _gateways.Count == 0
                     ? "(none)"
                     : string.Join(", ", _gateways.Select(candidate => candidate.ProviderName));
                 throw new InvalidOperationException(
-                    $"Payments:Provider selects '{activeName}', but no '{activeName}' payment gateway is registered. Registered gateways: {registered}.");
+                    $"Payments:DefaultProvider selects '{defaultName}', but no '{defaultName}' payment gateway is registered. Registered gateways: {registered}.");
             }
 
-            Active = active;
+            Default = defaultGateway;
         }
 
-        public IPaymentGateway Active { get; }
+        public IPaymentGateway Default { get; }
 
         public IReadOnlyCollection<IPaymentGateway> All => _gateways;
 

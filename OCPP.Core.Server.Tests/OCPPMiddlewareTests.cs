@@ -3606,7 +3606,9 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Theory]
-        [InlineData("Create", false, true)]
+        // A closed default provider no longer closes Create: a charge point may override to another
+        // configured provider, so the coordinator checks the provider per charge point.
+        [InlineData("Create", true, false)]
         [InlineData("Create", false, false)]
         [InlineData("Confirm", false, false)]
         [InlineData("Resume", false, false)]

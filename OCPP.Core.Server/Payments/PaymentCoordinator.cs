@@ -56,7 +56,7 @@ namespace OCPP.Core.Server.Payments
 
         public bool IsEnabled =>
             !string.IsNullOrWhiteSpace(_settings.ReturnBaseUrl) &&
-            ActiveGateway.IsConfigured;
+            DefaultGateway.IsConfigured;
 
         public PaymentCoordinator(
             IPaymentGatewayRegistry gateways,
@@ -72,9 +72,9 @@ namespace OCPP.Core.Server.Payments
             IViesVerificationService viesVerificationService = null)
         {
             _gateways = gateways ?? throw new ArgumentNullException(nameof(gateways));
-            if (_gateways.Active == null)
+            if (_gateways.Default == null)
             {
-                throw new ArgumentException("The payment gateway registry has no active gateway.", nameof(gateways));
+                throw new ArgumentException("The payment gateway registry has no default gateway.", nameof(gateways));
             }
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _flowOptions = flowOptions?.Value ?? new PaymentFlowOptions();
@@ -89,16 +89,20 @@ namespace OCPP.Core.Server.Payments
                 new UnavailableViesVerificationService(_utcNow);
         }
 
-        /// <summary>Gateway used for new checkouts (<c>Payments:Provider</c>).</summary>
-        protected IPaymentGateway ActiveGateway => _gateways.Active;
+        /// <summary>
+        /// Gateway for new checkouts on charge points without their own provider (<c>Payments:DefaultProvider</c>).
+        /// New checkouts pick their gateway with <see cref="PaymentProviderResolver"/>, never this property directly.
+        /// </summary>
+        protected IPaymentGateway DefaultGateway => _gateways.Default;
 
-        /// <summary>Provider name used in user-visible status texts (e.g. "Stripe disabled", "StripeError").</summary>
-        private string ActiveProviderName => ActiveGateway.ProviderName;
+        /// <summary>Provider name used in user-visible status texts not tied to a reservation (e.g. "Stripe disabled").</summary>
+        private string DefaultProviderName => DefaultGateway.ProviderName;
 
         /// <summary>
         /// True when existing reservations can be processed: the return URL is configured and at least one
         /// registered gateway is configured. Equals <see cref="IsEnabled"/> for a single-gateway setup; with
-        /// several gateways it keeps reservations of a previously active provider capturable and releasable.
+        /// several gateways it keeps reservations of every provider capturable and releasable, and lets charge
+        /// points that override the default provider create checkouts.
         /// </summary>
         public bool IsOperational =>
             !string.IsNullOrWhiteSpace(_settings.ReturnBaseUrl) &&
@@ -110,6 +114,27 @@ namespace OCPP.Core.Server.Payments
         /// </summary>
         private IPaymentGateway ResolveGateway(ChargePaymentReservation reservation) =>
             _gateways.Resolve(reservation?.PaymentProvider);
+
+        /// <summary>
+        /// Gateway for a new checkout on <paramref name="chargePoint"/>: its <c>PaymentProvider</c> override, else the
+        /// default provider. Throws <see cref="PaymentProviderUnavailableException"/> instead of falling back.
+        /// </summary>
+        private IPaymentGateway ResolveCheckoutGateway(ChargePoint chargePoint)
+        {
+            try
+            {
+                return PaymentProviderResolver.ResolveCheckoutGateway(_gateways, chargePoint?.PaymentProvider);
+            }
+            catch (PaymentProviderUnavailableException unavailable)
+            {
+                _logger.LogWarning(
+                    "Payments/CreateCheckout => Payment provider unavailable cp={ChargePointId} provider={Provider} reason={Reason}",
+                    chargePoint?.ChargePointId,
+                    unavailable.Provider ?? "(none)",
+                    unavailable.Reason);
+                throw;
+            }
+        }
 
         private static bool IsGatewayUsable(IPaymentGateway gateway) =>
             gateway != null && gateway.IsConfigured;
@@ -161,9 +186,9 @@ namespace OCPP.Core.Server.Payments
             PaymentSessionRequest request,
             CancellationToken cancellationToken)
         {
-            if (!IsEnabled)
+            if (!IsOperational)
             {
-                throw new InvalidOperationException($"{ActiveProviderName} integration is disabled.");
+                throw new InvalidOperationException("Payment integration is disabled.");
             }
             if (dbContext == null) throw new ArgumentNullException(nameof(dbContext));
             if (request == null) throw new ArgumentNullException(nameof(request));
@@ -197,6 +222,10 @@ namespace OCPP.Core.Server.Payments
             {
                 throw new ArgumentException($"Charge point '{request.ChargePointId}' not found.", nameof(request.ChargePointId));
             }
+
+            // Pick the provider once, from the charge point's current setting; the reservation then stores it and
+            // every later step (confirm, capture, cancel, webhooks, recovery) uses the stored provider.
+            var gateway = ResolveCheckoutGateway(chargePoint);
 
             double maxEnergyKwh = chargePoint.MaxSessionKwh;
             decimal pricePerKwh = chargePoint.PricePerKwh;
@@ -307,7 +336,6 @@ namespace OCPP.Core.Server.Payments
                 reservation.UsageFeePerMinute,
                 reservation.MaxUsageFeeMinutes);
 
-            var gateway = ActiveGateway;
             var baseReturnUrl = string.IsNullOrWhiteSpace(request.ReturnBaseUrl)
                 ? _settings.ReturnBaseUrl
                 : request.ReturnBaseUrl;
@@ -468,12 +496,12 @@ namespace OCPP.Core.Server.Payments
             {
                 Success = false,
                 Status = "Invalid",
-                Error = $"{ActiveProviderName} disabled"
+                Error = $"{DefaultProviderName} disabled"
             };
 
             if (!IsOperational)
             {
-                _logger.LogWarning("Payments/Confirm => {Provider} disabled while confirming reservation={ReservationId}", ActiveProviderName, reservationId);
+                _logger.LogWarning("Payments/Confirm => {Provider} disabled while confirming reservation={ReservationId}", DefaultProviderName, reservationId);
                 return result;
             }
 
@@ -977,7 +1005,7 @@ namespace OCPP.Core.Server.Payments
             if (!IsOperational)
             {
                 result.Status = "Disabled";
-                result.Error = $"{ActiveProviderName} integration is disabled.";
+                result.Error = $"{DefaultProviderName} integration is disabled.";
                 return result;
             }
 
@@ -1154,7 +1182,7 @@ namespace OCPP.Core.Server.Payments
             if (!IsOperational)
             {
                 result.Status = "Disabled";
-                result.Error = $"{ActiveProviderName} integration is disabled.";
+                result.Error = $"{DefaultProviderName} integration is disabled.";
                 return result;
             }
 

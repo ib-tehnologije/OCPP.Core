@@ -174,7 +174,7 @@ namespace OCPP.Core.Server.Tests
 
         private static PaymentCheckoutSettings Settings() => new()
         {
-            ActiveProvider = ActiveProvider,
+            DefaultProvider = ActiveProvider,
             ReturnBaseUrl = ReturnBaseUrl,
             Currency = "eur",
             ProductName = "Charging session"

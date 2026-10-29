@@ -14,8 +14,15 @@ namespace OCPP.Core.Server.Payments.Providers
     public class PaymentProviderOptions
     {
         /// <summary>
-        /// PSP used for new checkouts: <c>Stripe</c> (default when empty) or <c>Saferpay</c>.
-        /// Existing reservations keep using the provider that created them.
+        /// PSP used for new checkouts on charge points without their own <c>ChargePoint.PaymentProvider</c>:
+        /// <c>Stripe</c> (default when empty) or <c>Saferpay</c>. Existing reservations keep using the
+        /// provider that created them.
+        /// </summary>
+        public string DefaultProvider { get; set; }
+
+        /// <summary>
+        /// Legacy name of <see cref="DefaultProvider"/>, used when <see cref="DefaultProvider"/> is empty.
+        /// Setting both to different providers is a configuration error.
         /// </summary>
         public string Provider { get; set; }
 
@@ -34,32 +41,50 @@ namespace OCPP.Core.Server.Payments.Providers
     {
         public const string DefaultCurrency = "eur";
 
-        public string ActiveProvider { get; init; } = PaymentProviderNames.Stripe;
+        /// <summary>Provider for new checkouts on charge points without a provider override.</summary>
+        public string DefaultProvider { get; init; } = PaymentProviderNames.Stripe;
         public string ReturnBaseUrl { get; init; }
         public string Currency { get; init; } = DefaultCurrency;
         public string ProductName { get; init; }
 
         /// <summary>
         /// Resolves settings. Throws <see cref="InvalidOperationException"/> for an unknown
-        /// <see cref="PaymentProviderOptions.Provider"/> so a typo never silently falls back to Stripe.
+        /// <see cref="PaymentProviderOptions.DefaultProvider"/> (or legacy <see cref="PaymentProviderOptions.Provider"/>)
+        /// so a typo never silently falls back to Stripe, and when both keys name different providers.
         /// </summary>
         public static PaymentCheckoutSettings Resolve(PaymentProviderOptions providerOptions, StripeOptions stripeOptions)
         {
-            var configuredProvider = providerOptions?.Provider;
-            var provider = PaymentProviderNames.Normalize(configuredProvider);
-            if (provider == null)
+            var configuredDefault = providerOptions?.DefaultProvider;
+            var configuredLegacy = providerOptions?.Provider;
+            var defaultProvider = NormalizeConfigured(configuredDefault, "Payments:DefaultProvider");
+            var legacyProvider = NormalizeConfigured(configuredLegacy, "Payments:Provider");
+            if (!string.IsNullOrWhiteSpace(configuredDefault) &&
+                !string.IsNullOrWhiteSpace(configuredLegacy) &&
+                !string.Equals(defaultProvider, legacyProvider, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    $"Unknown payment provider '{configuredProvider}' in Payments:Provider. Supported values: {string.Join(", ", PaymentProviderNames.Known)}.");
+                    $"Payments:DefaultProvider ('{defaultProvider}') and the legacy Payments:Provider ('{legacyProvider}') select different payment providers. Set only Payments:DefaultProvider.");
             }
 
             return new PaymentCheckoutSettings
             {
-                ActiveProvider = provider,
+                DefaultProvider = string.IsNullOrWhiteSpace(configuredDefault) ? legacyProvider : defaultProvider,
                 ReturnBaseUrl = FirstNonEmpty(providerOptions?.ReturnBaseUrl, stripeOptions?.ReturnBaseUrl),
                 Currency = (FirstNonEmpty(providerOptions?.Currency, stripeOptions?.Currency) ?? DefaultCurrency).ToLowerInvariant(),
                 ProductName = FirstNonEmpty(providerOptions?.ProductName, stripeOptions?.ProductName)
             };
+        }
+
+        private static string NormalizeConfigured(string configured, string key)
+        {
+            var provider = PaymentProviderNames.Normalize(configured);
+            if (provider == null)
+            {
+                throw new InvalidOperationException(
+                    $"Unknown payment provider '{configured}' in {key}. Supported values: {string.Join(", ", PaymentProviderNames.Known)}.");
+            }
+
+            return provider;
         }
 
         private static string FirstNonEmpty(params string[] values)

@@ -32,12 +32,12 @@ test("Stripe pins the provider so developer Payments:* or Saferpay:* settings ca
   assert.deepEqual(
     buildPaymentProviderServerEnv({ provider: "Stripe", managementBaseUrl: "http://127.0.0.1:8082/" }),
     {
-      Payments__Provider: "Stripe",
+      Payments__DefaultProvider: "Stripe",
       Payments__ReturnBaseUrl: "http://127.0.0.1:8082",
       Saferpay__Enabled: "false",
     },
   );
-  assert.deepEqual(buildPaymentProviderManagementEnv({ provider: "Stripe" }), { Payments__Provider: "Stripe" });
+  assert.deepEqual(buildPaymentProviderManagementEnv({ provider: "Stripe" }), { Payments__DefaultProvider: "Stripe" });
   assert.throws(() => buildPaymentProviderServerEnv({ provider: "Stripe" }), /managementBaseUrl is required/);
 });
 
@@ -49,7 +49,7 @@ test("Saferpay selects the provider and the in-process mock with server notifica
       serverApiBaseUrl: "http://127.0.0.1:8081/API/",
     }),
     {
-      Payments__Provider: "Saferpay",
+      Payments__DefaultProvider: "Saferpay",
       Payments__ReturnBaseUrl: "http://127.0.0.1:8082",
       Saferpay__Enabled: "true",
       Saferpay__UseMockServices: "true",
@@ -57,7 +57,7 @@ test("Saferpay selects the provider and the in-process mock with server notifica
       Saferpay__NotifyBaseUrl: "http://127.0.0.1:8081/API",
     },
   );
-  assert.deepEqual(buildPaymentProviderManagementEnv({ provider: "Saferpay" }), { Payments__Provider: "Saferpay" });
+  assert.deepEqual(buildPaymentProviderManagementEnv({ provider: "Saferpay" }), { Payments__DefaultProvider: "Saferpay" });
   assert.throws(() => buildPaymentProviderServerEnv({ provider: "Saferpay" }), /required/);
 });
 

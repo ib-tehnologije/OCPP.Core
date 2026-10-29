@@ -156,6 +156,12 @@ namespace OCPP.Core.Server
                 }
             }
 
+            // Fail fast when a charge point overrides its payment provider to one that is not configured.
+            Payments.Providers.PaymentProviderStartupValidator.Validate(
+                dbContext,
+                scope.ServiceProvider.GetRequiredService<Payments.Providers.IPaymentGatewayRegistry>(),
+                logger);
+
             // Startup maintenance: clear stale reservations and stuck connector statuses.
             StartupMaintenance.Run(dbContext, logger, Configuration);
 

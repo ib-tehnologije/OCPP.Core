@@ -95,6 +95,8 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.UsageFeeAfterChargingEnds).HasColumnType("bit");
 
+                entity.Property(e => e.PaymentProvider).HasMaxLength(32);
+
                 entity.HasOne(d => d.Owner)
                     .WithMany(p => p.ChargePoints)
                     .HasForeignKey(d => d.OwnerId)

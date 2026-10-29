@@ -2235,13 +2235,13 @@ namespace OCPP.Core.Server
                 return;
             }
 
-            // New checkouts need the active provider (IsEnabled). Every other action works on an existing
-            // reservation, which only needs its own provider (IsOperational): a previous provider's
-            // reservations keep confirming, stopping and reporting status after Payments:Provider changes.
-            // The coordinator still fails closed per reservation when its own provider is unusable.
+            // Payments are available when any provider is configured (IsOperational). A new checkout then needs
+            // its charge point's provider (override or Payments:DefaultProvider), checked by the coordinator; every
+            // other action works on an existing reservation and only needs the provider stored on it, so
+            // reservations keep confirming, stopping and reporting status after a charge point's provider changes.
+            // The coordinator fails closed per charge point and per reservation when that provider is unusable.
             bool isCreate = string.Equals(action, "Create", StringComparison.OrdinalIgnoreCase);
-            bool paymentsAvailable = _paymentCoordinator != null &&
-                                     (isCreate ? _paymentCoordinator.IsEnabled : _paymentCoordinator.IsOperational);
+            bool paymentsAvailable = _paymentCoordinator != null && _paymentCoordinator.IsOperational;
             if (!paymentsAvailable)
             {
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
@@ -2389,6 +2389,13 @@ namespace OCPP.Core.Server
             {
                 context.Response.StatusCode = (int)HttpStatusCode.Conflict;
                 await context.Response.WriteAsync("{\"status\":\"ConnectorBusy\",\"reason\":\"ActiveReservation\"}");
+            }
+            catch (PaymentProviderUnavailableException)
+            {
+                // The charge point's payment provider is unknown or not configured: same answer as disabled payments.
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"Disabled\",\"reason\":\"ProviderUnavailable\"}");
             }
             catch (InvoiceBuyerValidationException validation)
             {
