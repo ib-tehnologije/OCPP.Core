@@ -160,4 +160,16 @@
   <data name="SessionExpired" xml:space="preserve">
     <value>Ihre Sitzung ist abgelaufen. Bitte Seite neu laden und erneut anmelden.</value>
   </data>
+  <data name="SetInoperative" xml:space="preserve">
+    <value>Außer Betrieb</value>
+  </data>
+  <data name="SetOperative" xml:space="preserve">
+    <value>Wieder in Betrieb</value>
+  </data>
+  <data name="SetInoperativeConfirm" xml:space="preserve">
+    <value>Den ausgewählten Anschluss außer Betrieb nehmen? Er bleibt auch nach einem Neustart nicht verfügbar, bis Sie ihn wieder in Betrieb nehmen.</value>
+  </data>
+  <data name="SetOperativeConfirm" xml:space="preserve">
+    <value>Den ausgewählten Anschluss wieder in Betrieb nehmen?</value>
+  </data>
 </root>

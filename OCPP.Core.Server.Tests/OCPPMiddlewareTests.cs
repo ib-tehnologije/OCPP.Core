@@ -2928,6 +2928,212 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Theory]
+        [InlineData("ocpp1.6", "/API/ChangeAvailability/CP-AVAIL/1/Inoperative", 1, "Inoperative")]
+        [InlineData("ocpp1.6", "/API/ChangeAvailability/CP-AVAIL/2/operative", 2, "Operative")]
+        [InlineData("ocpp1.6", "/API/ChangeAvailability/CP-AVAIL/0/INOPERATIVE", 0, "Inoperative")]
+        public async Task Invoke_ChangeAvailabilityApi_SendsOcpp16Payload(string protocol, string requestPath, int expectedConnectorId, string expectedType)
+        {
+            var (statusCode, body, sentPayload, _) = await InvokeChangeAvailabilityAsync(protocol, requestPath);
+
+            Assert.Equal(StatusCodes.Status200OK, statusCode);
+            Assert.Equal("Accepted", JObject.Parse(body)["status"]?.Value<string>());
+            var payload = JObject.Parse(sentPayload!);
+            Assert.Equal(expectedConnectorId, payload["connectorId"]?.Value<int>());
+            Assert.Equal(expectedType, payload["type"]?.Value<string>());
+        }
+
+        [Theory]
+        [InlineData("ocpp2.0.1", "/API/ChangeAvailability/CP-AVAIL/1/Inoperative", 1, "Inoperative")]
+        [InlineData("ocpp2.0.1", "/API/ChangeAvailability/CP-AVAIL/0/Operative", null, "Operative")]
+        [InlineData("ocpp2.1", "/API/ChangeAvailability/CP-AVAIL/2/Operative", 2, "Operative")]
+        [InlineData("ocpp2.1", "/API/ChangeAvailability/CP-AVAIL/0/Inoperative", null, "Inoperative")]
+        public async Task Invoke_ChangeAvailabilityApi_SendsOcpp2xPayload(string protocol, string requestPath, int? expectedEvseId, string expectedStatus)
+        {
+            var (statusCode, body, sentPayload, _) = await InvokeChangeAvailabilityAsync(protocol, requestPath);
+
+            Assert.Equal(StatusCodes.Status200OK, statusCode);
+            Assert.Equal("Accepted", JObject.Parse(body)["status"]?.Value<string>());
+            var payload = JObject.Parse(sentPayload!);
+            Assert.Equal(expectedStatus, payload["operationalStatus"]?.Value<string>());
+            Assert.Equal(expectedEvseId, payload["evse"]?["id"]?.Value<int>());
+            Assert.Null(payload["evse"]?["connectorId"]);
+        }
+
+        [Theory]
+        [InlineData("/API/ChangeAvailability/CP-AVAIL/abc/Inoperative", "InvalidConnectorId")]
+        [InlineData("/API/ChangeAvailability/CP-AVAIL/-1/Inoperative", "InvalidConnectorId")]
+        [InlineData("/API/ChangeAvailability/CP-AVAIL", "InvalidConnectorId")]
+        [InlineData("/API/ChangeAvailability/CP-AVAIL/1/Maybe", "InvalidAvailabilityType")]
+        [InlineData("/API/ChangeAvailability/CP-AVAIL/1", "InvalidAvailabilityType")]
+        public async Task Invoke_ChangeAvailabilityApi_WithInvalidInput_ReturnsBadRequestWithoutSending(string requestPath, string expectedStatus)
+        {
+            // Production mutation caught: an unparsable connector falling back to 0 takes the whole charge point out of service.
+            var (statusCode, body, sentPayload, queuedRequests) = await InvokeChangeAvailabilityAsync("ocpp1.6", requestPath);
+
+            Assert.Equal(StatusCodes.Status400BadRequest, statusCode);
+            Assert.Equal($"{{\"status\":\"{expectedStatus}\"}}", body);
+            Assert.Null(sentPayload);
+            Assert.Equal(0, queuedRequests);
+        }
+
+        [Fact]
+        public async Task Invoke_ChangeAvailabilityApi_WithOfflineChargePoint_ReturnsNotFound()
+        {
+            var (statusCode, _, sentPayload, _) = await InvokeChangeAvailabilityAsync("ocpp1.6", "/API/ChangeAvailability/CP-OTHER/1/Inoperative");
+
+            Assert.Equal(StatusCodes.Status404NotFound, statusCode);
+            Assert.Null(sentPayload);
+        }
+
+        private async Task<(int StatusCode, string Body, string? SentPayload, int QueuedRequests)> InvokeChangeAvailabilityAsync(string protocol, string requestPath)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-change-availability-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                var middleware = CreateMiddleware();
+                string? sentPayload = null;
+                var fakeSocket = new FakeOpenWebSocket(() =>
+                {
+                    var queuedMessage = GetQueuedRequest(middleware);
+                    Assert.Equal("ChangeAvailability", queuedMessage.Action);
+                    sentPayload = queuedMessage.JsonPayload;
+                    queuedMessage.TaskCompletionSource.SetResult("{\"status\":\"Accepted\"}");
+                    return Task.CompletedTask;
+                });
+
+                var previousStatuses = ReplaceChargePointStatuses(new Dictionary<string, ChargePointStatus>
+                {
+                    ["CP-AVAIL"] = new ChargePointStatus
+                    {
+                        Id = "CP-AVAIL",
+                        Protocol = protocol,
+                        WebSocket = fakeSocket
+                    }
+                });
+
+                try
+                {
+                    var httpContext = new DefaultHttpContext();
+                    httpContext.Request.Method = "GET";
+                    httpContext.Request.Path = requestPath;
+                    httpContext.Response.Body = new MemoryStream();
+
+                    using (var actionContext = CreateContext(databasePath))
+                    {
+                        await middleware.Invoke(httpContext, actionContext);
+                    }
+
+                    httpContext.Response.Body.Position = 0;
+                    using var reader = new StreamReader(httpContext.Response.Body);
+                    string body = await reader.ReadToEndAsync();
+                    return (httpContext.Response.StatusCode, body, sentPayload, GetQueuedRequestCount(middleware));
+                }
+                finally
+                {
+                    ReplaceChargePointStatuses(previousStatuses);
+                }
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("ocpp1.6", "Accepted")]
+        [InlineData("ocpp1.6", "Rejected")]
+        [InlineData("ocpp1.6", "Scheduled")]
+        [InlineData("ocpp2.0.1", "Scheduled")]
+        [InlineData("ocpp2.1", "Scheduled")]
+        public void ProcessAnswer_ChangeAvailability_ReturnsChargerStatusToApiCaller(string protocol, string chargerStatus)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-change-availability-answer-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using var dbContext = CreateContext(databasePath);
+                IConfiguration configuration = new ConfigurationBuilder().Build();
+                var chargePointStatus = new ChargePointStatus { Id = "CP-AVAIL", Protocol = protocol };
+                var msgIn = new OCPPMessage("3", "answer-id", null, $"{{\"status\":\"{chargerStatus}\"}}");
+                var msgOut = new OCPPMessage
+                {
+                    Action = "ChangeAvailability",
+                    TaskCompletionSource = new TaskCompletionSource<string>()
+                };
+
+                switch (protocol)
+                {
+                    case "ocpp2.1":
+                        new ControllerOCPP21(configuration, NullLoggerFactory.Instance, chargePointStatus, dbContext).ProcessAnswer(msgIn, msgOut);
+                        break;
+                    case "ocpp2.0.1":
+                        new ControllerOCPP20(configuration, NullLoggerFactory.Instance, chargePointStatus, dbContext).ProcessAnswer(msgIn, msgOut);
+                        break;
+                    default:
+                        new ControllerOCPP16(configuration, NullLoggerFactory.Instance, chargePointStatus, dbContext).ProcessAnswer(msgIn, msgOut);
+                        break;
+                }
+
+                Assert.True(msgOut.TaskCompletionSource.Task.IsCompletedSuccessfully);
+                Assert.Equal(chargerStatus, JObject.Parse(msgOut.TaskCompletionSource.Task.Result)["status"]?.Value<string>());
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("Unavailable", false, "PersistedStatus:Unavailable")]
+        [InlineData("Faulted", true, "Startable")]
+        public void PersistedStatus_OnlyUnavailableStaysAuthoritativeOnceOld(string persistedStatus, bool expectedStartable, string expectedReason)
+        {
+            // After a server restart the charger may not repeat the status it set for ChangeAvailability; the connector must stay blocked.
+            string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-persisted-unavailable-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint { ChargePointId = "CP-PERSISTED", Name = "Persisted status test" });
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-PERSISTED",
+                        ConnectorId = 1,
+                        LastStatus = persistedStatus,
+                        LastStatusTime = DateTime.UtcNow.AddDays(-3)
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var dbContext = CreateContext(databasePath);
+                var middleware = CreateMiddleware();
+                var chargePointStatus = new ChargePointStatus
+                {
+                    Id = "CP-PERSISTED",
+                    Protocol = "ocpp1.6",
+                    WebSocket = new FakeOpenWebSocket(() => Task.CompletedTask),
+                    OnlineConnectors = new Dictionary<int, OnlineConnectorStatus>()
+                };
+
+                var startability = InvokeGetConnectorStartability(middleware, dbContext, "CP-PERSISTED", 1, chargePointStatus, null);
+                Assert.Equal(expectedStartable, Assert.IsType<bool>(startability.GetType().GetProperty("Startable")!.GetValue(startability)));
+                Assert.Equal(expectedReason, Assert.IsType<string>(startability.GetType().GetProperty("Reason")!.GetValue(startability)));
+
+                var isConnectorBusy = typeof(OCPPMiddleware)
+                    .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Single(m => m.Name == "IsConnectorBusy" && m.GetParameters().Length == 6);
+                var busy = isConnectorBusy.Invoke(middleware, new object?[] { dbContext, "CP-PERSISTED", 1, chargePointStatus, null, null });
+                Assert.Equal(!expectedStartable, Assert.IsType<bool>(busy));
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         [Fact]
         public async Task ExecuteRequestStartTransaction20_UsesConfiguredIdTokenType()
         {

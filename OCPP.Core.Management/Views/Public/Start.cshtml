@@ -21,7 +21,8 @@
     var allowLocalConnectorSwitching = Model.ShowConnectorSelector && !Model.HasRecoveryOptions && !Model.HasError;
     var badgeClass = "waiting";
     if (string.Equals(Model.LastStatus, "Available", StringComparison.OrdinalIgnoreCase)) badgeClass = "available";
-    if (string.Equals(Model.LastStatus, "Offline", StringComparison.OrdinalIgnoreCase)) badgeClass = "error";
+    if (string.Equals(Model.LastStatus, "Offline", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Model.LastStatus, "Unavailable", StringComparison.OrdinalIgnoreCase)) badgeClass = "error";
     if (string.Equals(Model.LastStatus, "Occupied", StringComparison.OrdinalIgnoreCase))
     {
         badgeClass = "charging";
@@ -41,7 +42,8 @@
             return "available";
         }
 
-        if (string.Equals(status, "Offline", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(status, "Offline", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Unavailable", StringComparison.OrdinalIgnoreCase))
         {
             return "error";
         }

@@ -242,6 +242,7 @@ Moving Saferpay from the test environment to live is the same kind of switch: te
 - The middleware is large and would benefit from careful extraction only with strong tests.
 - Public appsettings contain development/sample values that look secret-like; do not treat them as deployable secrets.
 - Charger-side reservation profile behavior is disabled in code while related option naming remains.
+- Start checks ignore a persisted non-startable connector status after 10 minutes without a live status, except `Unavailable`, which `ChangeAvailability` keeps across charger reboots. If a charger becomes available while the server cannot receive its `StatusNotification` and does not repeat it after reconnecting, the connector stays blocked until the charger reports a new status; a charger reset normally triggers that report.
 - SQL scripts and EF migrations may represent overlapping database history; authoritative use is Unknown / verify.
 
 ## Recommended Future Cleanup

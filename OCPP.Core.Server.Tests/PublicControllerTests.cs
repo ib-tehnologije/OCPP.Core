@@ -976,6 +976,68 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task Start_UnavailableConnector_IsShownOutOfServiceAndNotSelectedByDefault()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-start-unavailable-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-OUT-OF-SERVICE", "Out of service test");
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-OUT-OF-SERVICE",
+                            ConnectorId = 1,
+                            LastStatus = "Unavailable",
+                            LastStatusTime = DateTime.UtcNow
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "CP-OUT-OF-SERVICE",
+                            ConnectorId = 2,
+                            LastStatus = "Available",
+                            LastStatusTime = DateTime.UtcNow
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var explicitResult = await controller.Start("CP-OUT-OF-SERVICE", 1);
+                var explicitModel = Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(explicitResult).Model);
+                Assert.Equal("Unavailable", explicitModel.LastStatus);
+                Assert.Equal("This connector is out of service. Please choose another connector.", explicitModel.AvailabilityMessage);
+
+                var defaultResult = await controller.Start("CP-OUT-OF-SERVICE", null);
+                var defaultModel = Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(defaultResult).Model);
+                Assert.Equal(2, defaultModel.ConnectorId);
+                Assert.Equal("Available", defaultModel.LastStatus);
+
+                var mapResult = await controller.Map();
+                var mapModel = Assert.IsType<PublicMapViewModel>(Assert.IsType<ViewResult>(mapResult).Model);
+                var chargePoint = Assert.Single(mapModel.ChargePoints);
+                Assert.Equal("Available", chargePoint.Status);
+                Assert.Equal(1, chargePoint.AvailableConnectorCount);
+                Assert.Equal(1, chargePoint.OfflineConnectorCount);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("LiveStatus:Unavailable")]
+        [InlineData("PersistedStatus:Unavailable")]
+        public void BuildBusyMessage_MapsUnavailableToOutOfServiceMessage(string reason)
+        {
+            Assert.Equal("This connector is out of service. Please choose another connector.", InvokeBuildBusyMessage(reason));
+        }
+
         [Theory]
         [InlineData("Unknown")]
         [InlineData("Undefined")]

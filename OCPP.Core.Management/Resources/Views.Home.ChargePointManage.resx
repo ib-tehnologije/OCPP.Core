@@ -160,4 +160,16 @@
   <data name="SessionExpired" xml:space="preserve">
     <value>Your session expired. Reload the page and sign in again.</value>
   </data>
+  <data name="SetInoperative" xml:space="preserve">
+    <value>Out of service</value>
+  </data>
+  <data name="SetOperative" xml:space="preserve">
+    <value>Back in service</value>
+  </data>
+  <data name="SetInoperativeConfirm" xml:space="preserve">
+    <value>Take the selected connector out of service? It stays unavailable, also after a reboot, until you put it back in service.</value>
+  </data>
+  <data name="SetOperativeConfirm" xml:space="preserve">
+    <value>Put the selected connector back in service?</value>
+  </data>
 </root>
