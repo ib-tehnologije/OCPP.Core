@@ -121,6 +121,10 @@
                 <button type="button" class="btn btn-outline-secondary" onclick="setLimit()"><i class="fas fa-sliders-h"></i> @Localizer["SetLimit"]</button>
                 <button type="button" class="btn btn-outline-secondary" onclick="clearLimit()"><i class="fas fa-eraser"></i> @Localizer["ClearLimit"]</button>
             </div>
+            <div class="btn-group mr-2 mb-2" role="group">
+                <button type="button" class="btn btn-outline-danger" onclick="changeAvailability('Inoperative')"><i class="fas fa-ban"></i> @Localizer["SetInoperative"]</button>
+                <button type="button" class="btn btn-outline-success" onclick="changeAvailability('Operative')"><i class="fas fa-check"></i> @Localizer["SetOperative"]</button>
+            </div>
         </div>
 
         <div id="actionResult" class="small text-monospace text-muted"></div>
@@ -382,6 +386,17 @@
         function clearLimit() {
             setActionMessage('@Localizer["Working"]');
             callApi('@Html.Raw(Url.Content("~/API/ClearChargingLimit/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()), function (resp) {
+                setActionMessage(resp);
+            });
+        }
+
+        function changeAvailability(type) {
+            const confirmText = type === 'Operative' ? '@Localizer["SetOperativeConfirm"]' : '@Localizer["SetInoperativeConfirm"]';
+            if (!window.confirm(confirmText)) {
+                return;
+            }
+            setActionMessage('@Localizer["Working"]');
+            callApi('@Html.Raw(Url.Content("~/API/ChangeAvailability/"))' + encodeURIComponent(chargePointId) + '/' + encodeURIComponent(currentConnector()) + '/' + encodeURIComponent(type), function (resp) {
                 setActionMessage(resp);
             });
         }

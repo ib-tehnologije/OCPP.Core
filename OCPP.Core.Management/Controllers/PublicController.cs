@@ -702,6 +702,11 @@ namespace OCPP.Core.Management.Controllers
                 return "Available";
             }
 
+            if (IsUnavailableStatus(effectiveRawStatus))
+            {
+                return "Unavailable";
+            }
+
             if (IsOfflineLikeStatus(effectiveRawStatus))
             {
                 return "Offline";
@@ -728,6 +733,11 @@ namespace OCPP.Core.Management.Controllers
             if (string.Equals(effectiveStatus, "Offline", StringComparison.OrdinalIgnoreCase))
             {
                 return "This connector is currently offline. Please try again later or choose another connector.";
+            }
+
+            if (IsUnavailableStatus(effectiveStatus))
+            {
+                return ConnectorOutOfServiceMessage;
             }
 
             return null;
@@ -804,11 +814,15 @@ namespace OCPP.Core.Management.Controllers
                 ?? connectorStates[0].ConnectorId;
         }
 
+        private static bool IsUnavailableStatus(string status)
+        {
+            return string.Equals(NormalizeConnectorStatus(status), "Unavailable", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool IsOfflineLikeStatus(string status)
         {
             string normalizedStatus = NormalizeConnectorStatus(status);
             return string.Equals(normalizedStatus, "Faulted", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalizedStatus, "Unavailable", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalizedStatus, "Unknown", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalizedStatus, "Undefined", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalizedStatus, "Offline", StringComparison.OrdinalIgnoreCase);
@@ -1122,6 +1136,8 @@ namespace OCPP.Core.Management.Controllers
             return null;
         }
 
+        private const string ConnectorOutOfServiceMessage = "This connector is out of service. Please choose another connector.";
+
         private static string BuildBusyMessage(string reason)
         {
             if (string.Equals(reason, "ActiveReservation", StringComparison.OrdinalIgnoreCase))
@@ -1145,8 +1161,12 @@ namespace OCPP.Core.Management.Controllers
             }
 
             if (string.Equals(reason, "LiveStatus:Unavailable", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(reason, "LiveStatus:Faulted", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(reason, "PersistedStatus:Unavailable", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reason, "PersistedStatus:Unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                return ConnectorOutOfServiceMessage;
+            }
+
+            if (string.Equals(reason, "LiveStatus:Faulted", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(reason, "PersistedStatus:Faulted", StringComparison.OrdinalIgnoreCase))
             {
                 return "This connector is not ready right now. Please choose another connector.";

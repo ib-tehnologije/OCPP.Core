@@ -36,6 +36,7 @@ Known API areas:
 - `/API/Status`
 - `GET /API/Reset/{chargePointId}/{mode?}`
 - `/API/UnlockConnector/{chargePointId}/{connectorId}`
+- `GET /API/ChangeAvailability/{chargePointId}/{connectorId}/{type}`
 - `/API/SetChargingProfile/{chargePointId}/{connectorId}/{limit}`
 - `/API/ClearChargingProfile/{chargePointId}/{connectorId}`
 - `/API/GetConfiguration/{chargePointId}/{key}`
@@ -51,6 +52,8 @@ Known behavior:
 - `POST /API/Payments/Confirm` requires `ReservationId`. `CheckoutSessionId` may be null for providers that append nothing to the return URL (Saferpay); Stripe still requires it and it must match.
 - `ChangeConfiguration` takes `{value}` as one URL-encoded path segment and decodes it exactly once from the raw request target, so values containing `/` (for example network-profile blobs with `wss://` URLs) reach the charge point intact. Encode the whole value with `encodeURIComponent`/`Uri.EscapeDataString`; an unencoded `/` splits the route.
 - Remote commands are dispatched to protocol-specific methods based on the connected charge point protocol.
+- `ChangeAvailability` takes `{type}` = `Inoperative` or `Operative` (case-insensitive). `{connectorId}` `0` addresses the whole charge point, a value above `0` one connector (OCPP 2.x: the EVSE with that id; `0` omits `evse`). An invalid connector returns HTTP 400 `InvalidConnectorId`, an invalid type `InvalidAvailabilityType`; an offline charge point returns 404. Otherwise the body is `{"status": ...}` with the charger's `Accepted`, `Rejected` or `Scheduled` (takes effect after the running session ends), or `Timeout` when the charger did not answer in time, in which case the change may still have been applied.
+- An accepted `ChangeAvailability` does not change the connector status by itself. The status changes when the charger sends `StatusNotification`, and the charger keeps `Unavailable` across reboots until `Operative` is sent. The server only stores connector-level notifications: a charger that reports a whole-station change only on connector `0` blocks starts on the charger, but the portal keeps showing the last connector statuses.
 - Reset accepts `Hard` and `Soft` modes (case-insensitive). An unsupported mode returns HTTP 400.
 - Omitting `mode` preserves the compatibility reset: OCPP 1.6 receives `Soft`; OCPP 2.x receives `OnIdle`. `Hard` selects a full reset and `Soft` selects the compatibility-safe reset for each protocol.
 
@@ -74,6 +77,7 @@ Known behavior:
 - Charge point, connector, charge tag, owner, transaction, and report views.
 - Remote start, stop, reset, unlock, charging profile, and configuration actions by calling the server API.
 - CSV and XLSX export paths for charge and owner reports.
+- Charge point page: "Out of service" and "Back in service" buttons send `ChangeAvailability` for the selected connector, after a confirmation. They are limited to administrators like the other remote commands; the whole-station form (connector `0`) is API-only.
 - Public portal settings editor.
 - Reverse proxy forwarded headers are trusted so generated URLs can respect public HTTPS/proxy headers.
 
@@ -98,6 +102,7 @@ Known behavior:
 - Anonymous public map and start pages.
 - Routes include `cp/{cp}` and `cp/{cp}/{conn:int}`.
 - Connector selection, busy/offline handling, and recovery cookie handling.
+- A connector the charger reports as `Unavailable` (for example after `ChangeAvailability` `Inoperative`) is shown as out of service on the start page instead of offline, with a message to choose another connector. It counts toward the map's offline connectors, and the station stays available on the map while another connector is available. Server-side start checks reject it.
 - Public availability exposes only genuine `Available` connector state. A `Preparing` connector (vehicle plugged in, no session yet) is shown on the start page as its own `Preparing` status without the in-use warning, and the map counts it as occupied, never available.
 - On the generic charger URL (`cp/{cp}`), the start page selects the connector that is the only one to have entered `Preparing` in the last 10 minutes; otherwise it selects the first `Available` connector, then the lowest connector. An explicit `cp/{cp}/{conn}` always wins.
 - Connector choices are shown as compact cards side by side (left/right). Each card shows the configured connector name (for example `1A`, `Lijevo`) as a large main label, a small short code without the operator prefix (for example `E5202601*1`) underneath, and the status. The full `HR*...` connector code appears only once, in the header pill for the selected connector. A connector without a configured name falls back to its short code.

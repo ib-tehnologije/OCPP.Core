@@ -177,4 +177,16 @@
   <data name="CancelReservationError" xml:space="preserve">
     <value>Die Reservierung konnte nicht storniert werden.</value>
   </data>
+  <data name="ChangeAvailabilityAccepted" xml:space="preserve">
+    <value>Die Ladestation hat die Änderung der Verfügbarkeit angenommen.</value>
+  </data>
+  <data name="ChangeAvailabilityScheduled" xml:space="preserve">
+    <value>Die Änderung ist geplant: Sie wird wirksam, sobald der laufende Ladevorgang endet.</value>
+  </data>
+  <data name="ChangeAvailabilityRejected" xml:space="preserve">
+    <value>Die Ladestation hat die Änderung der Verfügbarkeit abgelehnt.</value>
+  </data>
+  <data name="ChangeAvailabilityError" xml:space="preserve">
+    <value>Es ist ein Fehler aufgetreten.</value>
+  </data>
 </root>

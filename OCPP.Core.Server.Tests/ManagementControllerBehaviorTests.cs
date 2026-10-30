@@ -372,6 +372,53 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Theory]
+        [InlineData("Accepted", "The charging station has accepted the availability change.")]
+        [InlineData("Scheduled", "The change takes effect after the running session.")]
+        [InlineData("Rejected", "The charging station has rejected the availability change.")]
+        [InlineData("Timeout", "A timeout has occured")]
+        public async Task ChangeAvailability_ForwardsToServerAndMapsChargerStatus(string backendStatus, string expectedResult)
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"change-availability-ui-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.ChargePoints.Add(new ChargePoint { ChargePointId = "CP-AVAIL", Name = "Availability test" });
+                    setupContext.SaveChanges();
+                }
+
+                using var server = TestHttpServer.Start(request =>
+                {
+                    Assert.Equal("GET", request.Method);
+                    Assert.Equal("/ChangeAvailability/CP-AVAIL/1/Inoperative", request.Path);
+                    Assert.Equal("test-api-key", request.Headers["x-api-key"]);
+
+                    return TestHttpResponse.Json($"{{\"status\":\"{backendStatus}\"}}");
+                });
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateApiController(
+                    actionContext,
+                    new Dictionary<string, string?>
+                    {
+                        ["ServerApiUrl"] = server.BaseUri.ToString(),
+                        ["ApiKey"] = "test-api-key"
+                    });
+
+                var result = await controller.ChangeAvailability("CP-AVAIL", 1, "Inoperative");
+                var objectResult = Assert.IsType<ObjectResult>(result);
+
+                Assert.Equal(StatusCodes.Status200OK, objectResult.StatusCode);
+                Assert.Equal(expectedResult, objectResult.Value);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         [Fact]
         public async Task StopTransaction_ReturnsVisibleError_WhenBackendReturnsHtmlLoginPage()
         {
@@ -1125,6 +1172,9 @@ namespace OCPP.Core.Server.Tests
                     ["ResetAccepted"] = "The charging station is being restarted.",
                     ["ResetRejected"] = "The charging station has rejected the request.",
                     ["ResetScheduled"] = "The charging station has scheduled the restart.",
+                    ["ChangeAvailabilityAccepted"] = "The charging station has accepted the availability change.",
+                    ["ChangeAvailabilityScheduled"] = "The change takes effect after the running session.",
+                    ["ChangeAvailabilityRejected"] = "The charging station has rejected the availability change.",
                     ["Timeout"] = "A timeout has occured",
                     ["UnknownChargepoint"] = "Unknown charge point"
                 }),

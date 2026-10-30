@@ -118,6 +118,9 @@ namespace OCPP.Core.Server
                 case "UnlockConnector":
                     HandleUnlockConnector(msgIn, msgOut);
                     break;
+                case "ChangeAvailability":
+                    HandleChangeAvailability(msgIn, msgOut);
+                    break;
                 case "SetChargingProfile":
                     HandleSetChargingProfile(msgIn, msgOut);
                     break;

@@ -380,6 +380,50 @@ namespace OCPP.Core.Server
         }
 
         /// <summary>
+        /// Sends a ChangeAvailability-Request to the chargepoint
+        /// </summary>
+        private async Task ChangeAvailability16(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, int connectorId, bool operative)
+        {
+            ILogger logger = _logFactory.CreateLogger("OCPPMiddleware.OCPP16");
+            ControllerOCPP16 controller16 = new ControllerOCPP16(_configuration, _logFactory, chargePointStatus, dbContext);
+
+            Messages_OCPP16.ChangeAvailabilityRequest changeAvailabilityRequest = new Messages_OCPP16.ChangeAvailabilityRequest
+            {
+                ConnectorId = connectorId,
+                Type = operative ? Messages_OCPP16.ChangeAvailabilityRequestType.Operative : Messages_OCPP16.ChangeAvailabilityRequestType.Inoperative
+            };
+            logger.LogTrace("OCPPMiddleware.OCPP16 => ChangeAvailability16: ChargePoint='{0}' / ConnectorId={1} / Type={2}", chargePointStatus.Id, connectorId, changeAvailabilityRequest.Type);
+
+            OCPPMessage msgOut = new OCPPMessage();
+            msgOut.MessageType = "2";
+            msgOut.Action = "ChangeAvailability";
+            msgOut.UniqueId = Guid.NewGuid().ToString("N");
+            msgOut.JsonPayload = JsonConvert.SerializeObject(changeAvailabilityRequest);
+            msgOut.TaskCompletionSource = new TaskCompletionSource<string>();
+
+            // store HttpContext with MsgId for later answer processing (=> send anwer to API caller)
+            _requestQueue.TryAdd(msgOut.UniqueId, msgOut);
+
+            // Send OCPP message with optional logging/dump
+            await SendOcpp16Message(msgOut, logger, chargePointStatus);
+
+            // Wait for asynchronous chargepoint response and processing
+            string apiResult = "{\"status\": \"Timeout\"}";
+            if (msgOut.TaskCompletionSource.Task.Wait(TimoutWaitForCharger))
+            {
+                apiResult = msgOut.TaskCompletionSource.Task.Result;
+            }
+            else
+            {
+                logger.LogInformation("OCPPMiddleware.OCPP16 => ChangeAvailability16: Timeout (ChargePoint='{0}' / ConnectorId={1})", chargePointStatus.Id, connectorId);
+            }
+
+            apiCallerContext.Response.StatusCode = 200;
+            apiCallerContext.Response.ContentType = "application/json";
+            await apiCallerContext.Response.WriteAsync(apiResult);
+        }
+
+        /// <summary>
         /// Sends a SetChargingProfile-Request to the chargepoint
         /// </summary>
         private async Task SetChargingProfile16(ChargePointStatus chargePointStatus, HttpContext apiCallerContext, OCPPCoreContext dbContext, string urlConnectorId, double power, string unit)

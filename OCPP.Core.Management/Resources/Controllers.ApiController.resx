@@ -177,4 +177,16 @@
   <data name="CancelReservationError" xml:space="preserve">
     <value>The reservation could not be cancelled.</value>
   </data>
+  <data name="ChangeAvailabilityAccepted" xml:space="preserve">
+    <value>The charging station has accepted the availability change.</value>
+  </data>
+  <data name="ChangeAvailabilityScheduled" xml:space="preserve">
+    <value>The change is scheduled: it takes effect when the running charging session ends.</value>
+  </data>
+  <data name="ChangeAvailabilityRejected" xml:space="preserve">
+    <value>The charging station has rejected the availability change.</value>
+  </data>
+  <data name="ChangeAvailabilityError" xml:space="preserve">
+    <value>An error has occurred.</value>
+  </data>
 </root>

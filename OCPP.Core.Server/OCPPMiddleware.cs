@@ -1884,6 +1884,73 @@ namespace OCPP.Core.Server
                             context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                         }
                     }
+                    else if (cmd == "ChangeAvailability")
+                    {
+                        if (!string.IsNullOrEmpty(urlChargePointId))
+                        {
+                            // A wrong connector must not fall back to 0, which would take the whole charge point out of service
+                            if (!TryParseAvailabilityConnectorId(urlConnectorId, out int connectorId))
+                            {
+                                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                                context.Response.ContentType = "application/json";
+                                await context.Response.WriteAsync("{\"status\":\"InvalidConnectorId\"}");
+                                return;
+                            }
+
+                            if (!TryParseAvailabilityType(urlParam, out bool operative))
+                            {
+                                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                                context.Response.ContentType = "application/json";
+                                await context.Response.WriteAsync("{\"status\":\"InvalidAvailabilityType\"}");
+                                return;
+                            }
+
+                            try
+                            {
+                                if (TryResolveLiveChargePointStatus(urlChargePointId, "OCPPMiddleware ChangeAvailability", out var status))
+                                {
+                                    _logger.LogInformation(
+                                        "OCPPMiddleware ChangeAvailability dispatch ChargePointId={ChargePointId} Protocol={Protocol} ConnectorId={ConnectorId} Operative={Operative}",
+                                        status.Id,
+                                        status.Protocol,
+                                        connectorId,
+                                        operative);
+
+                                    // Send message to chargepoint
+                                    if (status.Protocol == Protocol_OCPP21)
+                                    {
+                                        // OCPP V2.1
+                                        await ChangeAvailability21(status, context, dbContext, connectorId, operative);
+                                    }
+                                    else if (status.Protocol == Protocol_OCPP201)
+                                    {
+                                        // OCPP V2.0
+                                        await ChangeAvailability20(status, context, dbContext, connectorId, operative);
+                                    }
+                                    else
+                                    {
+                                        // OCPP V1.6
+                                        await ChangeAvailability16(status, context, dbContext, connectorId, operative);
+                                    }
+                                }
+                                else
+                                {
+                                    // Chargepoint offline
+                                    context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                                }
+                            }
+                            catch (Exception exp)
+                            {
+                                _logger.LogError(exp, "OCPPMiddleware ChangeAvailability => Error: {0}", exp.Message);
+                                context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogError("OCPPMiddleware ChangeAvailability => Missing chargepoint ID");
+                            context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                        }
+                    }
                     else if (cmd == "SetChargingLimit")
                     {
                         if (!string.IsNullOrEmpty(urlChargePointId))
@@ -3204,8 +3271,7 @@ namespace OCPP.Core.Server
 
                     if (!OcppConnectorStatus.IsStartable(persistedStatus.LastStatus))
                     {
-                        bool isStale = persistedStatusAgeMinutes.HasValue &&
-                                       TimeSpan.FromMinutes(persistedStatusAgeMinutes.Value) > PersistedStatusStaleAfter;
+                        bool isStale = IsPersistedStatusStale(persistedStatus.LastStatus, persistedStatusAgeMinutes);
                         if (!isStale && !busy)
                         {
                             busy = true;
@@ -3245,6 +3311,26 @@ namespace OCPP.Core.Server
         private bool IsConnectorBusy(OCPPCoreContext dbContext, string chargePointId, int connectorId, ChargePointStatus chargePointStatus = null, Guid? reservationToIgnore = null)
         {
             return IsConnectorBusy(dbContext, chargePointId, connectorId, chargePointStatus, reservationToIgnore, out _);
+        }
+
+        private static bool TryParseAvailabilityConnectorId(string value, out int connectorId)
+        {
+            return int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out connectorId);
+        }
+
+        private static bool TryParseAvailabilityType(string value, out bool operative)
+        {
+            operative = string.Equals(value, "Operative", StringComparison.OrdinalIgnoreCase);
+            return operative || string.Equals(value, "Inoperative", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // ChangeAvailability's Unavailable survives charger reboots until Operative is sent, and a charger may not repeat it
+        // after reconnecting, so it stays authoritative when other persisted statuses would age out.
+        private static bool IsPersistedStatusStale(string persistedStatus, double? ageMinutes)
+        {
+            return ageMinutes.HasValue &&
+                   ageMinutes.Value > PersistedStatusStaleAfter.TotalMinutes &&
+                   !string.Equals(OcppConnectorStatus.Normalize(persistedStatus), OcppConnectorStatus.Unavailable, StringComparison.OrdinalIgnoreCase);
         }
 
         private class StartabilityResult
@@ -3341,8 +3427,7 @@ namespace OCPP.Core.Server
 
                     if (!OcppConnectorStatus.IsStartable(persistedStatus.LastStatus))
                     {
-                        bool isStale = result.PersistedStatusAgeMinutes.HasValue &&
-                                       result.PersistedStatusAgeMinutes.Value > PersistedStatusStaleAfter.TotalMinutes;
+                        bool isStale = IsPersistedStatusStale(persistedStatus.LastStatus, result.PersistedStatusAgeMinutes);
                         if (!isStale)
                         {
                             result.Reason = $"PersistedStatus:{persistedStatus.LastStatus}";
