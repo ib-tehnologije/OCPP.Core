@@ -74,6 +74,12 @@ Reservations are long-lived: authorization, charging, idle time, capture or rele
 
 ## Unknowns / Verify
 
-- Some Saferpay error names and HTTP statuses have not been checked against the Saferpay test environment, for example when cancelling an already cancelled transaction, and for `TOKEN_INVALID` and `TRANSACTION_NOT_FOUND`. The mock follows the published specification.
-- How long `Transaction/Inquire` lags behind an authorization or capture. While it lags, a capture replay is reported at the requested amount (capped at the authorization) as `CAPTURED_UNVERIFIED`; the reservation completes with `FailureCode=capture_amount_unverified` and no invoice until an operator checks the amount.
+- Checked against the Saferpay test environment (JSON API 1.54, PreAuth, payment page with the address form) by running `SaferpayPaymentGateway` directly:
+  - Initialize with the default methods and the e-mail address form succeeds. The payer sees the card form, then the address form, then returns to the success URL. A payment page URL works only once: reopening it fails.
+  - Assert on a page that was never opened returns `TRANSACTION_NOT_STARTED`, and on an opened but unpaid page `TRANSACTION_IN_WRONG_STATE`; both map to `Open`. An aborted page returns the payer to the same return URL with `TRANSACTION_ABORTED` (`Canceled`). A declined test card returns `TRANSACTION_DECLINED` (`Failed`, with the acquirer message).
+  - Assert on an unknown token returns HTTP 402 `TRANSACTION_NOT_FOUND`, not `TOKEN_INVALID`. The gateway surfaces it as a non-transient error rather than a missing checkout. Stored tokens are always real, so this only matters for forged input.
+  - A partial capture (150 of 450 minor units) returns `CAPTURED` with the captured amount. A replay with the same amount resolves to `CAPTURED`, and the next `Transaction/Inquire` already showed the capture.
+  - Cancelling an authorization returns `CANCELED`, and a second cancel also resolves to `CANCELED`. Cancelling a captured transaction fails with HTTP 402 `ACTION_NOT_SUPPORTED` (non-transient).
+  - Not yet checked: notifications (they need a public `Saferpay:NotifyBaseUrl`), `TOKEN_EXPIRED`, and the 3-D Secure challenge flows.
+- How long `Transaction/Inquire` lags behind an authorization or capture. No lag was seen in the single test-environment run above. While it lags, a capture replay is reported at the requested amount (capped at the authorization) as `CAPTURED_UNVERIFIED`; the reservation completes with `FailureCode=capture_amount_unverified` and no invoice until an operator checks the amount.
 - How long a hold stays valid, and whether pre-authorization is available, depends on the acquirer contract and the merchant category.
