@@ -2,11 +2,11 @@
 //
 // OCPP_E2E_PAYMENT_PROVIDER selects the PSP mock the server uses for NEW checkouts:
 //   - "Stripe" (default, also when unset or empty): the historical Stripe mock setup.
-//   - "Saferpay": Payments:Provider=Saferpay with the in-process Saferpay JSON API mock. The Stripe mock
+//   - "Saferpay": Payments:DefaultProvider=Saferpay with the in-process Saferpay JSON API mock. The Stripe mock
 //     settings stay in place so the Stripe gateway remains registered and configured for reservations
 //     that Stripe created earlier.
 //
-// Both modes pin Payments:Provider and Payments:ReturnBaseUrl explicitly. The harnesses inherit the
+// Both modes pin Payments:DefaultProvider and Payments:ReturnBaseUrl explicitly. The harnesses inherit the
 // developer's environment and run with ASPNETCORE_ENVIRONMENT=Development (user secrets), so a Payments:*
 // or Saferpay:* value set there must not switch the run to another provider or return host.
 //
@@ -66,7 +66,7 @@ export function buildPaymentProviderServerEnv({
 
   if (!isSaferpayProvider(provider)) {
     return {
-      Payments__Provider: STRIPE_PROVIDER,
+      Payments__DefaultProvider: STRIPE_PROVIDER,
       Payments__ReturnBaseUrl: trimTrailingSlash(managementBaseUrl),
       Saferpay__Enabled: "false",
     };
@@ -77,7 +77,7 @@ export function buildPaymentProviderServerEnv({
   }
 
   return {
-    Payments__Provider: SAFERPAY_PROVIDER,
+    Payments__DefaultProvider: SAFERPAY_PROVIDER,
     Payments__ReturnBaseUrl: trimTrailingSlash(managementBaseUrl),
     Saferpay__Enabled: "true",
     Saferpay__UseMockServices: "true",
@@ -87,11 +87,11 @@ export function buildPaymentProviderServerEnv({
 }
 
 /**
- * Extra management-app environment. The management app reads Payments:Provider only to decide whether
+ * Extra management-app environment. The management app reads Payments:DefaultProvider only to decide whether
  * the Stripe webhook-secret admin banner applies. Pinned in both modes, like the server.
  */
 export function buildPaymentProviderManagementEnv({ provider = resolvePaymentProvider() } = {}) {
-  return { Payments__Provider: isSaferpayProvider(provider) ? SAFERPAY_PROVIDER : STRIPE_PROVIDER };
+  return { Payments__DefaultProvider: isSaferpayProvider(provider) ? SAFERPAY_PROVIDER : STRIPE_PROVIDER };
 }
 
 /**

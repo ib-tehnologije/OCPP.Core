@@ -2,11 +2,16 @@
 @using System.Linq
 @model ChargePointViewModel
 @inject IViewLocalizer Localizer
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
 @{
     ViewData["Title"] = @Localizer["Title"];
     var selectedOwner = Model?.Owners?.FirstOrDefault(o => o.OwnerId == Model.OwnerId);
     var ownerDisplay = (selectedOwner != null && !string.IsNullOrWhiteSpace(selectedOwner.Email)) ? $"{selectedOwner.Name} ({selectedOwner.Email})" : selectedOwner?.Name;
     var ownerEmail = selectedOwner?.Email;
+    var defaultPaymentProvider = OCPP.Core.Management.Helpers.PaymentProviderConfiguration.DisplayName(
+        OCPP.Core.Management.Helpers.PaymentProviderConfiguration.GetConfiguredProvider(Config));
+    var unknownPaymentProvider = !string.IsNullOrWhiteSpace(Model?.PaymentProvider) &&
+        !OCPP.Core.Management.Helpers.PaymentProviderConfiguration.TryNormalizeChargePointProvider(Model.PaymentProvider, out _);
 }
 <br />
 
@@ -182,6 +187,30 @@
                     <div class="form-group form-check">
                         <input type="checkbox" class="form-check-input" id="FreeChargingEnabled" name="FreeChargingEnabled" value="true" @(Model.FreeChargingEnabled ? "checked" : "") />
                         <input type="hidden" name="FreeChargingEnabled" value="false" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
+                        <label class="inline-label" for="PaymentProvider">@Localizer["PaymentProviderLabel"]</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <select class="form-control" id="PaymentProvider" name="PaymentProvider">
+                            <option value="" selected="@string.IsNullOrWhiteSpace(Model.PaymentProvider)">@string.Format(Localizer["PaymentProviderDefaultOption"].Value, defaultPaymentProvider)</option>
+                            @foreach (var provider in OCPP.Core.Management.Helpers.PaymentProviderConfiguration.ChargePointProviders)
+                            {
+                                <option value="@provider" selected="@string.Equals(Model.PaymentProvider, provider, StringComparison.OrdinalIgnoreCase)">@OCPP.Core.Management.Helpers.PaymentProviderConfiguration.DisplayName(provider)</option>
+                            }
+                            @if (unknownPaymentProvider)
+                            {
+                                <option value="@Model.PaymentProvider" selected="selected">@Model.PaymentProvider (?)</option>
+                            }
+                        </select>
+                        <small class="form-text text-muted">@Localizer["PaymentProviderHint"]</small>
                     </div>
                 </div>
             </div>

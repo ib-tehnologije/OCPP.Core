@@ -14,13 +14,13 @@ namespace OCPP.Core.Server.Payments
 {
     public interface IPaymentCoordinator
     {
-        /// <summary>True when new checkouts can be created (the active provider is configured).</summary>
+        /// <summary>True when the default provider (<c>Payments:DefaultProvider</c>) is configured.</summary>
         bool IsEnabled { get; }
 
         /// <summary>
-        /// True when existing reservations can still be processed (any registered provider is configured), e.g. a
-        /// previous provider's reservations draining after Payments:Provider changed. Gate existing-reservation
-        /// operations on this, and only new checkouts on <see cref="IsEnabled"/>.
+        /// True when payments can be processed at all (any registered provider is configured): reservations of
+        /// every provider, and new checkouts on charge points whose own provider is configured. Gate payment API
+        /// calls on this; the coordinator checks the provider of each charge point or reservation.
         /// </summary>
         bool IsOperational => IsEnabled;
         PaymentSessionResult CreateCheckoutSession(OCPPCoreContext dbContext, PaymentSessionRequest request);

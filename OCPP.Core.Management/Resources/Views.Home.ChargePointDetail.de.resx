@@ -300,4 +300,13 @@
   <data name="NightTariffWindowLabel" xml:space="preserve">
     <value>Nachtzeitfenster (Ortszeit)</value>
   </data>
+  <data name="PaymentProviderLabel" xml:space="preserve">
+    <value>Zahlungsanbieter</value>
+  </data>
+  <data name="PaymentProviderDefaultOption" xml:space="preserve">
+    <value>Standard ({0})</value>
+  </data>
+  <data name="PaymentProviderHint" xml:space="preserve">
+    <value>Anbieter für neue Online-Zahlungen an diesem Ladepunkt. Bereits gestartete Sitzungen behalten ihren Anbieter. Der OCPP-Server muss den gewählten Anbieter konfiguriert haben, sonst startet er nicht.</value>
+  </data>
 </root>

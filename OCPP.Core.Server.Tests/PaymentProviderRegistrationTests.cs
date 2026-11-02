@@ -36,10 +36,10 @@ namespace OCPP.Core.Server.Tests
             var registry = provider.GetRequiredService<IPaymentGatewayRegistry>();
             var coordinator = provider.GetRequiredService<IPaymentCoordinator>();
 
-            Assert.Equal(PaymentProviderNames.Stripe, settings.ActiveProvider);
-            Assert.Equal(PaymentProviderNames.Stripe, registry.Active.ProviderName);
-            Assert.IsType<StripePaymentGateway>(registry.Active);
-            Assert.Same(registry.Active, registry.Resolve(null));
+            Assert.Equal(PaymentProviderNames.Stripe, settings.DefaultProvider);
+            Assert.Equal(PaymentProviderNames.Stripe, registry.Default.ProviderName);
+            Assert.IsType<StripePaymentGateway>(registry.Default);
+            Assert.Same(registry.Default, registry.Resolve(null));
             Assert.IsType<PaymentCoordinator>(coordinator);
             Assert.False(coordinator.IsEnabled);
             Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(MockStripeStore));
@@ -59,7 +59,7 @@ namespace OCPP.Core.Server.Tests
             using var provider = services.BuildServiceProvider();
 
             Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(MockStripeStore));
-            Assert.Equal(PaymentProviderNames.Stripe, provider.GetRequiredService<IPaymentGatewayRegistry>().Active.ProviderName);
+            Assert.Equal(PaymentProviderNames.Stripe, provider.GetRequiredService<IPaymentGatewayRegistry>().Default.ProviderName);
         }
 
         [Theory]
@@ -82,8 +82,8 @@ namespace OCPP.Core.Server.Tests
             services.AddPaymentProviders(configuration);
             using var provider = services.BuildServiceProvider();
 
-            Assert.Equal(PaymentProviderNames.Stripe, provider.GetRequiredService<PaymentCheckoutSettings>().ActiveProvider);
-            Assert.Equal(PaymentProviderNames.Stripe, provider.GetRequiredService<IPaymentGatewayRegistry>().Active.ProviderName);
+            Assert.Equal(PaymentProviderNames.Stripe, provider.GetRequiredService<PaymentCheckoutSettings>().DefaultProvider);
+            Assert.Equal(PaymentProviderNames.Stripe, provider.GetRequiredService<IPaymentGatewayRegistry>().Default.ProviderName);
             Assert.True(provider.GetRequiredService<IPaymentCoordinator>().IsEnabled);
         }
 
@@ -120,7 +120,7 @@ namespace OCPP.Core.Server.Tests
             services.AddSingleton<IPaymentGateway>(sp => sp.GetRequiredService<StripePaymentGateway>());
             using var provider = services.BuildServiceProvider();
 
-            Assert.Equal(PaymentProviderNames.Saferpay, provider.GetRequiredService<PaymentCheckoutSettings>().ActiveProvider);
+            Assert.Equal(PaymentProviderNames.Saferpay, provider.GetRequiredService<PaymentCheckoutSettings>().DefaultProvider);
             var error = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IPaymentGatewayRegistry>());
             Assert.Contains("Saferpay", error.Message);
             Assert.Contains("no 'Saferpay' payment gateway is registered", error.Message);
@@ -155,7 +155,7 @@ namespace OCPP.Core.Server.Tests
             var warning = Assert.Single(logs.Entries, entry => entry.Level == LogLevel.Warning);
             Assert.Contains("'Saferpay'", warning.Message);
             Assert.Contains("not configured", warning.Message);
-            Assert.Contains("New checkouts are disabled", warning.Message);
+            Assert.Contains("New checkouts on charge points without their own provider are disabled", warning.Message);
             Assert.Contains("Stripe", warning.Message);
         }
 
@@ -216,7 +216,7 @@ namespace OCPP.Core.Server.Tests
             var fake = new FakePaymentGateway("FakePay");
             var registry = new PaymentGatewayRegistry(new IPaymentGateway[] { stripe, fake }, "fakepay");
 
-            Assert.Same(fake, registry.Active);
+            Assert.Same(fake, registry.Default);
             Assert.Same(stripe, registry.Resolve(null));
             Assert.Same(stripe, registry.Resolve(" "));
             Assert.Same(stripe, registry.Resolve("STRIPE"));

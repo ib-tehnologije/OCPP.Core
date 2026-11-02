@@ -125,7 +125,7 @@ The E2E harnesses use mock Stripe by default. Set `OCPP_E2E_PAYMENT_PROVIDER=Saf
 
 ## Payment Providers
 
-Public charging pre-authorizes a maximum amount through a payment provider, then captures the final amount or releases the hold. Stripe is the default. Set `Payments:Provider=Saferpay` on the server, plus the `Saferpay:*` settings, to use Worldline Saferpay for new checkouts. Existing reservations keep the provider that created them. Supply provider credentials through user secrets or environment variables, never through committed `appsettings.json`. See [Operations](docs/operations.md#payment-providers) for configuration, webhook endpoints, and test-account setup, and [Maintenance](docs/maintenance.md#switching-payment-providers) for switching providers safely.
+Public charging pre-authorizes a maximum amount through a payment provider, then captures the final amount or releases the hold. Stripe and Worldline Saferpay can run side by side. `Payments:DefaultProvider` on the server (Stripe by default) serves charge points without their own setting; an administrator can set a single charge point to Stripe or Worldline Saferpay on its edit page. Configure the `Saferpay:*` settings for any charge point that uses Saferpay. Each reservation keeps the provider that created it, even if the charge point is switched later. Supply provider credentials through user secrets or environment variables, never through committed `appsettings.json`. See [Operations](docs/operations.md#payment-providers) for configuration, webhook endpoints, and test-account setup, and [Maintenance](docs/maintenance.md#switching-payment-providers) for switching providers safely.
 
 ## Database Notes
 
@@ -170,3 +170,4 @@ Private/internal project context, if any, is maintained outside this public repo
 - [Maintenance](docs/maintenance.md)
 - [Current architecture ADR](docs/decisions/0001-current-architecture.md)
 - [Pluggable payment providers ADR](docs/decisions/0005-pluggable-payment-providers.md)
+- [Payment provider per charge point ADR](docs/decisions/0006-payment-provider-per-charge-point.md)

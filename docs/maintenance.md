@@ -109,7 +109,7 @@ Also inspect the generated migration and model snapshot manually for provider-sp
 
 ## Switching Payment Providers
 
-`Payments:Provider` selects the payment provider for new checkouts only. Each reservation stays with the provider recorded in `ChargePaymentReservation.PaymentProvider`. Configuration keys are described in [Operations](operations.md#payment-providers), and the design in [ADR 0005](decisions/0005-pluggable-payment-providers.md).
+`Payments:DefaultProvider` (legacy `Payments:Provider`) and the per-charge-point `ChargePoint.PaymentProvider` select the payment provider for new checkouts only. Each reservation stays with the provider recorded in `ChargePaymentReservation.PaymentProvider`. Configuration keys are described in [Operations](operations.md#payment-providers), and the design in [ADR 0005](decisions/0005-pluggable-payment-providers.md).
 
 ### Upgrade to provider tracking
 
@@ -126,7 +126,7 @@ Behaviour changes that also affect Stripe-only deployments:
   - Webhooks start charging only for reservations that the server verified with Stripe. Before, the start could follow from the raw webhook body.
   - The webhook is answered before charging starts. The server sets the status code and completes the response, then runs the auto-start, so Stripe gets its `2xx` at once instead of after up to `Payments:ChargerResponseTimeoutMs`.
   - Signed Stripe deliveries to a suffixed webhook path, such as `/API/Payments/Webhook/prod`, still work through the legacy route and log a deprecation warning (see step 3).
-  - Payment API actions on existing reservations (`Confirm`, `Resume`, `Cancel`, `Stop`, `RequestR1` and `Status`) answer `Disabled` only when no registered provider is configured (`IPaymentCoordinator.IsOperational`). Only `Create` needs the active provider (`IsEnabled`). The idle-fee warning sweep and explicit financial recovery use the same operational gate. With only Stripe configured both gates are equal, so this changes nothing until a second provider is configured.
+  - Payment API actions on existing reservations (`Confirm`, `Resume`, `Cancel`, `Stop`, `RequestR1` and `Status`) answer `Disabled` only when no registered provider is configured (`IPaymentCoordinator.IsOperational`). `Create` passes the same gate and then needs the charge point's own provider (see [Per-charge-point providers](#per-charge-point-providers)). The idle-fee warning sweep and explicit financial recovery use the same operational gate. With only Stripe configured both gates are equal, so this changes nothing until a second provider is configured.
   - The webhook auto-start, the browser return and `Payments/Resume` share one start rule: only an `Authorized` reservation with no start under way is started (see [Operations](operations.md#starting-charging-after-payment)). A skipped start answers with the reservation status and a `reason`. A repeated or parallel return, or a webhook racing the return, no longer sends a second remote start. Before, Confirm always tried to start, and a rejected duplicate could set `StartRejected` and cancel the PaymentIntent of a session that was charging.
   - `Payments/Resume` answering `Status` for an `Authorized` reservation with no start under way now sends a remote start after the answer. Before, Resume never started charging.
 - **Late PaymentIntents of ended reservations.**
@@ -168,17 +168,27 @@ Behaviour changes that also affect Stripe-only deployments:
   - Each authorization costs a few more SQL statements: a `ChargeTag` `INSERT` in its own context, the conditional `UPDATE` and a `SELECT` of the tag, plus a `DELETE` of the unused tag when the transition loses.
 - **Tooling and logging.**
   - `/Payments/MockCheckout` (used by the Stripe mock) rejects `successUrl` and `cancelUrl` values that are not relative or absolute `http`/`https` URLs, with HTTP `400`. The mock Stripe URLs are unaffected.
-  - The server logs startup warnings when the active provider is not configured while another one is, and when the return base URL is empty while a provider is configured. Nothing is logged when no provider is configured.
-  - The E2E harnesses in Stripe mode pin `Payments:Provider=Stripe`, `Payments:ReturnBaseUrl` and `Saferpay:Enabled=false` on the server and `Payments:Provider=Stripe` on management. Scenario checkout URLs must carry `session_id` and must not carry `provider=Saferpay`.
+  - The server logs startup warnings when the default provider is not configured while another one is, and when the return base URL is empty while a provider is configured. Nothing is logged when no provider is configured.
+  - The E2E harnesses in Stripe mode pin `Payments:DefaultProvider=Stripe`, `Payments:ReturnBaseUrl` and `Saferpay:Enabled=false` on the server and `Payments:DefaultProvider=Stripe` on management. Scenario checkout URLs must carry `session_id` and must not carry `provider=Saferpay`.
 
-### Switching the active provider
+### Per-charge-point providers
+
+1. Apply migration `AddChargePointPaymentProvider`. It adds a nullable `ChargePoint.PaymentProvider` column; existing charge points stay `NULL` and keep using the default provider. Recreate local SQLite files with `make sqlite-reset`.
+2. Rename any `Payments__Provider` environment variable or `Payments:Provider` setting to `Payments:DefaultProvider` on the server and the management app. The committed server `appsettings.json` sets `Payments:DefaultProvider=Stripe`; a different legacy value next to it stops startup instead of being ignored.
+3. Configure the second provider on the server (for Saferpay: `Saferpay:Enabled=true`, credentials as secrets, `Saferpay:NotifyBaseUrl`) and restart. Keep the default provider configured: it still serves every other charge point.
+4. On the charge point edit page choose the provider (*Default*, *Stripe* or *Worldline Saferpay*) and save. The change applies to the next checkout; no restart is needed.
+5. Start one test session on that charge point and check that the new reservation row has the expected `PaymentProvider`.
+
+Switching a charge point back to *Default* is safe while its sessions are in flight: capture, release, cancel, webhooks and recovery use the provider stored on each reservation. Before disabling a provider on the server, set every charge point that uses it back to *Default*, then wait for its reservations as in the next section; otherwise the startup check refuses to start the server and names the charge points.
+
+### Switching the default provider
 
 1. Configure the new provider section, for example `Saferpay:*`, with credentials supplied as secrets. Set `Payments:ReturnBaseUrl`, `Payments:Currency` and `Payments:ProductName` so they no longer depend on the `Stripe:*` fallbacks.
 2. Make the new provider's webhook or notification route publicly reachable. For Saferpay, set `Saferpay:NotifyBaseUrl` to the public server `/API` base.
-3. Set `Payments:Provider` on the server, and on the management app for the admin banner.
+3. Set `Payments:DefaultProvider` on the server, and on the management app for the *Default* label and the admin banner. Charge points with their own provider are not affected.
 4. Keep the previous provider enabled and its credentials configured, together with its webhook endpoint. For Stripe this means `Stripe:Enabled`, `Stripe:ApiKey` and `Stripe:WebhookSecret`.
-5. Restart the server and the management app. Provider settings are read at startup, and an unknown `Payments:Provider` value stops the server before it accepts requests.
-   - If the selected provider is registered but not configured while another provider is, the server still starts. It logs a warning that names the selected provider, refuses new checkouts (`{"status":"Disabled"}` from `Payments/Create`), and keeps processing existing reservations through their own provider. Fix the configuration and restart.
+5. Restart the server and the management app. Provider settings are read at startup, and an unknown `Payments:DefaultProvider` value, or a charge point override to an unknown or unconfigured provider, stops the server before it accepts requests.
+   - If the default provider is registered but not configured while another provider is, the server still starts. It logs a warning that names the default provider, refuses new checkouts on charge points without their own provider (`{"status":"Disabled","reason":"ProviderUnavailable"}` from `Payments/Create`), and keeps processing existing reservations through their own provider. Fix the configuration and restart.
 6. Start one test session through the public portal and check that the new reservation row has the new `PaymentProvider`.
 7. Wait until the previous provider has no unfinished reservations. Check with SQL (it works on SQL Server and SQLite; replace `Stripe` with the previous provider):
 
@@ -193,7 +203,7 @@ Behaviour changes that also affect Stripe-only deployments:
    ```
 
    Also resolve the previous provider's `ReviewRequired` reservations, and its authorization releases in `ReviewRequired` or `PermanentFailure`. Explicit financial recovery (`OCPP.Core.Recovery`) for those rows also calls the reservation's own provider.
-8. Only then disable the previous provider and remove its credentials and webhook endpoint.
+8. Only then disable the previous provider and remove its credentials and webhook endpoint. First set any charge point that still overrides to it back to *Default*, or the server will not start.
 
 If the previous provider is removed too early, its reservations fail closed. They are never sent to another provider:
 
@@ -216,7 +226,8 @@ Moving Saferpay from the test environment to live is the same kind of switch: te
 - How long a Saferpay hold stays valid depends on the payment method, the acquirer contract and `Saferpay:PreAuth`. Confirm with the acquirer that pre-authorization is enabled for the merchant category.
 - Saferpay notifications have no payload, and the server re-asserts every one of them. The server answers the notification before it starts charging, so a slow charger does not delay the answer past Saferpay's 10-second timeout.
 - When Saferpay payments fail, the server returns message texts that the public portal's translation table does not cover, so payers may see them in English. The refund notice for a payment captured at checkout is translated.
-- The management admin banner reads the management app's own `Payments:Provider` and `Stripe:WebhookSecret`, not the server's.
+- The management admin banner reads the management app's own `Payments:DefaultProvider` and `Stripe:WebhookSecret`, not the server's, and ignores charge point overrides. A Stripe charge point under a Saferpay default gets no missing-webhook-secret banner.
+- The management app does not know which providers the server has configured. Selecting a provider the server lacks makes that charge point answer `Disabled` at once and stops the server at its next restart until the provider is configured or the charge point is set back to *Default*.
 - `MarkTransactionStarted` (linking a `StartTransaction` to its reservation) still writes `Charging` with a plain save. If the start-timeout sweep writes `StartTimeout` and cancels the hold while a late `StartTransaction` that read the reservation as `Authorized` is being processed, the reservation can end `Charging` on a cancelled hold. Its settlement then finds the authorization cancelled and fails the reservation.
 - Conditional status updates exist only on relational providers (SQL Server, SQLite). The EF in-memory provider used by most unit tests falls back to a status check plus `SaveChanges`, so only the SQLite race tests in `PaymentCoordinatorProviderTests.Races.cs` exercise the races.
 - The settlement retry keeps the connector locked (`Charging` or `WaitingForDisconnect`) for up to `Maintenance:SettlementRetryWindowMinutes`. The window is measured from the disconnect, so a settlement recovered long after it (for example an offline charger recovered by the sweep) gets no transient retry and fails with `settlement_retry_exhausted`. There is no per-reservation retry counter. Explicit `recover-settlement` runs are not retried.

@@ -58,6 +58,9 @@ namespace OCPP.Core.Database
         public double? Longitude { get; set; }
         public string LocationDescription { get; set; }
         public int? OwnerId { get; set; }
+        // Payment provider for new public checkouts on this charge point ("Stripe" or "Saferpay").
+        // Null uses Payments:DefaultProvider. Existing reservations keep the provider stored on them.
+        public string PaymentProvider { get; set; }
 
         public virtual Owner Owner { get; set; }
         public virtual ICollection<Transaction> Transactions { get; set; }
