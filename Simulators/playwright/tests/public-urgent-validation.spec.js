@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import {
+  activePaymentProvider,
   findMockStripeArtifactsByReservationId,
+  protocolPresets,
   readLatestInvoiceSubmissionLog,
   runtimeInfo,
   stripeMockSnapshotSkipReason,
@@ -217,6 +219,27 @@ test("public start page renders offline connectors without raw unknown status", 
   await expect(page.locator("#availability-message")).toContainText("currently offline");
   await expect(page.locator(".connector-option.selected")).toContainText("Offline");
   await expect(page.locator("body")).not.toContainText("Unknown");
+});
+
+test("public start asks for the payer e-mail only when Saferpay takes the payment", async ({ page }) => {
+  const target = protocolPresets["1.6"];
+  await page.goto(`/Public/Start?cp=${encodeURIComponent(target.chargePointId)}&conn=${target.connectorId}`);
+
+  if (activePaymentProvider !== "Saferpay") {
+    await expect(page.locator("#payerEmail")).toHaveCount(0);
+    await expect(page.locator("#buyerEmail")).toHaveCount(1);
+    return;
+  }
+
+  // Saferpay's payment page shows card entry only, so the start page collects the required e-mail
+  // and the company invoice reuses it instead of a second e-mail field.
+  await expect(page.locator("#payerEmail")).toBeVisible();
+  await expect(page.locator("#payerEmail")).toHaveAttribute("required", "");
+  await expect(page.locator("#buyerEmail")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Start charging/i }).click();
+  await expect(page).toHaveURL(/\/Public\/Start/);
+  await expect(page.locator("#payerEmail")).toBeFocused();
 });
 
 test("@invoice public start R1 details flow into Stripe metadata and invoice submission", async ({ page }) => {

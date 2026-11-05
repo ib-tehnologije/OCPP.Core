@@ -80,7 +80,7 @@ export async function startPublicSession(page, target, options = {}) {
     if (options.buyerCity !== undefined) {
       await page.locator("#buyerCity").fill(options.buyerCity);
     }
-    if (options.buyerEmail !== undefined) {
+    if (options.buyerEmail !== undefined && (await page.locator("#buyerEmail").count()) > 0) {
       await page.locator("#buyerEmail").fill(options.buyerEmail);
     }
     const taxIdentifier = options.buyerTaxIdentifier ?? options.buyerOib;
@@ -97,6 +97,7 @@ export async function startPublicSession(page, target, options = {}) {
       await page.locator("#buyerDataConfirmed").check();
     }
   }
+  await fillPayerEmailIfRequired(page, options.payerEmail ?? options.buyerEmail);
   await page.getByRole("button", { name: /Start charging/i }).click();
   await page.locator("#mock-pay-now").click();
   await page.waitForURL(/\/Payments\/Status\?/);
@@ -146,4 +147,12 @@ export async function readLatestEmail({ eventName, reservationId }) {
   }
 
   return null;
+}
+
+// Saferpay charge points ask for the payer e-mail on the start page (the R1 invoice reuses it there).
+export async function fillPayerEmailIfRequired(page, email = "driver@example.test") {
+  const payerEmail = page.locator("#payerEmail");
+  if ((await payerEmail.count()) > 0) {
+    await payerEmail.fill(email);
+  }
 }

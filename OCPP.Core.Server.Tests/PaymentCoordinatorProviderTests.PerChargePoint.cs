@@ -132,6 +132,70 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CreateCheckout_StoresPayerEmailAndPassesItToTheProvider()
+        {
+            using var context = CreateContext();
+            AddPricedChargePoint(context, OverrideChargePointId, PaymentProviderNames.Saferpay);
+            var (coordinator, _, saferpay) = TwoProviderCoordinator();
+            var request = CheckoutRequest(OverrideChargePointId);
+            request.PayerEmail = "  payer@example.com ";
+
+            var created = coordinator.CreateCheckoutSession(context, request);
+
+            Assert.Equal("payer@example.com", created.Reservation.PayerEmail);
+            Assert.Equal("payer@example.com", Assert.Single(saferpay.CheckoutRequests).CustomerEmail);
+        }
+
+        [Fact]
+        public void CreateCheckout_PendingR1EmailWinsAsTheProviderCustomerEmail_ButPayerEmailIsStored()
+        {
+            using var context = CreateContext();
+            AddPricedChargePoint(context, OverrideChargePointId, PaymentProviderNames.Saferpay);
+            var (coordinator, _, saferpay) = TwoProviderCoordinator();
+            var request = CheckoutRequest(OverrideChargePointId);
+            request.PayerEmail = "payer@example.com";
+            request.RequestR1Invoice = true;
+            request.BuyerEmail = "billing@example.com";
+
+            var created = coordinator.CreateCheckoutSession(context, request);
+
+            Assert.Equal("payer@example.com", created.Reservation.PayerEmail);
+            Assert.Equal("billing@example.com", created.Reservation.InvoiceBuyerEmail);
+            Assert.Equal("billing@example.com", Assert.Single(saferpay.CheckoutRequests).CustomerEmail);
+        }
+
+        [Theory]
+        [InlineData("not-an-email")]
+        [InlineData("a b@example.com")]
+        public void CreateCheckout_RejectsInvalidPayerEmailBeforeCallingTheProvider(string payerEmail)
+        {
+            using var context = CreateContext();
+            AddPricedChargePoint(context, OverrideChargePointId, PaymentProviderNames.Saferpay);
+            var (coordinator, _, saferpay) = TwoProviderCoordinator();
+            var request = CheckoutRequest(OverrideChargePointId);
+            request.PayerEmail = payerEmail;
+
+            var error = Assert.Throws<InvoiceBuyerValidationException>(() => coordinator.CreateCheckoutSession(context, request));
+
+            Assert.Equal("PayerEmail", error.Field);
+            Assert.Empty(saferpay.CheckoutRequests);
+            Assert.Empty(context.ChargePaymentReservations);
+        }
+
+        [Fact]
+        public void CreateCheckout_WithoutPayerEmailStillWorks()
+        {
+            using var context = CreateContext();
+            AddPricedChargePoint(context, OverrideChargePointId, PaymentProviderNames.Saferpay);
+            var (coordinator, _, saferpay) = TwoProviderCoordinator();
+
+            var created = coordinator.CreateCheckoutSession(context, CheckoutRequest(OverrideChargePointId));
+
+            Assert.Null(created.Reservation.PayerEmail);
+            Assert.Null(Assert.Single(saferpay.CheckoutRequests).CustomerEmail);
+        }
+
+        [Fact]
         public void CreateCheckout_UnconfiguredOverrideFailsClosedWithoutCallingAnyProvider()
         {
             using var context = CreateContext();

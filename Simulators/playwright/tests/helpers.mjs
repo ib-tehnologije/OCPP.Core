@@ -83,6 +83,10 @@ export async function startBrowserScenario(protocol, scenario) {
 
 export async function startPublicSession(page, { chargePointId, connectorId }) {
   await page.goto(`/Public/Start?cp=${encodeURIComponent(chargePointId)}&conn=${connectorId}`);
+  // Saferpay charge points ask for the payer e-mail on the start page.
+  if ((await page.locator("#payerEmail").count()) > 0) {
+    await page.locator("#payerEmail").fill("driver@example.test");
+  }
   await page.locator("form .btn-primary").click();
   await page.locator("#mock-pay-now").click();
   await page.waitForURL(/\/Payments\/Status\?/);

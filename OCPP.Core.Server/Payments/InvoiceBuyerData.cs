@@ -215,6 +215,27 @@ namespace OCPP.Core.Server.Payments
             };
         }
 
+        // Payer e-mail collected before checkout. Same syntax rules as the pending R1 e-mail, reported on field "PayerEmail".
+        public static InvoiceBuyerDataValidationResult ValidatePayerEmail(string email)
+        {
+            var field = Field("PayerEmail", email, 254, true);
+            if (field.Error != null)
+            {
+                return Invalid("InvalidPayerEmail", field.Name, "Enter a valid email address.");
+            }
+            if (!IsValidEmail(field.Value))
+            {
+                return Invalid("InvalidPayerEmail", "PayerEmail", "Enter a valid email address.");
+            }
+
+            return new InvoiceBuyerDataValidationResult
+            {
+                Success = true,
+                Status = "Valid",
+                Data = new InvoiceBuyerData { Email = field.Value }
+            };
+        }
+
         private static (string Name, string Value, string Error) Field(string name, string value, int maxLength, bool required)
         {
             var normalized = Trim(value);
