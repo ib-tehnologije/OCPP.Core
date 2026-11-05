@@ -99,10 +99,12 @@ namespace OCPP.Core.Server.Payments.Providers.Saferpay
         public string Condition { get; set; }
 
         /// <summary>
-        /// Ask the payer for an e-mail address on the payment page so receipts, idle-fee warnings and
-        /// invoices can be delivered (Saferpay, unlike Stripe Checkout, does not collect one by default).
+        /// Show Saferpay's own billing-address form (e-mail mandatory) on the payment page. Off by default: the
+        /// payment page then asks for card details only, and the public start page collects the payer e-mail
+        /// before checkout (<c>PaymentSessionRequest.PayerEmail</c>). Saferpay cannot show an e-mail field on
+        /// its own, so turning this on shows the full address form.
         /// </summary>
-        public bool CollectPayerEmail { get; set; } = true;
+        public bool CollectPayerEmail { get; set; } = false;
 
         public int TimeoutSeconds { get; set; } = 100;
 

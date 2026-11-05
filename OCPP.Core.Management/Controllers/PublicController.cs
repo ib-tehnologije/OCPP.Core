@@ -75,6 +75,7 @@ namespace OCPP.Core.Management.Controllers
             var model = await BuildViewModelAsync(request?.ChargePointId, requestedConnectorId);
             model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
             model.BuyerEmail = request?.BuyerEmail;
+            model.PayerEmail = request?.PayerEmail?.Trim();
 
             if (string.IsNullOrWhiteSpace(model.ChargePointId))
             {
@@ -89,6 +90,12 @@ namespace OCPP.Core.Management.Controllers
                 return View(model);
             }
 
+            if (model.RequiresPayerEmail && !IsPlausibleEmail(model.PayerEmail))
+            {
+                model.ErrorMessage = "Please enter a valid email address.";
+                return View(model);
+            }
+
             var chargeTagId = $"WEB-{Guid.NewGuid():N}";
             model.ChargeTagId = chargeTagId;
 
@@ -99,7 +106,8 @@ namespace OCPP.Core.Management.Controllers
                 chargeTagId = chargeTagId,
                 requestR1Invoice = model.RequestR1Invoice,
                 // Company details are completed on the status page during charging.
-                buyerEmail = model.RequestR1Invoice ? model.BuyerEmail : null,
+                buyerEmail = model.RequestR1Invoice ? (model.RequiresPayerEmail ? model.PayerEmail : model.BuyerEmail) : null,
+                payerEmail = model.RequiresPayerEmail ? model.PayerEmail : null,
                 origin = "public",
                 returnBaseUrl = $"{Request.Scheme}://{Request.Host}"
             });
@@ -274,6 +282,23 @@ namespace OCPP.Core.Management.Controllers
             return vm;
         }
 
+        private static bool IsPlausibleEmail(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length > 254 || value.Any(char.IsWhiteSpace) || !value.Contains('@'))
+            {
+                return false;
+            }
+
+            try
+            {
+                return string.Equals(new System.Net.Mail.MailAddress(value).Address, value, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+        }
+
         private static string FormatMinuteOfDay(int minute)
         {
             minute = ((minute % 1440) + 1440) % 1440;
@@ -323,6 +348,14 @@ namespace OCPP.Core.Management.Controllers
             model.UsageFeeAfterChargingEnds = chargePoint.UsageFeeAfterChargingEnds;
             model.FreeChargingEnabled = chargePoint.FreeChargingEnabled;
             model.MaxUsageFeeBillableMinutes = Math.Max(0, model.MaxUsageFeeMinutes - model.StartUsageFeeAfterMinutes);
+
+            // Saferpay's payment page cannot ask for an e-mail alone, so the start page asks for it (paid sessions only).
+            PaymentProviderConfiguration.TryNormalizeChargePointProvider(chargePoint.PaymentProvider, out var chargePointProvider);
+            string effectiveProvider = chargePointProvider ?? PaymentProviderConfiguration.GetConfiguredProvider(Config);
+            bool isFreeSession = model.FreeChargingEnabled ||
+                                 (model.PricePerKwh <= 0 && model.ConnectorUsageFeePerMinute <= 0 && model.UserSessionFee <= 0);
+            model.RequiresPayerEmail = !isFreeSession &&
+                                       string.Equals(effectiveProvider, PaymentProviderConfiguration.SaferpayProviderName, StringComparison.OrdinalIgnoreCase);
 
             // Approximate max preauthorization similar to backend: energy cap + idle cap + session fee
             decimal energyCap = (decimal)model.MaxSessionKwh *

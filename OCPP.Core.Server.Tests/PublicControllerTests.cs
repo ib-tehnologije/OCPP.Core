@@ -1511,6 +1511,105 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task Start_PostSaferpayChargePoint_RequiresValidPayerEmail()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-payer-email-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-SAFERPAY", "Saferpay test");
+                    setupContext.ChargePoints.Find("CP-SAFERPAY")!.PaymentProvider = "Saferpay";
+                    setupContext.ConnectorStatuses.Add(new ConnectorStatus
+                    {
+                        ChargePointId = "CP-SAFERPAY",
+                        ConnectorId = 1,
+                        LastStatus = "Available",
+                        LastStatusTime = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                var postedBodies = new List<string>();
+                using var server = TestHttpServer.Start(request =>
+                {
+                    if (request.Path == "/API/Status")
+                    {
+                        return TestHttpResponse.Json("[]");
+                    }
+
+                    Assert.Equal("/API/Payments/Create", request.Path);
+                    postedBodies.Add(request.Body ?? string.Empty);
+                    return TestHttpResponse.Json(
+                        "{\"status\":\"Redirect\",\"checkoutUrl\":\"https://checkout.example/sp\",\"reservationId\":\"66666666-6666-6666-6666-666666666666\"}");
+                });
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API"
+                });
+
+                var missing = await controller.Start(new PublicStartViewModel { ChargePointId = "CP-SAFERPAY", ConnectorId = 1 });
+                var invalid = await controller.Start(new PublicStartViewModel { ChargePointId = "CP-SAFERPAY", ConnectorId = 1, PayerEmail = "not-an-email" });
+
+                Assert.True(Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(missing).Model).RequiresPayerEmail);
+                Assert.Equal("Please enter a valid email address.", ((PublicStartViewModel)((ViewResult)missing).Model!).ErrorMessage);
+                Assert.Equal("Please enter a valid email address.", ((PublicStartViewModel)((ViewResult)invalid).Model!).ErrorMessage);
+                Assert.Empty(postedBodies);
+
+                var ok = await controller.Start(new PublicStartViewModel
+                {
+                    ChargePointId = "CP-SAFERPAY",
+                    ConnectorId = 1,
+                    PayerEmail = " driver@example.com ",
+                    RequestR1Invoice = true,
+                    BuyerEmail = "ignored@example.com"
+                });
+
+                Assert.IsType<RedirectResult>(ok);
+                var body = Assert.Single(postedBodies);
+                Assert.Contains("\"payerEmail\":\"driver@example.com\"", body, StringComparison.Ordinal);
+                Assert.Contains("\"buyerEmail\":\"driver@example.com\"", body, StringComparison.Ordinal);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_GetDefaultProviderChargePoint_DoesNotRequirePayerEmail()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-no-payer-email-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "CP-STRIPE", "Stripe test");
+                    setupContext.SaveChanges();
+                }
+
+                using var server = TestHttpServer.Start(_ => TestHttpResponse.Json("[]"));
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext, new Dictionary<string, string?>
+                {
+                    ["ServerApiUrl"] = $"{server.BaseUri}API"
+                });
+
+                var result = await controller.Start("CP-STRIPE");
+
+                var model = Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(result).Model);
+                Assert.False(model.RequiresPayerEmail);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         [Theory]
         [InlineData("StripeError")]
         [InlineData("SaferpayError")]

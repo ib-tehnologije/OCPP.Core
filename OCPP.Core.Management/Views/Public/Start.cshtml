@@ -322,6 +322,15 @@
                         <input type="hidden" name="ChargePointId" value="@Model.ChargePointId" />
                         <input type="hidden" name="ConnectorId" value="@Model.ConnectorId" />
 
+                        @if (Model.RequiresPayerEmail)
+                        {
+                            <div>
+                                <label for="payerEmail" class="field-label" data-i18n="start.payerEmail">Email</label>
+                                <input type="email" class="field-input" id="payerEmail" name="PayerEmail" value="@Model.PayerEmail" required autocomplete="email" maxlength="254" />
+                                <div class="field-help" data-i18n="start.payerEmailHelp">For your receipt and charging notifications.</div>
+                            </div>
+                        }
+
                         <label class="r1-checkbox">
                             <input type="checkbox" id="wantsR1" name="RequestR1Invoice" value="true" @(Model.RequestR1Invoice ? "checked" : "")>
                             <div class="r1-label">
@@ -330,11 +339,14 @@
                             </div>
                         </label>
 
+                        @if (!Model.RequiresPayerEmail)
+                        {
                         <div id="r1Fields" class="r1-fields" @(Model.RequestR1Invoice ? null : "hidden")>
                             <label for="buyerEmail" class="field-label" data-i18n="start.r1Email">Email for the R1 invoice</label>
                             <input type="email" class="field-input" id="buyerEmail" name="BuyerEmail" value="@Model.BuyerEmail" autocomplete="email" maxlength="254" />
                             <div class="field-help" data-i18n="start.r1EmailHelp">We'll email you a link to enter the company details while charging.</div>
                         </div>
+                        }
 
                         <button type="submit" class="btn-primary">
                             <span data-i18n="@(isFree ? "start.startFree" : "start.startCharging")">@(isFree ? "Start free session" : "Start charging")</span>

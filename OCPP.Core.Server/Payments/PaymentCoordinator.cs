@@ -196,6 +196,17 @@ namespace OCPP.Core.Server.Payments
             if (string.IsNullOrWhiteSpace(request.ChargeTagId)) throw new ArgumentException("ChargeTagId is required.", nameof(request));
             cancellationToken.ThrowIfCancellationRequested();
 
+            string payerEmail = null;
+            if (!string.IsNullOrWhiteSpace(request.PayerEmail))
+            {
+                var payerEmailValidation = InvoiceBuyerDataValidator.ValidatePayerEmail(request.PayerEmail);
+                if (!payerEmailValidation.Success)
+                {
+                    throw new InvoiceBuyerValidationException(payerEmailValidation.Status, payerEmailValidation.Field, payerEmailValidation.Error);
+                }
+                payerEmail = payerEmailValidation.Data.Email;
+            }
+
             InvoiceBuyerData invoiceBuyer = null;
             string pendingR1Email = null;
             if (request.RequestR1Invoice && InvoiceBuyerDataValidator.IsEmailOnlyRequest(request))
@@ -321,6 +332,10 @@ namespace OCPP.Core.Server.Payments
             {
                 reservation.InvoiceBuyerEmail = pendingR1Email;
             }
+            if (payerEmail != null)
+            {
+                reservation.PayerEmail = payerEmail;
+            }
 
             _logger.LogInformation(
                 "Payments/CreateCheckout => reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} tag={ChargeTagId} maxTotalCents={MaxTotalCents} currency={Currency} maxEnergyKwh={MaxEnergyKwh} pricePerKwh={PricePerKwh} sessionFee={SessionFee} usageFeePerMin={UsageFeePerMinute} maxUsageMinutes={MaxUsageMinutes}",
@@ -392,7 +407,7 @@ namespace OCPP.Core.Server.Payments
                     : _settings.ProductName,
                 SuccessUrl = successUrl,
                 CancelUrl = cancelUrl,
-                CustomerEmail = pendingR1Email,
+                CustomerEmail = pendingR1Email ?? payerEmail,
                 Metadata = metadata,
                 IdempotencyKey = BuildIdempotencyKey(IdempotencyCheckoutCreate, reservation.ReservationId)
             };

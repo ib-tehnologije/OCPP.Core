@@ -139,11 +139,25 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal("payer@example.com", (string?)json["Payer"]!["BillingAddress"]!["Email"]);
             Assert.Equal(SaferpayTestData.ReturnUrl, (string?)json["ReturnUrl"]!["Url"]);
 
-            Assert.Equal("SAFERPAY", (string?)json["BillingAddressForm"]!["AddressSource"]);
-            Assert.Equal(new[] { "EMAIL" }, json["BillingAddressForm"]!["MandatoryFields"]!.Values<string>());
+            // Card entry only by default: no address form on the payment page.
+            Assert.Null(json["BillingAddressForm"]);
 
             Assert.Null(json["Metadata"]);
             Assert.DoesNotContain("reservation_id", request.Body);
+        }
+
+        [Fact]
+        public void CreateCheckout_SendsBillingAddressForm_WhenCollectPayerEmailIsEnabled()
+        {
+            var handler = new SaferpayRecordingHandler().Enqueue(InitializeResponse().Create());
+            var options = SaferpayTestData.Options(o => o.CollectPayerEmail = true);
+            var gateway = SaferpayTestData.Gateway(handler, options);
+
+            gateway.CreateCheckout(CheckoutRequest());
+
+            var json = handler.LastRequest.Json!;
+            Assert.Equal("SAFERPAY", (string?)json["BillingAddressForm"]!["AddressSource"]);
+            Assert.Equal(new[] { "EMAIL" }, json["BillingAddressForm"]!["MandatoryFields"]!.Values<string>());
         }
 
         [Fact]

@@ -99,6 +99,10 @@ namespace OCPP.Core.Server.Payments
         public string Origin { get; set; }
         public string ReturnBaseUrl { get; set; }
 
+        // Optional payer e-mail collected before checkout (receipts, notifications). Stored on the reservation
+        // and passed to the provider as the customer e-mail.
+        public string PayerEmail { get; set; }
+
         // Optional confirmed buyer info for company invoicing.
         public bool RequestR1Invoice { get; set; }
         public string BuyerCompanyName { get; set; }

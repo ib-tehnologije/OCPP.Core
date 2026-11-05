@@ -18,6 +18,9 @@ namespace OCPP.Core.Management.Models
         public string ChargeTagId { get; set; }
         public bool RequestR1Invoice { get; set; }
         public string BuyerEmail { get; set; }
+        public string PayerEmail { get; set; }
+        // True when the charge point's payment provider has no e-mail field of its own (Saferpay) and the session is paid.
+        public bool RequiresPayerEmail { get; set; }
         public double MaxSessionKwh { get; set; }
         public decimal PricePerKwh { get; set; }
         public bool NightTariffEnabled { get; set; }
