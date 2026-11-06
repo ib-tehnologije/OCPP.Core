@@ -106,6 +106,13 @@ namespace OCPP.Core.Server.Payments.Providers.Saferpay
         /// </summary>
         public bool CollectPayerEmail { get; set; } = false;
 
+        /// <summary>
+        /// Cardholder name field on Saferpay's card form (<c>CardForm.HolderName</c>): <c>MANDATORY</c> (default)
+        /// asks for the name, which the gateway reads back as the payer name; <c>NONE</c> hides it. Empty sends
+        /// nothing, so Saferpay's own default (no name field) applies. Wallets are not affected.
+        /// </summary>
+        public string CardHolderName { get; set; } = "MANDATORY";
+
         public int TimeoutSeconds { get; set; } = 100;
 
         /// <summary>

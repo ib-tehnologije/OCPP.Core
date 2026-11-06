@@ -202,6 +202,13 @@ namespace OCPP.Core.Server.Payments.Providers.Saferpay
                 };
             }
 
+            if (!string.IsNullOrWhiteSpace(_options.CardHolderName))
+            {
+                // Card entry has no name otherwise (the address form is off), so ask for the holder name;
+                // ReadPayerName falls back to PaymentMeans.Card.HolderName.
+                payload["CardForm"] = new JObject { ["HolderName"] = _options.CardHolderName.Trim().ToUpperInvariant() };
+            }
+
             if (_options.CollectPayerEmail)
             {
                 // Saferpay shows its address form; only the e-mail is mandatory. A Payer.BillingAddress sent

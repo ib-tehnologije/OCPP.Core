@@ -161,6 +161,28 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CreateCheckout_AsksForCardHolderName_ByDefault()
+        {
+            var handler = new SaferpayRecordingHandler().Enqueue(InitializeResponse().Create());
+            var gateway = SaferpayTestData.Gateway(handler);
+
+            gateway.CreateCheckout(CheckoutRequest());
+
+            Assert.Equal("MANDATORY", (string?)handler.LastRequest.Json!["CardForm"]!["HolderName"]);
+        }
+
+        [Fact]
+        public void CreateCheckout_SendsConfiguredCardHolderName_Normalized()
+        {
+            var handler = new SaferpayRecordingHandler().Enqueue(InitializeResponse().Create());
+            var gateway = SaferpayTestData.Gateway(handler, SaferpayTestData.Options(o => o.CardHolderName = " none "));
+
+            gateway.CreateCheckout(CheckoutRequest());
+
+            Assert.Equal("NONE", (string?)handler.LastRequest.Json!["CardForm"]!["HolderName"]);
+        }
+
+        [Fact]
         public void CreateCheckout_SendsSignedNotificationUrls_ThatParseWebhookAccepts()
         {
             var handler = new SaferpayRecordingHandler().Enqueue(InitializeResponse().Create());
@@ -197,6 +219,7 @@ namespace OCPP.Core.Server.Tests
                 o.PreAuth = false;
                 o.NotifyBaseUrl = null;
                 o.CollectPayerEmail = false;
+                o.CardHolderName = "";
             });
             var gateway = SaferpayTestData.Gateway(handler, options);
 
@@ -212,6 +235,7 @@ namespace OCPP.Core.Server.Tests
             Assert.Equal(SaferpayPaymentGateway.DefaultDescription, (string?)json["Payment"]!["Description"]);
             Assert.Null(json["Notification"]);
             Assert.Null(json["BillingAddressForm"]);
+            Assert.Null(json["CardForm"]);
             Assert.Null(json["Payer"]);
             // Without a configured filter only the deferred-capture card brands are offered (never every terminal method).
             Assert.Equal(new[] { "VISA", "MASTERCARD", "MAESTRO" }, json["PaymentMethods"]!.Values<string>());
