@@ -265,6 +265,13 @@ namespace OCPP.Core.Database.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<DateTime?>("TermsAcceptedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("TermsVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<int?>("TransactionId")
                         .HasColumnType("int");
 
@@ -899,7 +906,14 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<bool?>("LightThemeEnabled")
                         .HasColumnType("bit");
 
+                    b.Property<string>("PrivacyUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<bool?>("QrScannerEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("RequireTermsAcceptance")
                         .HasColumnType("bit");
 
                     b.Property<string>("SeoDescription")
@@ -921,6 +935,14 @@ namespace OCPP.Core.Database.Migrations
                     b.Property<string>("Tagline")
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("TermsUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("TermsVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .ValueGeneratedOnAdd()

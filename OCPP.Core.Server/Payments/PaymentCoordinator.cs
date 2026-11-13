@@ -336,6 +336,13 @@ namespace OCPP.Core.Server.Payments
             {
                 reservation.PayerEmail = payerEmail;
             }
+            if (request.TermsAccepted)
+            {
+                reservation.TermsAcceptedAtUtc = now;
+                reservation.TermsVersion = string.IsNullOrWhiteSpace(request.TermsVersion)
+                    ? null
+                    : Truncate(request.TermsVersion.Trim(), 32);
+            }
 
             _logger.LogInformation(
                 "Payments/CreateCheckout => reservation={ReservationId} cp={ChargePointId} connector={ConnectorId} tag={ChargeTagId} maxTotalCents={MaxTotalCents} currency={Currency} maxEnergyKwh={MaxEnergyKwh} pricePerKwh={PricePerKwh} sessionFee={SessionFee} usageFeePerMin={UsageFeePerMinute} maxUsageMinutes={MaxUsageMinutes}",

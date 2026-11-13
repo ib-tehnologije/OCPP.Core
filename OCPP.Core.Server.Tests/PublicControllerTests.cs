@@ -1775,6 +1775,78 @@ namespace OCPP.Core.Server.Tests
             }
         }
 
+        [Fact]
+        public async Task Start_TermsAcceptanceRequired_RejectsPostWithoutAcceptance()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-terms-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                SeedRecoveryChargePoint(databasePath, "CP-TERMS");
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.PublicPortalSettings.Add(new PublicPortalSettings
+                    {
+                        TermsUrl = "/uvjeti.html",
+                        PrivacyUrl = "/privatnost.html",
+                        RequireTermsAcceptance = true,
+                        CreatedAtUtc = DateTime.UtcNow,
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var getModel = Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(await controller.Start("CP-TERMS", 1)).Model);
+                Assert.True(getModel.RequireTermsAcceptance);
+                Assert.Equal("/uvjeti.html", getModel.TermsUrl);
+                Assert.Equal("/privatnost.html", getModel.PrivacyUrl);
+                Assert.True(getModel.HasPrivacyPolicy);
+
+                var result = await controller.Start(new PublicStartViewModel { ChargePointId = "CP-TERMS", ConnectorId = 1, AcceptTerms = false });
+                var model = Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(result).Model);
+                Assert.Equal("Please accept the Terms of Use.", model.ErrorMessage);
+                Assert.Null(model.ChargeTagId);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public async Task Start_TermsAcceptanceEnabledWithoutTermsUrl_IsNotRequired()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-terms-empty-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                SeedRecoveryChargePoint(databasePath, "CP-TERMS-EMPTY");
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    setupContext.PublicPortalSettings.Add(new PublicPortalSettings
+                    {
+                        RequireTermsAcceptance = true,
+                        CreatedAtUtc = DateTime.UtcNow,
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var model = Assert.IsType<PublicStartViewModel>(Assert.IsType<ViewResult>(await controller.Start("CP-TERMS-EMPTY", 1)).Model);
+                Assert.False(model.RequireTermsAcceptance);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
         private static void SeedRecoveryChargePoint(string databasePath, string chargePointId)
         {
             using var setupContext = CreateContext(databasePath);

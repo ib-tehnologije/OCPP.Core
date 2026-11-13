@@ -57,6 +57,10 @@ namespace OCPP.Core.Database
         public string PayerEmail { get; set; }
         /// <summary>Payer name reported by the payment provider at authorization.</summary>
         public string PayerName { get; set; }
+        /// <summary>When the payer accepted the general terms on the public start page (server time). Null when no acceptance was asked.</summary>
+        public DateTime? TermsAcceptedAtUtc { get; set; }
+        /// <summary>Version of the general terms the payer accepted, as configured in the public portal settings.</summary>
+        public string TermsVersion { get; set; }
         public string Status { get; set; }
         public DateTime CreatedAtUtc { get; set; }
         public DateTime UpdatedAtUtc { get; set; }

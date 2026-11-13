@@ -107,6 +107,16 @@ Also inspect the generated migration and model snapshot manually for provider-sp
 - Review package versions periodically for .NET, Hangfire, EF Core, Stripe, Sentry, Azure Identity, ClosedXML, and Playwright.
 - Review the Saferpay JSON API release notes periodically. `Saferpay:SpecVersion` defaults to `1.54`; raise it only after checking the changed request and response fields against `SaferpayPaymentGateway` and its tests.
 
+## Public Terms and Privacy Pages
+
+Some payment acquirers check that the public site shows general terms and a privacy policy, and that the driver accepts the terms before paying.
+
+1. The pages are the static files `OCPP.Core.Management/wwwroot/uvjeti.html` and `privatnost.html`. Replace a file as a whole when the operator sends a new version.
+2. Apply migration `AddPublicPortalTerms`. It adds the nullable columns `TermsUrl`, `PrivacyUrl`, `TermsVersion` and `RequireTermsAcceptance` to `PublicPortalSettings`, and `TermsAcceptedAtUtc` and `TermsVersion` to `ChargePaymentReservation`. Local SQLite files need `make sqlite-reset`.
+3. In the management portal, open the public portal settings as an administrator, set the general terms URL to `/uvjeti.html`, the privacy policy URL to `/privatnost.html` and the terms version (for example the effective date stated in the terms), and turn on "Require drivers to accept the terms before paying" if needed. Then check both pages, the footer links and a start page.
+4. When the operator sends new terms, replace the file and change the terms version in the same deployment, so new acceptances record the new version.
+5. Turning the switch off removes the checkbox. Clearing a URL removes its footer link.
+
 ## Switching Payment Providers
 
 `Payments:DefaultProvider` (legacy `Payments:Provider`) and the per-charge-point `ChargePoint.PaymentProvider` select the payment provider for new checkouts only. Each reservation stays with the provider recorded in `ChargePaymentReservation.PaymentProvider`. Configuration keys are described in [Operations](operations.md#payment-providers), and the design in [ADR 0005](decisions/0005-pluggable-payment-providers.md).

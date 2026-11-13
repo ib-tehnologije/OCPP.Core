@@ -17,5 +17,11 @@ namespace OCPP.Core.Management.Models
         public string FooterLogoUrl { get; set; }
         public bool QrScannerEnabled { get; set; }
         public bool LightThemeEnabled { get; set; }
+        public string TermsUrl { get; set; }
+        public string PrivacyUrl { get; set; }
+        public bool HasTerms => !string.IsNullOrWhiteSpace(TermsUrl);
+        public bool HasPrivacy => !string.IsNullOrWhiteSpace(PrivacyUrl);
+        // The acceptance checkbox only makes sense when there are terms to link to.
+        public bool RequireTermsAcceptance { get; set; }
     }
 }

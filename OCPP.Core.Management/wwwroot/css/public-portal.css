@@ -1601,6 +1601,15 @@ html.public-theme-light {
   color: var(--text-3);
 }
 
+.terms-checkbox .terms-label > span {
+  display: block;
+}
+
+.terms-checkbox .terms-label a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .field-label {
   display: block;
   margin: 14px 0 8px;

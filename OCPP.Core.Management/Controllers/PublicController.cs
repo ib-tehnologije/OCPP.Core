@@ -76,6 +76,7 @@ namespace OCPP.Core.Management.Controllers
             model.RequestR1Invoice = request?.RequestR1Invoice ?? false;
             model.BuyerEmail = request?.BuyerEmail;
             model.PayerEmail = request?.PayerEmail?.Trim();
+            model.AcceptTerms = request?.AcceptTerms ?? false;
 
             if (string.IsNullOrWhiteSpace(model.ChargePointId))
             {
@@ -96,6 +97,12 @@ namespace OCPP.Core.Management.Controllers
                 return View(model);
             }
 
+            if (model.RequireTermsAcceptance && !model.AcceptTerms)
+            {
+                model.ErrorMessage = "Please accept the Terms of Use.";
+                return View(model);
+            }
+
             var chargeTagId = $"WEB-{Guid.NewGuid():N}";
             model.ChargeTagId = chargeTagId;
 
@@ -108,6 +115,8 @@ namespace OCPP.Core.Management.Controllers
                 // Company details are completed on the status page during charging.
                 buyerEmail = model.RequestR1Invoice ? (model.RequiresPayerEmail ? model.PayerEmail : model.BuyerEmail) : null,
                 payerEmail = model.RequiresPayerEmail ? model.PayerEmail : null,
+                termsAccepted = model.RequireTermsAcceptance && model.AcceptTerms,
+                termsVersion = model.RequireTermsAcceptance && model.AcceptTerms ? model.TermsVersion : null,
                 origin = "public",
                 returnBaseUrl = $"{Request.Scheme}://{Request.Host}"
             });
@@ -313,6 +322,7 @@ namespace OCPP.Core.Management.Controllers
                 ConnectorId = requestedConnectorId.GetValueOrDefault() > 0 ? requestedConnectorId.Value : 1,
                 IdleFeeExcludedWindow = ResolveIdleFeeExcludedWindow()
             };
+            ApplyLegalSettings(model);
             var nowUtc = DateTime.UtcNow;
             var onlineStatuses = await LoadOnlineChargePointStatusesAsync();
 
@@ -581,6 +591,22 @@ namespace OCPP.Core.Management.Controllers
             }
 
             return dictOnlineStatus;
+        }
+
+        private PublicPortalSettings LoadPortalSettings()
+        {
+            return DbContext.PublicPortalSettings
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .FirstOrDefault();
+        }
+
+        private void ApplyLegalSettings(PublicStartViewModel model)
+        {
+            var settings = LoadPortalSettings();
+            model.TermsUrl = string.IsNullOrWhiteSpace(settings?.TermsUrl) ? null : settings.TermsUrl.Trim();
+            model.PrivacyUrl = string.IsNullOrWhiteSpace(settings?.PrivacyUrl) ? null : settings.PrivacyUrl.Trim();
+            model.TermsVersion = string.IsNullOrWhiteSpace(settings?.TermsVersion) ? null : settings.TermsVersion.Trim();
+            model.RequireTermsAcceptance = (settings?.RequireTermsAcceptance ?? false) && model.TermsUrl != null;
         }
 
         private string ResolveIdleFeeExcludedWindow()
