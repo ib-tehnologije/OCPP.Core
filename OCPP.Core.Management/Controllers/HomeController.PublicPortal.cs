@@ -45,6 +45,12 @@ namespace OCPP.Core.Management.Controllers
                 return View("PublicPortal", model);
             }
 
+            if (model.RequireTermsAcceptance && string.IsNullOrWhiteSpace(model.TermsUrl))
+            {
+                ModelState.AddModelError(nameof(model.TermsUrl), "Enter the general terms URL before requiring drivers to accept them.");
+                return View("PublicPortal", model);
+            }
+
             var entity = DbContext.PublicPortalSettings
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .FirstOrDefault();
@@ -75,6 +81,10 @@ namespace OCPP.Core.Management.Controllers
             entity.LightThemeEnabled = model.LightThemeEnabled;
             entity.IdleFeeExcludedWindowEnabled = model.IdleFeeExcludedWindowEnabled;
             entity.IdleFeeExcludedWindow = model.IdleFeeExcludedWindowEnabled ? normalizedIdleWindow : null;
+            entity.TermsUrl = NormalizePublicLinkUrl(model.TermsUrl);
+            entity.PrivacyUrl = NormalizePublicLinkUrl(model.PrivacyUrl);
+            entity.TermsVersion = Normalize(model.TermsVersion);
+            entity.RequireTermsAcceptance = model.RequireTermsAcceptance;
             entity.UpdatedAtUtc = DateTime.UtcNow;
 
             DbContext.SaveChanges();

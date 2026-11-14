@@ -164,6 +164,19 @@
                     }
                 </div>
             }
+            @if (portal.HasTerms || portal.HasPrivacy)
+            {
+                <div class="company-footer-links company-footer-legal">
+                    @if (portal.HasTerms)
+                    {
+                        <a href="@portal.TermsUrl" data-i18n="legal.terms">Terms of Use</a>
+                    }
+                    @if (portal.HasPrivacy)
+                    {
+                        <a href="@portal.PrivacyUrl" data-i18n="legal.privacy">Privacy Policy</a>
+                    }
+                </div>
+            }
         </footer>
     </div>
 

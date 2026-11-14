@@ -103,6 +103,11 @@ namespace OCPP.Core.Server.Payments
         // and passed to the provider as the customer e-mail.
         public string PayerEmail { get; set; }
 
+        // True when the payer ticked the general-terms checkbox on the public start page. The server records
+        // the acceptance time and TermsVersion on the reservation.
+        public bool TermsAccepted { get; set; }
+        public string TermsVersion { get; set; }
+
         // Optional confirmed buyer info for company invoicing.
         public bool RequestR1Invoice { get; set; }
         public string BuyerCompanyName { get; set; }

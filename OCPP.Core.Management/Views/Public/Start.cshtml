@@ -348,7 +348,21 @@
                         </div>
                         }
 
-                        <button type="submit" class="btn-primary">
+                        @if (Model.RequireTermsAcceptance)
+                        {
+                            <label class="r1-checkbox terms-checkbox">
+                                <input type="checkbox" id="acceptTerms" name="AcceptTerms" value="true" required @(Model.AcceptTerms ? "checked" : "")>
+                                <div class="r1-label terms-label">
+                                    <span><span data-i18n="start.acceptTermsBefore">I accept the</span> <a href="@Model.TermsUrl" target="_blank" rel="noopener" data-i18n="start.acceptTermsLink">Terms of Use</a><span data-i18n="start.acceptTermsAfter">.</span></span>
+                                    @if (Model.HasPrivacyPolicy)
+                                    {
+                                        <span><span data-i18n="start.privacyNoticeBefore">I have read the</span> <a href="@Model.PrivacyUrl" target="_blank" rel="noopener" data-i18n="start.privacyNoticeLink">Privacy Policy</a><span data-i18n="start.privacyNoticeAfter">.</span></span>
+                                    }
+                                </div>
+                            </label>
+                        }
+
+                        <button type="submit" class="btn-primary" id="startSubmit" @(Model.RequireTermsAcceptance && !Model.AcceptTerms ? "disabled" : null)>
                             <span data-i18n="@(isFree ? "start.startFree" : "start.startCharging")">@(isFree ? "Start free session" : "Start charging")</span>
                             <span class="arrow" aria-hidden="true">→</span>
                         </button>
@@ -359,6 +373,15 @@
             }
 
             <script>
+                (function () {
+                    const accept = document.getElementById('acceptTerms');
+                    const submit = document.getElementById('startSubmit');
+                    if (!accept || !submit) return;
+                    const sync = () => { submit.disabled = !accept.checked; };
+                    accept.addEventListener('change', sync);
+                    sync();
+                })();
+
                 (function () {
                     const wantsR1 = document.getElementById('wantsR1');
                     const fields = document.getElementById('r1Fields');

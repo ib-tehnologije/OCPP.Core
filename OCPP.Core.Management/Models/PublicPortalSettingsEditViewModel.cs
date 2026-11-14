@@ -71,5 +71,20 @@ namespace OCPP.Core.Management.Models
         [Display(Name = "Non-billing idle window")]
         [StringLength(32)]
         public string IdleFeeExcludedWindow { get; set; }
+
+        [Display(Name = "General terms URL")]
+        [StringLength(500)]
+        public string TermsUrl { get; set; }
+
+        [Display(Name = "Privacy policy URL")]
+        [StringLength(500)]
+        public string PrivacyUrl { get; set; }
+
+        [Display(Name = "General terms version")]
+        [StringLength(32)]
+        public string TermsVersion { get; set; }
+
+        [Display(Name = "Require drivers to accept the terms before paying")]
+        public bool RequireTermsAcceptance { get; set; }
     }
 }

@@ -22,6 +22,62 @@ namespace OCPP.Core.Server.Tests
     public class HomeControllerPublicPortalTests
     {
         [Fact]
+        public void PublicPortal_Post_SavesTermsLinksAndAcceptanceFlag()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"portal-terms-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using var context = CreateContext(databasePath);
+                var controller = CreateController(context);
+
+                var result = controller.PublicPortal(new PublicPortalSettingsEditViewModel
+                {
+                    TermsUrl = "  /uvjeti.html ",
+                    PrivacyUrl = "   ",
+                    TermsVersion = " 2026-11-05 ",
+                    RequireTermsAcceptance = true
+                });
+
+                Assert.IsType<RedirectToActionResult>(result);
+                var saved = Assert.Single(context.PublicPortalSettings);
+                Assert.Equal("/uvjeti.html", saved.TermsUrl);
+                Assert.Null(saved.PrivacyUrl);
+                Assert.Equal("2026-11-05", saved.TermsVersion);
+                Assert.True(saved.RequireTermsAcceptance);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
+        public void PublicPortal_Post_RejectsAcceptanceWithoutTerms()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"portal-terms-missing-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using var context = CreateContext(databasePath);
+                var controller = CreateController(context);
+
+                var result = controller.PublicPortal(new PublicPortalSettingsEditViewModel
+                {
+                    RequireTermsAcceptance = true
+                });
+
+                Assert.IsType<ViewResult>(result);
+                Assert.False(controller.ModelState.IsValid);
+                Assert.Empty(context.PublicPortalSettings);
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public void PublicPortal_Post_SavesTrimmedValuesAndRedirects()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"portal-save-{Guid.NewGuid():N}.sqlite");

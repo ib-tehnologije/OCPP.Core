@@ -127,6 +127,38 @@
                 <span asp-validation-for="IdleFeeExcludedWindow" class="text-danger"></span>
             </div>
 
+            <h5 class="mt-4">Terms and privacy</h5>
+            <p class="text-muted small">
+                Links to the operator's general terms and privacy policy, for example static pages such as <code>/uvjeti.html</code> placed in <code>wwwroot</code>.
+                The public footer and the start page link to them.
+            </p>
+
+            <div class="form-row">
+                <div class="form-group col-md-6">
+                    <label asp-for="TermsUrl"></label>
+                    <input asp-for="TermsUrl" class="form-control" placeholder="/uvjeti.html" />
+                    <span asp-validation-for="TermsUrl" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-6">
+                    <label asp-for="PrivacyUrl"></label>
+                    <input asp-for="PrivacyUrl" class="form-control" placeholder="/privatnost.html" />
+                    <span asp-validation-for="PrivacyUrl" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-group col-md-4 px-0">
+                <label asp-for="TermsVersion"></label>
+                <input asp-for="TermsVersion" class="form-control" placeholder="2026-11-05" />
+                <small class="form-text text-muted">Stored with every acceptance. Change it whenever the terms change, for example to their effective date.</small>
+                <span asp-validation-for="TermsVersion" class="text-danger"></span>
+            </div>
+
+            <div class="form-check mb-3">
+                <input asp-for="RequireTermsAcceptance" class="form-check-input" />
+                <label asp-for="RequireTermsAcceptance" class="form-check-label"></label>
+                <small class="form-text text-muted">The start button stays disabled until the driver ticks the acceptance box. Needs the general terms URL above.</small>
+            </div>
+
             <button type="submit" class="btn btn-primary">Save settings</button>
         </form>
     </div>

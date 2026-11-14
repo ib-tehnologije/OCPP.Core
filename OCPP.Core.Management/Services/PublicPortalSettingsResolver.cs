@@ -49,7 +49,10 @@ namespace OCPP.Core.Management.Services
                 HeaderLogoUrl = Pick(dbSettings?.HeaderLogoUrl, "PublicPortal:HeaderLogoUrl", string.Empty),
                 FooterLogoUrl = Pick(dbSettings?.FooterLogoUrl, "PublicPortal:FooterLogoUrl", string.Empty),
                 QrScannerEnabled = dbSettings?.QrScannerEnabled ?? _configuration.GetValue<bool?>("PublicPortal:QrScannerEnabled") ?? true,
-                LightThemeEnabled = dbSettings?.LightThemeEnabled ?? _configuration.GetValue<bool?>("PublicPortal:LightThemeEnabled") ?? false
+                LightThemeEnabled = dbSettings?.LightThemeEnabled ?? _configuration.GetValue<bool?>("PublicPortal:LightThemeEnabled") ?? false,
+                TermsUrl = NullIfBlank(dbSettings?.TermsUrl),
+                PrivacyUrl = NullIfBlank(dbSettings?.PrivacyUrl),
+                RequireTermsAcceptance = (dbSettings?.RequireTermsAcceptance ?? false) && !string.IsNullOrWhiteSpace(dbSettings?.TermsUrl)
             };
         }
 
@@ -81,8 +84,17 @@ namespace OCPP.Core.Management.Services
                 IdleFeeExcludedWindowEnabled = dbSettings?.IdleFeeExcludedWindowEnabled ?? !string.IsNullOrWhiteSpace(_configuration["Payments:IdleFeeExcludedWindow"]),
                 IdleFeeExcludedWindow = !string.IsNullOrWhiteSpace(dbSettings?.IdleFeeExcludedWindow)
                     ? dbSettings.IdleFeeExcludedWindow
-                    : (_configuration["Payments:IdleFeeExcludedWindow"] ?? string.Empty)
+                    : (_configuration["Payments:IdleFeeExcludedWindow"] ?? string.Empty),
+                TermsUrl = dbSettings?.TermsUrl,
+                PrivacyUrl = dbSettings?.PrivacyUrl,
+                TermsVersion = dbSettings?.TermsVersion,
+                RequireTermsAcceptance = dbSettings?.RequireTermsAcceptance ?? false
             };
+        }
+
+        private static string NullIfBlank(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null : value;
         }
 
         private string Pick(string primaryValue, params string[] fallbacks)

@@ -21,6 +21,13 @@ namespace OCPP.Core.Management.Models
         public string PayerEmail { get; set; }
         // True when the charge point's payment provider has no e-mail field of its own (Saferpay) and the session is paid.
         public bool RequiresPayerEmail { get; set; }
+        // Set by the operator in the portal settings; the driver must tick the box before the start button works.
+        public bool RequireTermsAcceptance { get; set; }
+        public string TermsUrl { get; set; }
+        public string PrivacyUrl { get; set; }
+        public string TermsVersion { get; set; }
+        public bool HasPrivacyPolicy => !string.IsNullOrWhiteSpace(PrivacyUrl);
+        public bool AcceptTerms { get; set; }
         public double MaxSessionKwh { get; set; }
         public decimal PricePerKwh { get; set; }
         public bool NightTariffEnabled { get; set; }

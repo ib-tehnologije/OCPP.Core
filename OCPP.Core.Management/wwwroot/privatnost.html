@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="hr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Politika privatnosti | EVCharge.hr</title>
+<meta name="description" content="Kako EVCharge.hr obrađuje osobne podatke korisnika punionica.">
+<meta name="robots" content="index, follow">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=Playfair+Display:ital,wght@0,500;0,600;1,500&display=swap">
+<style>
+:root{--dark:#1a1a2e;--light:#F3F2EC;--green-on-dark:#2ECC71;--green-on-light:#1E9E58;--navy:#1B2A4A;--muted-ink:#5E6C80;--rule-light:rgba(27,42,74,.14);--wrap:1180px;--gutter:20px;
+--serif:'Playfair Display',Georgia,'Times New Roman',serif;--cond:'Barlow Condensed','Barlow',Arial,sans-serif;--sans:'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif}
+*,*::before,*::after{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--light);color:var(--navy);font-family:var(--sans);font-size:17px;line-height:1.6;overflow-x:hidden}
+a{color:inherit}::selection{background:var(--green-on-light);color:#fff}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 var(--gutter)}
+.skip{position:absolute;left:-9999px}.skip:focus{left:12px;top:12px;background:#fff;padding:8px 12px;z-index:99}
+.btn{display:inline-flex;align-items:center;font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.06em;text-transform:uppercase;text-decoration:none;padding:8px 16px;border-radius:2px;background:var(--green-on-dark);color:#0F2A1C}
+.btn:hover{background:#25b563}
+.top{position:sticky;top:0;z-index:60;background:rgba(26,26,46,.94);backdrop-filter:saturate(140%) blur(8px);border-bottom:1px solid rgba(255,255,255,.1)}
+.top-in{display:flex;align-items:center;justify-content:space-between;gap:16px;height:82px}
+.top-logo img{height:50px;width:auto;display:block}
+@media(max-width:860px){.top-in{height:72px}.top-logo img{height:40px}}
+.hero{background:var(--dark);color:#fff;padding:clamp(48px,7vw,88px) 0 clamp(40px,5vw,64px)}
+.kicker{font-family:var(--cond);font-weight:600;font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:#9AA7BC;margin:0 0 18px;display:flex;align-items:center;gap:12px}
+.kicker::before{content:"";width:28px;height:2px;background:var(--green-on-dark)}
+.hero h1{font-family:var(--serif);font-weight:500;font-size:clamp(32px,5vw,54px);line-height:1.12;margin:0 0 16px;letter-spacing:-.01em}
+.hero h1 em{font-style:italic;color:var(--green-on-dark)}
+.hero p{color:#B7C2D4;max-width:62ch;margin:0;font-size:clamp(16px,1.8vw,19px)}
+.doc{display:grid;grid-template-columns:240px minmax(0,1fr);gap:56px;padding:clamp(40px,6vw,72px) var(--gutter) clamp(56px,8vw,96px)}
+.toc{position:sticky;top:110px;align-self:start;font-size:15px}
+.toc p{font-family:var(--cond);font-weight:600;letter-spacing:.12em;text-transform:uppercase;font-size:13px;color:var(--muted-ink);margin:0 0 10px}
+.toc a{display:block;text-decoration:none;color:var(--muted-ink);padding:5px 0 5px 12px;border-left:2px solid var(--rule-light)}
+.toc a:hover{color:var(--navy);border-left-color:var(--green-on-light)}
+@media(max-width:900px){.doc{grid-template-columns:minmax(0,1fr);gap:24px}.toc{position:static}}
+article{max-width:76ch}
+article h2{font-family:var(--serif);font-weight:500;font-size:clamp(24px,3vw,32px);line-height:1.2;margin:48px 0 16px;scroll-margin-top:110px}
+article h2:first-child{margin-top:0}
+article h2 .n{font-family:var(--cond);font-weight:600;color:var(--green-on-light);margin-right:10px}
+article h3{font-family:var(--cond);font-weight:600;font-size:20px;letter-spacing:.01em;margin:28px 0 6px}
+article p,article li{margin:0 0 12px}
+article ul,article ol{padding-left:22px;margin:0 0 14px}
+article a{color:var(--green-on-light)}
+.meta{font-size:15px;color:var(--muted-ink);border-top:1px solid var(--rule-light);margin-top:48px;padding-top:18px}
+.table-wrap{overflow-x:auto;margin:8px 0 20px;background:#fff;border:1px solid var(--rule-light)}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:15px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--rule-light)}
+th{font-family:var(--cond);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:13px;color:var(--muted-ink);background:#FAFAF7}
+tr:last-child td{border-bottom:0}
+footer{background:var(--dark);color:#fff;padding:56px 0 40px;font-size:15px}
+footer a{color:#fff;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.25)}
+footer a:hover{border-bottom-color:var(--green-on-dark);color:var(--green-on-dark)}
+.foot-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:36px}
+.foot-grid img.flogo{height:62px;width:auto}
+.foot-lab{font-family:var(--cond);font-weight:600;letter-spacing:.12em;text-transform:uppercase;font-size:13px;color:#8E9BB0;margin:0 0 8px}
+.foot-bot{margin-top:40px;padding-top:22px;border-top:1px solid rgba(255,255,255,.13);display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;color:#8E9BB0;font-size:14px}
+@media(max-width:760px){.foot-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<a class="skip" href="#glavno">Preskoči na sadržaj</a>
+<header class="top"><div class="wrap top-in">
+  <a class="top-logo" href="https://info.evcharge.hr/" aria-label="EVCharge.hr — početna"><img src="https://info.evcharge.hr/assets/evcharge-logo-dark-nav.svg" alt="EVCharge.hr" width="211" height="50"></a>
+  <a class="btn" href="https://evcharge.hr" rel="noopener">Natrag na punjenje</a>
+</div></header>
+<section class="hero"><div class="wrap">
+  <p class="kicker">Pravni dokumenti</p>
+  <h1>Politika <em>privatnosti</em></h1>
+  <p>Koje podatke obrađujemo kad punite na EVCharge.hr punionici, zašto i koja prava imate.</p>
+</div></section>
+<main id="glavno" class="wrap doc">
+  <nav class="toc" aria-label="Sadržaj"><p>Sadržaj</p><a href="#voditelj">1. Voditelj obrade</a><a href="#podaci">2. Podaci i svrhe</a><a href="#pozivi">3. Snimanje poziva</a><a href="#primatelji">4. Primatelji</a><a href="#kolacici">5. Kolačići i sigurnost</a><a href="#prava">6. Vaša prava</a><a href="#izmjene">7. Izmjene</a></nav>
+  <article>
+
+<p>Ova Politika objašnjava koje osobne podatke obrađujemo kada koristite punionice EVCharge.hr, internetsku stranicu www.evcharge.hr i korisničku podršku, zašto ih obrađujemo i koja prava imate. Za punjenje bez registracije prikupljamo samo podatke nužne za izvršenje i naplatu usluge. Politika je sastavni dio <a href="uvjeti.html">Općih uvjeta korištenja EVCharge.hr punionica</a>.</p>
+<h2 id="voditelj"><span class="n">1.</span>Voditelj obrade</h2>
+<p>TEHNOLINE TELEKOM d.o.o., Draguzeti 15A, 52207 Barban, OIB 62579761244.</p>
+<ul><li>Upiti o zaštiti podataka: <a href="mailto:gdpr@tehnoline.hr">gdpr@tehnoline.hr</a></li><li>Poslovnica: Bože Gumpca 49, 52100 Pula</li><li>Telefon: <a href="tel:+38552355050">+385 52 355 050</a></li></ul>
+<p>Službenik za zaštitu podataka: Denis Draguzet, <a href="mailto:gdpr@tehnoline.hr">gdpr@tehnoline.hr</a></p>
+<h2 id="podaci"><span class="n">2.</span>Koje podatke obrađujemo i zašto</h2>
+<p>Ne tražimo ime, adresu ni identifikacijski dokument za ad-hoc punjenje. Puni broj platne kartice nikada ne primamo ni ne pohranjujemo; plaćanje obrađuje ovlašteni pružatelj platnih usluga.</p>
+<div class="table-wrap"><table><thead><tr><th>Kategorija</th><th>Podaci</th><th>Svrha</th><th>Pravna osnova (GDPR)</th><th>Rok čuvanja</th></tr></thead><tbody><tr><td>Sesija punjenja</td><td>punionica (EVSE ID), priključak, vrijeme početka i završetka, isporučena energija, iznos</td><td>izvršenje i obračun usluge, rješavanje prigovora</td><td>izvršenje ugovora, čl. 6(1)(b)</td><td>5 godina, odnosno do zastare potraživanja</td></tr><tr><td>Podaci o plaćanju</td><td>vrsta kartice, zadnje 4 znamenke, ID transakcije, iznos predautorizacije i naplate</td><td>naplata, povrat sredstava, sprječavanje prijevara</td><td>izvršenje ugovora; legitimni interes, čl. 6(1)(f)</td><td>kao račun</td></tr><tr><td>Račun</td><td>sadržaj računa; za R1 račun OIB, naziv i adresa tvrtke</td><td>izdavanje i fiskalizacija računa, knjigovodstvo</td><td>zakonska obveza, čl. 6(1)(c)</td><td>11 godina (Zakon o računovodstvu)</td></tr><tr><td>Adresa e-pošte</td><td>e-pošta koju unesete</td><td>slanje računa i poveznice za upravljanje punjenjem</td><td>izvršenje ugovora</td><td>kao račun</td></tr><tr><td>Korisnička podrška</td><td>ime, e-pošta, telefon, sadržaj upita, priložene fotografije</td><td>rješavanje upita, prigovora i prijava štete</td><td>izvršenje ugovora; legitimni interes</td><td>3 godine od zatvaranja predmeta</td></tr><tr><td>Snimke poziva</td><td>broj telefona, snimka i transkript poziva</td><td>v. odjeljak 3.</td><td>legitimni interes</td><td>90 dana</td></tr><tr><td>Tehnički zapisi</td><td>IP adresa, vrsta preglednika, vrijeme pristupa</td><td>sigurnost sustava, otkrivanje zlouporaba</td><td>legitimni interes</td><td>12 mjeseci</td></tr><tr><td>Ugovorni korisnici (RFID)</td><td>ime ili naziv, OIB, kontakt, ID kartice</td><td>izvršenje posebnog ugovora</td><td>izvršenje ugovora</td><td>trajanje ugovora + 11 godina za račune</td></tr></tbody></table></div>
+<p>Podatke ne koristimo za izradu profila ni za automatizirano donošenje odluka.</p>
+<h2 id="pozivi"><span class="n">3.</span>Telefonska podrška i snimanje poziva</h2>
+<p>Pozive na <a href="tel:+38552355050">+385 52 355 050</a> prima digitalni glasovni asistent koji odgovara na pitanja o lokacijama, cijenama i postupku punjenja. Na početku svakog poziva obavještavamo vas da razgovarate s asistentom i da se poziv snima.</p>
+<p>Pozive snimamo i iz njih izrađujemo transkript radi:</p>
+<ul><li>rješavanja vašeg upita i praćenja prijava kvarova,</li><li>dokazivanja sadržaja prijave u slučaju prigovora,</li><li>poboljšanja točnosti odgovora asistenta.</li></ul>
+<p>Ako ne želite da se poziv snima, možete nam se obratiti e-poštom na <a href="mailto:help@evcharge.hr">help@evcharge.hr</a>.</p>
+<h2 id="primatelji"><span class="n">4.</span>Primatelji i izvršitelji obrade</h2>
+<p>Podatke ne prodajemo. Dijelimo ih samo onoliko koliko je potrebno za pružanje usluge, s:</p>
+<ul>
+<li><strong>pružateljem platnih usluga</strong> koji obrađuje kartice i predautorizacije: Worldline;</li>
+<li><strong>pružateljem usluge glasovnog asistenta</strong> za telefonsku podršku, s poslužiteljima u EU;</li>
+<li><strong>vlasnikom partnerske lokacije</strong>: zbirni izvještaji o prometu, bez podataka o pojedinom korisniku;</li>
+<li><strong>roaming partnerima</strong> kod punjenja preko drugog pružatelja: podaci o sesiji potrebni za obračun;</li>
+<li><strong>Poreznom upravom</strong> radi fiskalizacije računa te nadležnim tijelima kad to zakon nalaže.</li>
+</ul>
+<p>S izvršiteljima obrade imamo ugovore prema članku 28. GDPR-a.</p>
+<p><strong>Prijenos izvan EU/EGP-a.</strong> Podatke u pravilu obrađujemo u EU/EGP-u.</p>
+<h2 id="kolacici"><span class="n">5.</span>Kolačići i sigurnost</h2>
+<p><strong>Kolačići.</strong> Stranica za plaćanje koristi samo nužne kolačiće za održavanje sesije punjenja i sigurnost plaćanja; za njih nije potreban pristanak.</p>
+<p><strong>Sigurnost.</strong> Podatke štitimo tehničkim i organizacijskim mjerama na poslužiteljima i mreži TEHNOLINE TELEKOMA d.o.o., čiji je sustav upravljanja informacijskom sigurnošću certificiran prema normi ISO/IEC 27001:2022. Komunikacija sa stranicama zaštićena je enkripcijom (HTTPS), a pristup podacima imaju samo ovlašteni zaposlenici kojima je potreban za rad.</p>
+<h2 id="prava"><span class="n">6.</span>Vaša prava</h2>
+<p>U svakom trenutku možete zatražiti:</p>
+<ul>
+<li><strong>pristup</strong> podacima koje o vama obrađujemo i njihovu presliku;</li>
+<li><strong>ispravak</strong> netočnih podataka;</li>
+<li><strong>brisanje</strong> podataka, osim onih koje moramo čuvati po zakonu (npr. računi);</li>
+<li><strong>ograničenje obrade</strong>;</li>
+<li><strong>prenosivost</strong> podataka koje ste nam dali;</li>
+<li><strong>prigovor</strong> na obradu koja se temelji na legitimnom interesu;</li>
+<li><strong>povlačenje privole</strong>, gdje se obrada temelji na privoli.</li>
+</ul>
+<p>Zahtjev pošaljite na <a href="mailto:gdpr@tehnoline.hr">gdpr@tehnoline.hr</a> ili poštom na adresu voditelja obrade. Radi provjere identiteta možemo zatražiti podatke o sesiji (datum, lokacija, e-pošta korištena pri plaćanju). Odgovaramo u roku od mjesec dana.</p>
+<p>Ako smatrate da obrada nije zakonita, možete podnijeti prigovor Agenciji za zaštitu osobnih podataka (AZOP), Selska cesta 136, 10000 Zagreb, <a href="mailto:azop@azop.hr">azop@azop.hr</a>, <a href="https://azop.hr" rel="noopener">www.azop.hr</a>.</p>
+<h2 id="izmjene"><span class="n">7.</span>Izmjene i stupanje na snagu</h2>
+<p>Politiku možemo mijenjati zbog promjena usluge ili propisa. Važeća verzija uvijek je objavljena na <a href="privatnost.html">www.evcharge.hr/privatnost.html</a>.</p>
+<p class="meta">Ova Politika stupa na snagu 5. studenoga 2026.</p>
+
+  </article>
+</main>
+<footer><div class="wrap">
+  <div class="foot-grid">
+    <div><img class="flogo" src="https://info.evcharge.hr/assets/evcharge-logo-dark.svg" alt="EVCharge.hr — powered by Tehnoline Telekom" width="270" height="62">
+      <p style="margin:16px 0 0;color:#B7C2D4;max-width:38ch">Mreža punionica električnih vozila.</p></div>
+    <div><p class="foot-lab">Stranice</p>
+      <p style="margin:0;line-height:2"><a href="https://info.evcharge.hr/">Za vlasnike lokacija</a><br><a href="https://info.evcharge.hr/help">Upute za punjenje</a><br><a href="https://evcharge.hr" rel="noopener">Portal za punjenje</a><br><a href="https://evcharge.hr/Public/Map" rel="noopener">Karta punionica</a><br><a href="uvjeti.html">Opći uvjeti korištenja</a><br><a href="privatnost.html">Politika privatnosti</a></p></div>
+    <div><p class="foot-lab">Tvrtka</p>
+      <p style="margin:0;line-height:1.8;color:#B7C2D4">Tehnoline Telekom d.o.o.<br>Bože Gumpca 49, 52100 Pula<br>OIB 62579761244<br>CPO oznaka HR*TTK<br><a href="tel:+38552355050">+385 52 355 050</a><br><a href="mailto:ev@evcharge.hr">ev@evcharge.hr</a></p></div>
+  </div>
+  <div class="foot-bot"><span>© 2026 Tehnoline Telekom d.o.o. Sva prava pridržana.</span>
+    <span><img src="https://info.evcharge.hr/assets/iso27001-dnv.png" alt="DNV — ISO/IEC 27001 sustav upravljanja informacijskom sigurnošću" width="58" height="54" loading="lazy"></span></div>
+</div></footer>
+</body>
+</html>

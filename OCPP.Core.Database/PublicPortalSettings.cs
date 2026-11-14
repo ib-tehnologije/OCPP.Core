@@ -22,6 +22,13 @@ namespace OCPP.Core.Database
         public bool? LightThemeEnabled { get; set; }
         public bool? IdleFeeExcludedWindowEnabled { get; set; }
         public string IdleFeeExcludedWindow { get; set; }
+        // Links to the operator's general terms and privacy policy pages (for example static pages under wwwroot).
+        public string TermsUrl { get; set; }
+        public string PrivacyUrl { get; set; }
+        // Version label of the current general terms (for example their effective date), stored with each acceptance.
+        public string TermsVersion { get; set; }
+        // When true and terms exist, the start form requires the driver to accept them before paying.
+        public bool? RequireTermsAcceptance { get; set; }
         public DateTime CreatedAtUtc { get; set; }
         public DateTime UpdatedAtUtc { get; set; }
     }

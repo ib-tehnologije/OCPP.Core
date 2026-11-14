@@ -196,6 +196,37 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void CreateCheckout_RecordsTermsAcceptanceAndVersion()
+        {
+            using var context = CreateContext();
+            AddPricedChargePoint(context, OverrideChargePointId, PaymentProviderNames.Saferpay);
+            var (coordinator, _, _) = TwoProviderCoordinator();
+            var request = CheckoutRequest(OverrideChargePointId);
+            request.TermsAccepted = true;
+            request.TermsVersion = " 2026-11-05 ";
+
+            var created = coordinator.CreateCheckoutSession(context, request);
+
+            Assert.Equal("2026-11-05", created.Reservation.TermsVersion);
+            Assert.Equal(created.Reservation.CreatedAtUtc, created.Reservation.TermsAcceptedAtUtc);
+        }
+
+        [Fact]
+        public void CreateCheckout_WithoutTermsAcceptanceLeavesFieldsEmpty()
+        {
+            using var context = CreateContext();
+            AddPricedChargePoint(context, OverrideChargePointId, PaymentProviderNames.Saferpay);
+            var (coordinator, _, _) = TwoProviderCoordinator();
+            var request = CheckoutRequest(OverrideChargePointId);
+            request.TermsVersion = "2026-11-05";
+
+            var created = coordinator.CreateCheckoutSession(context, request);
+
+            Assert.Null(created.Reservation.TermsAcceptedAtUtc);
+            Assert.Null(created.Reservation.TermsVersion);
+        }
+
+        [Fact]
         public void CreateCheckout_UnconfiguredOverrideFailsClosedWithoutCallingAnyProvider()
         {
             using var context = CreateContext();
