@@ -272,6 +272,8 @@ namespace OCPP.Core.Server
             ocs.CurrentImportA = currentImportA;
             ocs.SoC = stateOfCharge;
 
+            CloseIdleIntervalOnMeterProgress(connectorId, ocs, meterKWH);
+
             if (isNew)
             {
                 TryAddOnlineConnectorStatus(connectorId, ocs, "MeterValues");
@@ -528,13 +530,20 @@ namespace OCPP.Core.Server
             return null;
         }
 
+        /// <summary>
+        /// Meter increase (kWh) since an idle interval opened that confirms the vehicle really
+        /// resumed charging. Smaller changes are treated as a status flap.
+        /// </summary>
+        internal const double IdleResumeMinMeterIncreaseKwh = 0.1;
+
         private void UpdateIdleTrackingForStatusTransition(int connectorId, string previousRawStatus, string newRawStatus, DateTimeOffset? timestamp)
         {
-            bool wasSuspendedEv = OcppConnectorStatus.IsSuspendedEv(previousRawStatus);
-            bool isSuspendedEv = OcppConnectorStatus.IsSuspendedEv(newRawStatus);
+            bool wasIdle = OcppConnectorStatus.IsIdleAfterCharging(previousRawStatus);
+            bool isIdle = OcppConnectorStatus.IsIdleAfterCharging(newRawStatus);
             DateTime effectiveUtc = (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime;
+            OnlineConnectorStatus ocs = TryGetOnlineConnectorStatus(connectorId);
 
-            if (wasSuspendedEv == isSuspendedEv)
+            if (wasIdle == isIdle)
             {
                 return;
             }
@@ -550,31 +559,71 @@ namespace OCPP.Core.Server
 
                 if (transaction == null)
                 {
+                    ClearIdleIntervalMemory(ocs);
                     return;
                 }
 
-                if (isSuspendedEv)
+                if (isIdle)
                 {
+                    if (ocs != null)
+                    {
+                        ocs.IdleResumeCandidateAtUtc = null;
+                    }
+
                     if (!transaction.ChargingEndedAtUtc.HasValue)
                     {
                         transaction.ChargingEndedAtUtc = effectiveUtc;
                         DbContext.SaveChanges();
+                        if (ocs != null)
+                        {
+                            ocs.IdleIntervalMeterKwh = ResolveCurrentMeterKwh(connectorId, ocs);
+                        }
+
                         Logger.LogInformation(
-                            "UpdateIdleTrackingForStatusTransition => Opened idle interval cp={ChargePointId} connector={ConnectorId} tx={TransactionId} at={Timestamp:u}",
+                            "UpdateIdleTrackingForStatusTransition => Opened idle interval cp={ChargePointId} connector={ConnectorId} tx={TransactionId} at={Timestamp:u} status={Status}",
                             transaction.ChargePointId,
                             transaction.ConnectorId,
                             transaction.TransactionId,
-                            transaction.ChargingEndedAtUtc);
+                            transaction.ChargingEndedAtUtc,
+                            newRawStatus);
+                    }
+                    else if (ocs != null && !ocs.IdleIntervalMeterKwh.HasValue)
+                    {
+                        // Interval survived a restart or reconnect: start watching the meter from now.
+                        ocs.IdleIntervalMeterKwh = ResolveCurrentMeterKwh(connectorId, ocs);
                     }
 
                     return;
                 }
 
-                if (transaction.ChargingEndedAtUtc.HasValue)
+                if (!transaction.ChargingEndedAtUtc.HasValue)
                 {
-                    FinalizeIdleTracking(transaction, effectiveUtc);
-                    DbContext.SaveChanges();
+                    ClearIdleIntervalMemory(ocs);
+                    return;
                 }
+
+                if (OcppConnectorStatus.IsCharging(newRawStatus) && IsMeterUnchangedSinceIdleStart(connectorId, ocs))
+                {
+                    // Some chargers flap Charging <-> Finishing while the vehicle draws no energy.
+                    // Keep the idle interval open; MeterValues closes it once the meter really moves.
+                    if (ocs != null && !ocs.IdleResumeCandidateAtUtc.HasValue)
+                    {
+                        ocs.IdleResumeCandidateAtUtc = timestamp ?? DateTimeOffset.UtcNow;
+                    }
+
+                    Logger.LogInformation(
+                        "UpdateIdleTrackingForStatusTransition => Kept idle interval open, meter unchanged cp={ChargePointId} connector={ConnectorId} tx={TransactionId} {PreviousStatus} -> {NewStatus}",
+                        transaction.ChargePointId,
+                        transaction.ConnectorId,
+                        transaction.TransactionId,
+                        previousRawStatus ?? "(none)",
+                        newRawStatus);
+                    return;
+                }
+
+                FinalizeIdleTracking(transaction, effectiveUtc);
+                DbContext.SaveChanges();
+                ClearIdleIntervalMemory(ocs);
             }
             catch (Exception exp)
             {
@@ -584,6 +633,103 @@ namespace OCPP.Core.Server
                     connectorId,
                     previousRawStatus ?? "(none)",
                     newRawStatus ?? "(none)");
+            }
+        }
+
+        /// <summary>
+        /// Closes an idle interval that was kept open over a Charging status once the meter shows
+        /// that the vehicle really resumed charging. The interval ends at the Charging status time.
+        /// </summary>
+        private void CloseIdleIntervalOnMeterProgress(int connectorId, OnlineConnectorStatus ocs, double meterKwh)
+        {
+            if (ocs == null ||
+                !ocs.IdleIntervalMeterKwh.HasValue ||
+                !ocs.IdleResumeCandidateAtUtc.HasValue ||
+                meterKwh < 0 ||
+                meterKwh - ocs.IdleIntervalMeterKwh.Value < IdleResumeMinMeterIncreaseKwh ||
+                !OcppConnectorStatus.IsCharging(ocs.OcppStatus))
+            {
+                return;
+            }
+
+            DateTime resumedAtUtc = ocs.IdleResumeCandidateAtUtc.Value.UtcDateTime;
+            try
+            {
+                var transaction = DbContext.Transactions
+                    .Where(t => t.ChargePointId == ChargePointStatus.Id &&
+                                t.ConnectorId == connectorId &&
+                                !t.StopTime.HasValue)
+                    .OrderByDescending(t => t.TransactionId)
+                    .FirstOrDefault();
+
+                if (transaction?.ChargingEndedAtUtc.HasValue == true &&
+                    transaction.ChargingEndedAtUtc.Value <= resumedAtUtc)
+                {
+                    FinalizeIdleTracking(transaction, resumedAtUtc);
+                    DbContext.SaveChanges();
+                    Logger.LogInformation(
+                        "CloseIdleIntervalOnMeterProgress => Closed idle interval cp={ChargePointId} connector={ConnectorId} tx={TransactionId} resumedAt={ResumedAt:u} meter={Meter}",
+                        transaction.ChargePointId,
+                        transaction.ConnectorId,
+                        transaction.TransactionId,
+                        resumedAtUtc,
+                        meterKwh);
+                }
+
+                ClearIdleIntervalMemory(ocs);
+            }
+            catch (Exception exp)
+            {
+                Logger.LogError(exp,
+                    "CloseIdleIntervalOnMeterProgress => Error closing idle interval for ChargePoint={ChargePointId} Connector={ConnectorId}",
+                    ChargePointStatus?.Id,
+                    connectorId);
+            }
+        }
+
+        private bool IsMeterUnchangedSinceIdleStart(int connectorId, OnlineConnectorStatus ocs)
+        {
+            double? startMeterKwh = ocs?.IdleIntervalMeterKwh;
+            double? currentMeterKwh = ResolveCurrentMeterKwh(connectorId, ocs);
+            if (!startMeterKwh.HasValue || !currentMeterKwh.HasValue)
+            {
+                return false;
+            }
+
+            return currentMeterKwh.Value - startMeterKwh.Value < IdleResumeMinMeterIncreaseKwh;
+        }
+
+        private double? ResolveCurrentMeterKwh(int connectorId, OnlineConnectorStatus ocs)
+        {
+            if (ocs?.MeterKWH.HasValue == true && ocs.MeterKWH.Value >= 0)
+            {
+                return ocs.MeterKWH.Value;
+            }
+
+            var persistedMeter = DbContext.ConnectorStatuses
+                .Where(cs => cs.ChargePointId == ChargePointStatus.Id && cs.ConnectorId == connectorId)
+                .Select(cs => cs.LastMeter)
+                .FirstOrDefault();
+            return persistedMeter.HasValue && persistedMeter.Value >= 0 ? persistedMeter : null;
+        }
+
+        private OnlineConnectorStatus TryGetOnlineConnectorStatus(int connectorId)
+        {
+            if (ChargePointStatus?.OnlineConnectors != null &&
+                ChargePointStatus.OnlineConnectors.TryGetValue(connectorId, out OnlineConnectorStatus ocs))
+            {
+                return ocs;
+            }
+
+            return null;
+        }
+
+        private static void ClearIdleIntervalMemory(OnlineConnectorStatus ocs)
+        {
+            if (ocs != null)
+            {
+                ocs.IdleIntervalMeterKwh = null;
+                ocs.IdleResumeCandidateAtUtc = null;
             }
         }
 
