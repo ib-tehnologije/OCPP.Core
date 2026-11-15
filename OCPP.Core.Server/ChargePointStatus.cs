@@ -136,6 +136,20 @@ namespace OCPP.Core.Server
         /// StateOfCharges in percent
         /// </summary>
         public double? SoC { get; set; }
+
+        /// <summary>
+        /// Meter reading (kWh) when the current idle interval opened. Used to tell a real resume
+        /// of charging from a status flap. In memory only.
+        /// </summary>
+        [JsonIgnore]
+        public double? IdleIntervalMeterKwh { get; set; }
+
+        /// <summary>
+        /// Time of the first Charging status received while an idle interval is open and the meter
+        /// has not moved yet. The interval is closed at this time once the meter confirms the resume.
+        /// </summary>
+        [JsonIgnore]
+        public DateTimeOffset? IdleResumeCandidateAtUtc { get; set; }
     }
 
     public enum ConnectorStatusEnum
