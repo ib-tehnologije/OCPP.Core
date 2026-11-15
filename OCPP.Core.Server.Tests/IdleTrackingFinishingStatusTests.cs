@@ -38,6 +38,34 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public void FinishingJustBeforeStop_WithoutGrace_BillsNoIdleMinutes()
+        {
+            RunWithDatabase((db, chargePointStatus, controller) =>
+            {
+                SendStatus(controller, "Finishing", "2026-03-09T22:00:00.200Z");
+                SendStop(controller, "2026-03-09T22:00:00.500Z");
+
+                db.ChangeTracker.Clear();
+                var transaction = db.Transactions.Find(TransactionId)!;
+                Assert.Equal(0, transaction.IdleUsageFeeMinutes);
+                Assert.Equal(0m, transaction.IdleUsageFeeAmount);
+            }, graceMinutes: 0);
+        }
+
+        [Fact]
+        public void Finishing_WithoutGrace_BillsFromFirstMinute()
+        {
+            RunWithDatabase((db, chargePointStatus, controller) =>
+            {
+                SendStatus(controller, "Finishing", "2026-03-09T22:00:00Z");
+                SendStop(controller, "2026-03-09T22:10:00Z");
+
+                db.ChangeTracker.Clear();
+                Assert.Equal(10, db.Transactions.Find(TransactionId)!.IdleUsageFeeMinutes);
+            }, graceMinutes: 0);
+        }
+
+        [Fact]
         public void ChargingFinishingFlap_WithFrozenMeter_KeepsSingleIdleInterval()
         {
             RunWithDatabase((db, chargePointStatus, controller) =>
@@ -103,7 +131,7 @@ namespace OCPP.Core.Server.Tests
             });
         }
 
-        private static void RunWithDatabase(Action<OCPPCoreContext, ChargePointStatus, ControllerOCPP16> test)
+        private static void RunWithDatabase(Action<OCPPCoreContext, ChargePointStatus, ControllerOCPP16> test, int graceMinutes = 60)
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"ocpp-idle-finishing-{Guid.NewGuid():N}.sqlite");
             try
@@ -130,7 +158,7 @@ namespace OCPP.Core.Server.Tests
                     Status = PaymentReservationStatus.Charging,
                     UsageFeeAnchorMinutes = 1,
                     UsageFeePerMinute = 0.05m,
-                    StartUsageFeeAfterMinutes = 60,
+                    StartUsageFeeAfterMinutes = graceMinutes,
                     MaxUsageFeeMinutes = 360,
                     Currency = "eur",
                     CreatedAtUtc = Utc("2026-03-09T20:47:00Z"),
