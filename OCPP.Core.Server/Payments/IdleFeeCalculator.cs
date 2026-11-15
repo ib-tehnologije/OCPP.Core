@@ -21,6 +21,8 @@ namespace OCPP.Core.Server.Payments
 
     internal static class IdleFeeCalculator
     {
+        internal static readonly TimeSpan MinBillableIdleInterval = TimeSpan.FromMinutes(1);
+
         public static bool IsIdleFeeEnabled(ChargePaymentReservation reservation)
         {
             return reservation != null &&
@@ -137,6 +139,13 @@ namespace OCPP.Core.Server.Payments
             ILogger logger = null)
         {
             if (!IsIdleFeeEnabled(reservation) || intervalEndUtc <= intervalStartUtc)
+            {
+                return 0;
+            }
+
+            // An idle interval shorter than a minute is status noise, for example Finishing sent
+            // just before StopTransaction on a normal stop. Rounding it up would bill a whole minute.
+            if (intervalEndUtc - intervalStartUtc < MinBillableIdleInterval)
             {
                 return 0;
             }
