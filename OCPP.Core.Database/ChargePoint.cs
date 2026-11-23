@@ -62,6 +62,18 @@ namespace OCPP.Core.Database
         // Null uses Payments:DefaultProvider. Existing reservations keep the provider stored on them.
         public string PaymentProvider { get; set; }
 
+        // Identity reported by the charger in BootNotification (null until the first boot that sends it).
+        // OCPP 1.6 can fill all fields; OCPP 2.0.1/2.1 have no charge box serial number or meter fields.
+        public string ChargePointVendor { get; set; }
+        public string ChargePointModel { get; set; }
+        public string ChargePointSerialNumber { get; set; }
+        public string ChargeBoxSerialNumber { get; set; }
+        public string FirmwareVersion { get; set; }
+        public string Iccid { get; set; }
+        public string Imsi { get; set; }
+        public string MeterType { get; set; }
+        public string MeterSerialNumber { get; set; }
+
         public virtual Owner Owner { get; set; }
         public virtual ICollection<Transaction> Transactions { get; set; }
     }

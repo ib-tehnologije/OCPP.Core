@@ -55,6 +55,17 @@ namespace OCPP.Core.Server
                 {
                     // Known charge station => accept
                     bootNotificationResponse.Status = RegistrationStatusEnumType.Accepted;
+
+                    ChargingStationType station = bootNotificationRequest?.ChargingStation;
+                    UpdateChargePointBootIdentity(new Dictionary<string, string>
+                    {
+                        [nameof(ChargePoint.ChargePointVendor)] = station?.VendorName,
+                        [nameof(ChargePoint.ChargePointModel)] = station?.Model,
+                        [nameof(ChargePoint.ChargePointSerialNumber)] = station?.SerialNumber,
+                        [nameof(ChargePoint.FirmwareVersion)] = station?.FirmwareVersion,
+                        [nameof(ChargePoint.Iccid)] = station?.Modem?.Iccid,
+                        [nameof(ChargePoint.Imsi)] = station?.Modem?.Imsi,
+                    });
                 }
                 else
                 {
@@ -71,7 +82,9 @@ namespace OCPP.Core.Server
                 errorCode = ErrorCodes.FormationViolation;
             }
 
-            WriteMessageLog(ChargePointStatus.Id, null, msgIn.Action, bootReason, errorCode);
+            // Keep the raw request (it includes the reason) as history of firmware and SIM changes;
+            // ChargePoint holds the latest values.
+            WriteMessageLog(ChargePointStatus.Id, null, msgIn.Action, msgIn.JsonPayload, errorCode);
             return errorCode;
         }
     }
