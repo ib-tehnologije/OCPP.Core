@@ -672,37 +672,12 @@ namespace OCPP.Core.Server
 
         private static string BuildPublicConnectorCode(string publicDisplayCode, int connectorId)
         {
-            if (connectorId <= 0)
-            {
-                return null;
-            }
-
-            string normalized = NormalizePublicDisplayCode(publicDisplayCode);
-            return string.IsNullOrWhiteSpace(normalized)
-                ? null
-                : $"{normalized}*{connectorId}";
+            return PublicConnectorCodes.BuildEvseId(NormalizePublicDisplayCode(publicDisplayCode), connectorId);
         }
 
         private static string BuildPublicConnectorShortCode(string publicDisplayCode, int connectorId)
         {
-            if (connectorId <= 0)
-            {
-                return null;
-            }
-
-            string normalized = NormalizePublicDisplayCode(publicDisplayCode);
-            if (string.IsNullOrWhiteSpace(normalized))
-            {
-                return null;
-            }
-
-            string lastSegment = normalized
-                .Split(new[] { '*', '-' }, StringSplitOptions.RemoveEmptyEntries)
-                .LastOrDefault();
-
-            return string.IsNullOrWhiteSpace(lastSegment)
-                ? null
-                : $"{lastSegment}*{connectorId}";
+            return PublicConnectorCodes.BuildConnectorLabel(NormalizePublicDisplayCode(publicDisplayCode), connectorId);
         }
 
         /// <summary>
@@ -2949,7 +2924,7 @@ namespace OCPP.Core.Server
             var chargePoint = dbContext.ChargePoints.Find(reservation.ChargePointId);
             if (chargePoint != null)
             {
-                publicDisplayCode = NormalizePublicDisplayCode(chargePoint.PublicDisplayCode);
+                publicDisplayCode = PublicConnectorCodes.ResolveChargePointCode(chargePoint.PublicDisplayCode, chargePoint.ChargePointId);
                 publicConnectorShortCode = BuildPublicConnectorShortCode(publicDisplayCode, reservation.ConnectorId);
                 publicConnectorCode = BuildPublicConnectorCode(publicDisplayCode, reservation.ConnectorId);
             }

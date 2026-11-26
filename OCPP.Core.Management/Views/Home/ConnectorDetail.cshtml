@@ -42,6 +42,19 @@
             <div class="row">
                 <div class="col-sm-2 align-self-center">
                     <div class="form-group">
+                        <label class="inline-label" for="EvseIdRO">EVSE ID</label>
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <div class="form-group">
+                        <input type="text" readonly class="form-control" id="EvseIdRO" name="EvseIdRO" value="@(Model.EvseId ?? "-")">
+                        <small class="form-text text-muted">Computed from the charge point's public display code and the connector number.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-2 align-self-center">
+                    <div class="form-group">
                         <label class="inline-label" for="ConnectorName">@Localizer["ConnectorNameLabel"]</label>
                     </div>
                 </div>

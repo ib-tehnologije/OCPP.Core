@@ -161,7 +161,9 @@ namespace OCPP.Core.Management.Controllers
                 csv.Append(DefaultCSVSeparator);
                 csv.Append(_localizer["StopMeter"]);
                 csv.Append(DefaultCSVSeparator);
-                csv.AppendLine(_localizer["Energy-kWh"]);
+                csv.Append(_localizer["Energy-kWh"]);
+                csv.Append(DefaultCSVSeparator);
+                csv.AppendLine("EVSE ID");
 
                 foreach (var ft in fullTransactions)
                 {
@@ -192,6 +194,8 @@ namespace OCPP.Core.Management.Controllers
                     csv.Append(ft.t.MeterStop);
                     csv.Append(DefaultCSVSeparator);
                     csv.Append(energy);
+                    csv.Append(DefaultCSVSeparator);
+                    csv.Append(EscapeCsvValue(BuildReportEvseId(ft.t.ChargePointId, ft.t.ConnectorId, ft.cs?.ChargePoint), DefaultCSVSeparator));
                     csv.AppendLine();
                 }
 
@@ -204,6 +208,12 @@ namespace OCPP.Core.Management.Controllers
                 TempData["ErrMessage"] = exp.Message;
                 return RedirectToAction("Error", new { Id = "" });
             }
+        }
+
+        private static string BuildReportEvseId(string chargePointId, int connectorId, ChargePoint chargePoint)
+        {
+            string code = PublicConnectorCodes.ResolveChargePointCode(chargePoint?.PublicDisplayCode, chargePointId);
+            return PublicConnectorCodes.BuildEvseId(code, connectorId) ?? string.Empty;
         }
 
         [Authorize]
@@ -238,6 +248,7 @@ namespace OCPP.Core.Management.Controllers
                 worksheet.Cell(1, 11).Value = _localizer["StopTime"].Value;
                 worksheet.Cell(1, 12).Value = _localizer["StopMeter"].Value;
                 worksheet.Cell(1, 13).Value = _localizer["Energy-kWh"].Value;
+                worksheet.Cell(1, 14).Value = "EVSE ID";
 
                 var row = 2;
                 foreach (var ft in fullTransactions)
@@ -262,6 +273,7 @@ namespace OCPP.Core.Management.Controllers
                         worksheet.Cell(row, 12).SetValue(ft.t.MeterStop);
                     if (energy.HasValue)
                         worksheet.Cell(row, 13).SetValue(energy);
+                    worksheet.Cell(row, 14).Value = BuildReportEvseId(ft.t.ChargePointId, ft.t.ConnectorId, ft.cs?.ChargePoint);
 
                     row++;
                 }

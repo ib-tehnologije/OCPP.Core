@@ -106,10 +106,7 @@
                                 ?? Url.Action("Start", "Public", new { cp = Model.ChargePointId, conn = connector.ConnectorId });
                             var connectorBadgeClass = ConnectorBadgeClass(connector.LastStatus);
                             var connectorPrimaryLabel = connector.Label;
-                            var connectorSecondaryLabel = !string.IsNullOrWhiteSpace(connector.PublicConnectorShortCode) &&
-                                !string.Equals(connector.PublicConnectorShortCode, connectorPrimaryLabel, StringComparison.OrdinalIgnoreCase)
-                                ? connector.PublicConnectorShortCode
-                                : null;
+                            var connectorSecondaryLabel = connector.Description;
                             var connectorStatusLabel = string.IsNullOrWhiteSpace(connector.LastStatus) ? "Offline" : connector.LastStatus;
                             var connectorFallbackPrimaryLabel = $"Connector {connector.ConnectorId}";
                             var connectorPrimaryLabelIsGeneric = string.Equals(connectorPrimaryLabel, connectorFallbackPrimaryLabel, StringComparison.OrdinalIgnoreCase);
@@ -120,7 +117,7 @@
                             <a class="connector-option @(connector.IsSelected ? "selected" : "")"
                                href="@connectorUrl"
                                data-connector-id="@connector.ConnectorId"
-                               data-connector-label="@connector.Label"
+                               data-connector-label="@(string.IsNullOrWhiteSpace(connector.Heading) ? connector.Label : connector.Heading)"
                                data-connector-name="@connector.DisplayName"
                                data-last-status="@connectorStatusLabel"
                                data-badge-class="@connectorBadgeClass"

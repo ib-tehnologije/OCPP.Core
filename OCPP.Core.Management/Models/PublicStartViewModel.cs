@@ -64,6 +64,8 @@ namespace OCPP.Core.Management.Models
     {
         public int ConnectorId { get; set; }
         public string Label { get; set; }
+        public string Description { get; set; }
+        public string Heading { get; set; }
         public string DisplayName { get; set; }
         public string LastStatus { get; set; }
         public DateTime? LastStatusTime { get; set; }

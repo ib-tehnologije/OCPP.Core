@@ -523,14 +523,18 @@
             const englishGenericConnectorLabel = connectorId ? `Connector ${connectorId}` : "";
             const genericConnectorLabel = connectorId ? fillTemplate("status.connectorFallback", { id: connectorId }) : "";
 
-            if (connectorName &&
+            const hasCustomName = !!connectorName &&
                 connectorName.toLowerCase() !== englishGenericConnectorLabel.toLowerCase() &&
-                connectorName.toLowerCase() !== genericConnectorLabel.toLowerCase()) {
-                return connectorName;
-            }
+                connectorName.toLowerCase() !== genericConnectorLabel.toLowerCase();
 
             if (shortCode) {
-                return shortCode;
+                return hasCustomName && connectorName.toLowerCase() !== shortCode.toLowerCase()
+                    ? `${shortCode} · ${connectorName}`
+                    : shortCode;
+            }
+
+            if (hasCustomName) {
+                return connectorName;
             }
 
             return genericConnectorLabel || "-";

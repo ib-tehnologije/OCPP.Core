@@ -86,6 +86,14 @@ namespace OCPP.Core.Management.Controllers
                     // List all connectors
                     csvm = new ConnectorStatusViewModel();
                     csvm.ConnectorStatuses = dbConnectorStatuses;
+                    foreach (var cp in DbContext.ChargePoints.Select(cp => new { cp.ChargePointId, cp.PublicDisplayCode }).ToList())
+                    {
+                        string code = PublicConnectorCodes.ResolveChargePointCode(cp.PublicDisplayCode, cp.ChargePointId);
+                        if (code != null)
+                        {
+                            csvm.ChargePointCodes[cp.ChargePointId] = code;
+                        }
+                    }
 
                     if (currentConnectorStatus != null)
                     {
@@ -96,6 +104,7 @@ namespace OCPP.Core.Management.Controllers
                         csvm.LastStatusTime = currentConnectorStatus.LastStatusTime;
                         csvm.LastMeter = currentConnectorStatus.LastMeter;
                         csvm.LastMeterTime = currentConnectorStatus.LastMeterTime;
+                        csvm.EvseId = csvm.GetEvseId(currentConnectorStatus.ChargePointId, currentConnectorStatus.ConnectorId);
                     }
 
                     Dictionary<string, ChargePointStatus> dictOnlineStatus = CreateChargePointStatusDictionary();
