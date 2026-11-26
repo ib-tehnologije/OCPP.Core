@@ -559,8 +559,8 @@ namespace OCPP.Core.Server.Tests
                 var payload = JObject.Parse(json);
 
                 Assert.Equal("Desni", payload["connectorName"]?.Value<string>());
-                Assert.Equal("01*2", payload["publicConnectorShortCode"]?.Value<string>());
-                Assert.Equal("HR*TTK*052009*01*2", payload["publicConnectorCode"]?.Value<string>());
+                Assert.Equal("1B", payload["publicConnectorShortCode"]?.Value<string>());
+                Assert.Equal("HR*TTK*052009*01*1B", payload["publicConnectorCode"]?.Value<string>());
             }
             finally
             {

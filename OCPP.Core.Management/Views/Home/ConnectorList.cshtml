@@ -15,6 +15,7 @@
                 <th class="th-sm">@Localizer["ChargePointId"]</th>
                 <th class="th-sm">@Localizer["ConnectorId"]</th>
                 <th class="th-sm">@Localizer["ConnectorName"]</th>
+                <th class="th-sm">EVSE ID</th>
                 <th class="th-sm">@Localizer["LastStatus"]</th>
                 <th class="th-sm">@Localizer["LastStatusTime"]</th>
                 <th class="th-sm">@Localizer["LastMeter"]</th>
@@ -46,6 +47,7 @@
                         </td>
                         <td>@cs.ConnectorId</td>
                         <td><a href="@Url.Action("Connector", Constants.HomeController, new { id = cs.ChargePointId, connectorId = cs.ConnectorId.ToString() })"><i class="fas fa-edit" title="@Localizer["Edit"]"></i></a> @cs.ConnectorName</td>
+                        <td>@(Model.GetEvseId(cs.ChargePointId, cs.ConnectorId) ?? "-")</td>
                         <td>@((!string.IsNullOrEmpty(cs.LastStatus)) ? cs.LastStatus : "-")</td>
                         <td>@((cs.LastStatusTime.HasValue) ? string.Format("{0:G}", cs.LastStatusTime.Value.ToLocalTime()) : "-")</td>
                         <td>@((cs.LastMeter.HasValue) ? string.Format("{0:0.0##}", cs.LastMeter.Value) : "-" )</td>

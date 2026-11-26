@@ -359,26 +359,29 @@ namespace OCPP.Core.Server.Tests
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
                 Assert.Equal("HR*TTK*052009*01", model.PublicDisplayCode);
-                Assert.Equal("HR*TTK*052009*01*2", model.PublicConnectorCode);
-                Assert.Equal("01*2", model.PublicConnectorShortCode);
-                Assert.Equal("Desni", model.ConnectorName);
+                Assert.Equal("HR*TTK*052009*01*1B", model.PublicConnectorCode);
+                Assert.Equal("1B", model.PublicConnectorShortCode);
+                Assert.Equal("1B · Desni", model.ConnectorName);
                 Assert.Collection(
                     model.Connectors.OrderBy(c => c.ConnectorId),
                     connector =>
                     {
                         Assert.Equal(1, connector.ConnectorId);
-                        Assert.Equal("Lijevi", connector.Label);
+                        Assert.Equal("1A", connector.Label);
+                        Assert.Equal("Lijevi", connector.Description);
+                        Assert.Equal("1A · Lijevi", connector.Heading);
                         Assert.Equal("Lijevi", connector.DisplayName);
-                        Assert.Equal("HR*TTK*052009*01*1", connector.PublicConnectorCode);
-                        Assert.Equal("01*1", connector.PublicConnectorShortCode);
+                        Assert.Equal("HR*TTK*052009*01*1A", connector.PublicConnectorCode);
+                        Assert.Equal("1A", connector.PublicConnectorShortCode);
                     },
                     connector =>
                     {
                         Assert.Equal(2, connector.ConnectorId);
-                        Assert.Equal("Desni", connector.Label);
+                        Assert.Equal("1B", connector.Label);
+                        Assert.Equal("Desni", connector.Description);
                         Assert.Equal("Desni", connector.DisplayName);
-                        Assert.Equal("HR*TTK*052009*01*2", connector.PublicConnectorCode);
-                        Assert.Equal("01*2", connector.PublicConnectorShortCode);
+                        Assert.Equal("HR*TTK*052009*01*1B", connector.PublicConnectorCode);
+                        Assert.Equal("1B", connector.PublicConnectorShortCode);
                     });
             }
             finally
@@ -1078,6 +1081,63 @@ namespace OCPP.Core.Server.Tests
         }
 
         [Fact]
+        public async Task Start_EmptyPublicDisplayCode_DerivesCodeFromEvseShapedChargePointId()
+        {
+            string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-derived-code-{Guid.NewGuid():N}.sqlite");
+
+            try
+            {
+                using (var setupContext = CreateContext(databasePath))
+                {
+                    SeedChargePoint(setupContext, "HRABCE1234502", "Derived code", null);
+                    setupContext.ConnectorStatuses.AddRange(
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "HRABCE1234502",
+                            ConnectorId = 1,
+                            ConnectorName = "2A",
+                            LastStatus = "Available"
+                        },
+                        new ConnectorStatus
+                        {
+                            ChargePointId = "HRABCE1234502",
+                            ConnectorId = 2,
+                            LastStatus = "Available"
+                        });
+                    setupContext.SaveChanges();
+                }
+
+                using var actionContext = CreateContext(databasePath);
+                var controller = CreateController(actionContext);
+
+                var result = await controller.Start("HRABCE1234502", 1);
+                var viewResult = Assert.IsType<ViewResult>(result);
+                var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
+
+                Assert.Equal("HR*ABC*E1234502", model.PublicDisplayCode);
+                Assert.Equal("HR*ABC*E1234502*2A", model.PublicConnectorCode);
+                Assert.Equal("2A", model.ConnectorName);
+                Assert.Collection(
+                    model.Connectors.OrderBy(c => c.ConnectorId),
+                    connector =>
+                    {
+                        Assert.Equal("2A", connector.Label);
+                        Assert.Null(connector.Description);
+                        Assert.Equal("2A", connector.Heading);
+                    },
+                    connector =>
+                    {
+                        Assert.Equal("2B", connector.Label);
+                        Assert.Equal("HR*ABC*E1234502*2B", connector.PublicConnectorCode);
+                    });
+            }
+            finally
+            {
+                TryDelete(databasePath);
+            }
+        }
+
+        [Fact]
         public async Task Start_PublicDisplayCode_WithoutFriendlyConnectorName_FallsBackToPublicShortCode()
         {
             string databasePath = Path.Combine(Path.GetTempPath(), $"public-controller-public-code-fallback-{Guid.NewGuid():N}.sqlite");
@@ -1110,22 +1170,23 @@ namespace OCPP.Core.Server.Tests
                 var viewResult = Assert.IsType<ViewResult>(result);
                 var model = Assert.IsType<PublicStartViewModel>(viewResult.Model);
 
-                Assert.Equal("02*2", model.ConnectorName);
+                Assert.Equal("2B", model.ConnectorName);
                 Assert.Collection(
                     model.Connectors.OrderBy(c => c.ConnectorId),
                     connector =>
                     {
                         Assert.Equal(1, connector.ConnectorId);
-                        Assert.Equal("02*1", connector.Label);
+                        Assert.Equal("2A", connector.Label);
+                        Assert.Null(connector.Description);
                         Assert.Equal("Connector 1", connector.DisplayName);
-                        Assert.Equal("02*1", connector.PublicConnectorShortCode);
+                        Assert.Equal("2A", connector.PublicConnectorShortCode);
                     },
                     connector =>
                     {
                         Assert.Equal(2, connector.ConnectorId);
-                        Assert.Equal("02*2", connector.Label);
+                        Assert.Equal("2B", connector.Label);
                         Assert.Equal("Connector 2", connector.DisplayName);
-                        Assert.Equal("02*2", connector.PublicConnectorShortCode);
+                        Assert.Equal("2B", connector.PublicConnectorShortCode);
                     });
             }
             finally

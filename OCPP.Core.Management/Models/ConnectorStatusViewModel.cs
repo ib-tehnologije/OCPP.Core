@@ -58,5 +58,22 @@ namespace OCPP.Core.Management.Models
         [StringLength(100)]
         public string ConnectorName { get; set; }
 
+        /// <summary>
+        /// Public charge point code per charge point ID (configured or derived), used to show EVSE IDs
+        /// </summary>
+        public Dictionary<string, string> ChargePointCodes { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Computed EVSE ID of the connector being edited
+        /// </summary>
+        public string EvseId { get; set; }
+
+        public string GetEvseId(string chargePointId, int connectorId)
+        {
+            return chargePointId != null && ChargePointCodes != null && ChargePointCodes.TryGetValue(chargePointId, out string code)
+                ? PublicConnectorCodes.BuildEvseId(code, connectorId)
+                : null;
+        }
+
     }
 }

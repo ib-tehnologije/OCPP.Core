@@ -90,8 +90,8 @@
                 </div>
                 <div class="col-sm-6">
                     <div class="form-group">
-                        <input class="form-control" id="PublicDisplayCode" maxlength="200" name="PublicDisplayCode" placeholder="HR*TTK*052009*01" type="text" value="@Model.PublicDisplayCode" />
-                        <small class="form-text text-muted">Shown in the public portal and QR flow. Connector labels are derived from the last segment plus connector number, for example <code>01*1</code>.</small>
+                        <input class="form-control" id="PublicDisplayCode" maxlength="200" name="PublicDisplayCode" placeholder="@(PublicConnectorCodes.DeriveChargePointCode(Model.ChargePointId) ?? "HR*ABC*E1234501")" type="text" value="@Model.PublicDisplayCode" />
+                        <small class="form-text text-muted">Charge point part of the EVSE ID, shown in the public portal and QR flow. When empty, it is derived from a charge point ID like <code>HRABCE1234501</code> (<code>HR*ABC*E1234501</code>). Connector labels are the last two digits plus the connector letter (1 = A, 2 = B), for example <code>HR*ABC*E1234502*2B</code>.</small>
                     </div>
                 </div>
                 <div class="col-sm-2">

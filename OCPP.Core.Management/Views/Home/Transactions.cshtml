@@ -12,11 +12,13 @@
 
     // Copy CP-Names in dictionary for name resolution and
     Dictionary<string, string> chargePointNames = new Dictionary<string, string>();
+    Dictionary<string, string> chargePointCodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     if (Model.ChargePoints != null)
     {
         foreach (ChargePoint cp in Model.ChargePoints)
         {
             chargePointNames.Add(cp.ChargePointId, cp.Name);
+            chargePointCodes[cp.ChargePointId] = PublicConnectorCodes.ResolveChargePointCode(cp.PublicDisplayCode, cp.ChargePointId);
         }
     }
 
@@ -51,6 +53,12 @@
                 connectorName = cs.ChargePointId;
             }
             connectorName = $"{connectorName}:{cs.ConnectorId}";
+        }
+        chargePointCodes.TryGetValue(cs.ChargePointId, out string chargePointCode);
+        string evseId = PublicConnectorCodes.BuildEvseId(chargePointCode, cs.ConnectorId);
+        if (!string.IsNullOrEmpty(evseId))
+        {
+            connectorName = $"{connectorName} ({evseId})";
         }
         csvm.ConnectorName = connectorName;
         connectorStatusViewModels.Add(csvm);
