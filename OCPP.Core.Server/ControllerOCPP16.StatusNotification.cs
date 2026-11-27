@@ -46,7 +46,7 @@ namespace OCPP.Core.Server
                 connectorId = statusNotificationRequest.ConnectorId;
 
                 // Write raw status in DB
-                WriteMessageLog(ChargePointStatus.Id, connectorId, msgIn.Action, string.Format("Info={0} / Status={1} / ", statusNotificationRequest.Info, statusNotificationRequest.Status), statusNotificationRequest.ErrorCode.ToString());
+                WriteMessageLog(ChargePointStatus.Id, connectorId, msgIn.Action, FormatStatusLogResult(statusNotificationRequest), statusNotificationRequest.ErrorCode.ToString());
 
                 string rawStatus = statusNotificationRequest.Status.ToString();
                 ConnectorStatusEnum newStatus = OcppConnectorStatus.ToConnectorStatusEnum(rawStatus);
@@ -82,6 +82,24 @@ namespace OCPP.Core.Server
             }
 
             return errorCode;
+        }
+
+        /// <summary>
+        /// Message log text for a status notification. The "Info=... / Status=... / " prefix is unchanged
+        /// because existing readers parse "Status="; the vendor diagnostics are appended only when sent.
+        /// </summary>
+        private static string FormatStatusLogResult(StatusNotificationRequest statusNotificationRequest)
+        {
+            string result = string.Format("Info={0} / Status={1} / ", statusNotificationRequest.Info, statusNotificationRequest.Status);
+            if (!string.IsNullOrWhiteSpace(statusNotificationRequest.VendorId))
+            {
+                result += string.Format("VendorId={0} / ", statusNotificationRequest.VendorId);
+            }
+            if (!string.IsNullOrWhiteSpace(statusNotificationRequest.VendorErrorCode))
+            {
+                result += string.Format("VendorErrorCode={0} / ", statusNotificationRequest.VendorErrorCode);
+            }
+            return result;
         }
     }
 }

@@ -314,6 +314,22 @@ namespace OCPP.Core.Database.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("ChargeBoxSerialNumber")
+                        .HasMaxLength(25)
+                        .HasColumnType("nvarchar(25)");
+
+                    b.Property<string>("ChargePointModel")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ChargePointSerialNumber")
+                        .HasMaxLength(25)
+                        .HasColumnType("nvarchar(25)");
+
+                    b.Property<string>("ChargePointVendor")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<string>("ClientCertThumb")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -329,8 +345,20 @@ namespace OCPP.Core.Database.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<string>("FirmwareVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<bool>("FreeChargingEnabled")
                         .HasColumnType("bit");
+
+                    b.Property<string>("Iccid")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Imsi")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<double?>("Latitude")
                         .HasColumnType("float");
@@ -347,6 +375,14 @@ namespace OCPP.Core.Database.Migrations
 
                     b.Property<int>("MaxUsageFeeMinutes")
                         .HasColumnType("int");
+
+                    b.Property<string>("MeterSerialNumber")
+                        .HasMaxLength(25)
+                        .HasColumnType("nvarchar(25)");
+
+                    b.Property<string>("MeterType")
+                        .HasMaxLength(25)
+                        .HasColumnType("nvarchar(25)");
 
                     b.Property<string>("Name")
                         .HasMaxLength(100)

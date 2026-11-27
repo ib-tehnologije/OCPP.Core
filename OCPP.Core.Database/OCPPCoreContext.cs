@@ -97,6 +97,17 @@ namespace OCPP.Core.Database
 
                 entity.Property(e => e.PaymentProvider).HasMaxLength(32);
 
+                // BootNotification identity; lengths are the largest the OCPP 1.6 / 2.0.1 / 2.1 schemas allow.
+                entity.Property(e => e.ChargePointVendor).HasMaxLength(50);
+                entity.Property(e => e.ChargePointModel).HasMaxLength(20);
+                entity.Property(e => e.ChargePointSerialNumber).HasMaxLength(25);
+                entity.Property(e => e.ChargeBoxSerialNumber).HasMaxLength(25);
+                entity.Property(e => e.FirmwareVersion).HasMaxLength(50);
+                entity.Property(e => e.Iccid).HasMaxLength(20);
+                entity.Property(e => e.Imsi).HasMaxLength(20);
+                entity.Property(e => e.MeterType).HasMaxLength(25);
+                entity.Property(e => e.MeterSerialNumber).HasMaxLength(25);
+
                 entity.HasOne(d => d.Owner)
                     .WithMany(p => p.ChargePoints)
                     .HasForeignKey(d => d.OwnerId)

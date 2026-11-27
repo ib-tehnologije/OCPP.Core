@@ -107,6 +107,17 @@ Also inspect the generated migration and model snapshot manually for provider-sp
 - Review package versions periodically for .NET, Hangfire, EF Core, Stripe, Sentry, Azure Identity, ClosedXML, and Playwright.
 - Review the Saferpay JSON API release notes periodically. `Saferpay:SpecVersion` defaults to `1.54`; raise it only after checking the changed request and response fields against `SaferpayPaymentGateway` and its tests.
 
+## Charge Point Identity From BootNotification
+
+The server stores the vendor, model, serial numbers, firmware, modem ICCID/IMSI and meter that a charger reports in `BootNotification` on its `ChargePoint` row.
+
+1. Apply migration `AddChargePointBootIdentity` **before** starting the new server and management builds.
+   - It adds nine nullable columns to `ChargePoint` and does not change existing rows: `ChargePointVendor`, `ChargePointModel`, `ChargePointSerialNumber`, `ChargeBoxSerialNumber`, `FirmwareVersion`, `Iccid`, `Imsi`, `MeterType` and `MeterSerialNumber`.
+   - The previous builds keep working on the new schema. A new build on the old schema fails every query that loads `ChargePoint` (invalid column name), including the lookup when a charger connects.
+   - Local SQLite files need `make sqlite-reset`.
+2. The columns fill as chargers boot. A charger keeps empty columns until its next `BootNotification`.
+3. `MessageLog` holds the raw request of each boot only with `DbMessageLog=2`, and only for as long as the rows are kept.
+
 ## Public Terms and Privacy Pages
 
 Some payment acquirers check that the public site shows general terms and a privacy policy, and that the driver accepts the terms before paying.
